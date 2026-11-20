@@ -2,7 +2,7 @@
 
 # Mothership
 
-**Every agent knows everything. Your PRs get reviewed, merged and checked in production, so you stop being the bottleneck.**
+**Debottleneck yourself. Your agents write code in parallel; Mothership gets it reviewed, merged and checked in production, and only asks you for decisions.**
 
 [![CI](https://github.com/DanielVisca/mothership/actions/workflows/ci.yml/badge.svg)](https://github.com/DanielVisca/mothership/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -15,11 +15,17 @@
 
 </div>
 
+Agents can write code in parallel. You can't review it, unblock it, merge it and check it in production in parallel, so your output is capped by you. Mothership is built to debottleneck that: it takes you out of every step that isn't a decision.
+
+- **No agent starts from zero.** Every chat can search, read and message every other chat and the PRs behind them.
+- **PRs finish without you pushing them.** A shepherd carries each one through review threads, red CI, merge order, the merge itself and a production check.
+- **You only see what needs you.** Questions, red CI, changes requested and stalls surface; everything else stays quiet.
+
 Mothership sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), `gh`, your own MCP servers and skills). It builds no connectors of its own and Mothership itself sends nothing anywhere: every chat is an ordinary `claude` session, so `claude --resume` works on all of them.
 
-## The pain, and how Mothership fixes it
+## Where you're the bottleneck, and how Mothership takes you out
 
-|  | **The pain** | **How Mothership fixes it** |
+|  | **Where you're the bottleneck** | **How Mothership takes you out** |
 | --- | --- | --- |
 | 🚧 | **Agents open PRs and then stall.** Review comments pile up, CI goes red, merge order gets forgotten. | A **PR shepherd** answers review threads and red CI, and merges when the PR's plan allows. Merge order is a real status check on the PR (`perch/plan`), not a sentence in the description. After the merge it checks that the change reached production and held up, and opens a revert PR if it didn't. |
 | 🗂 | **You have 40 agent chats across terminals and tabs, and you can't find the one from Tuesday.** | One list of every conversation (Claude Code, Codex, cloud tasks), with full-text search, filters (`repo:api state:waiting`) and an *Ask Claude* box that answers from your history, with links. |
