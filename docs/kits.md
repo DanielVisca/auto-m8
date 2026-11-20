@@ -40,9 +40,25 @@ Evolve-forged skills are learned from one person's chats, so they export only wh
 
 Nothing runs or spends tokens until the user turns it on; autonomy pack rules still apply.
 
-## Build order
+## Use
 
-1. `kit export` (CLI, maintainer side): skills + routines + instructions, templating, scrub gate. Output a git repo `mothership-kit-<name>`.
-2. `kit import` with dry-run + `kit_items` ledger, Settings → Kits UI.
-3. Scouts and boards (need PostHog key / canvas export).
-4. Fresh-user test: import the maintainer kit into the sandbox HOME from fresh.test.ts, assert no scrub hit and nothing enabled.
+```
+# export (forbid list: one pattern per line, /regex/flags allowed; keep it outside the repo)
+node server/kitcli.ts export --name my-kit --out ../my-kit --author <github> --description "..." \
+  --skills a,b --routines "Routine one,Routine two" --instructions snippet.md \
+  --forbid ~/.config/mothership/kit-forbid.txt --sub="--owner=[[Acme]]=github.org"
+# import / inspect / undo
+node server/kitcli.ts import <folder or git URL> [--dry-run] [--only skill:a,routine:B]
+node server/kitcli.ts list
+node server/kitcli.ts remove my-kit
+```
+
+`--sub "Literal=var"` adds a substitution; `[[...]]` swaps only that part of a longer match. Variables: owner.name, home, codeDir, github.org, posthog.projectId.
+
+## Status
+
+- [x] Export with templating and scrub gate (`server/kitexport.ts`, `server/kitcli.ts`)
+- [x] Import: preview, kit_items record, update without overwriting edits, remove (`server/kits.ts`)
+- [x] Settings → Kits (`web/src/Kits.tsx`), `/api/kits*`
+- [ ] Scouts and boards (need a PostHog key / canvas export)
+- [ ] Publish the maintainer's general kit as its own repo
