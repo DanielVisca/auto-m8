@@ -2,7 +2,7 @@
 
 # perch
 
-**One floating window for all your coding agents. Nothing gets lost, PRs finish themselves, and you only see what needs you.**
+**Your agents open PRs. perch gets them reviewed, merged and checked in production, so you stop being the bottleneck.**
 
 [![CI](https://github.com/DanielVisca/perch-app/actions/workflows/ci.yml/badge.svg)](https://github.com/DanielVisca/perch-app/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -19,10 +19,10 @@ perch sits on top of the tools you already use ([Claude Code](https://docs.anthr
 
 |  | **The pain** | **How perch fixes it** |
 | --- | --- | --- |
+| 🚧 | **Agents open PRs and then stall.** Review comments pile up, CI goes red, merge order gets forgotten. | A **PR shepherd** answers review threads and red CI, and merges when the PR's plan allows. Merge order is a real status check on the PR (`perch/plan`), not a sentence in the description. After the merge it checks that the change reached production and held up, and opens a revert PR if it didn't. |
 | 🗂 | **You have 40 agent chats across terminals and tabs, and you can't find the one from Tuesday.** | One list of every conversation (Claude Code, Codex, cloud tasks), with full-text search, filters (`repo:api state:waiting`) and an *Ask Claude* box that answers from your history, with links. |
 | 🧠 | **Every new chat starts from zero.** You re-explain the project, the decision, the PR. | Each chat can search, read and message every other chat. Start typing and related past conversations appear; *Pull in* adds a brief of one. Agents hand work to each other (`delegate`, `race`) and the message shows up marked as agent-sent. |
 | 🔔 | **You don't know which agent is waiting on you.** You check six windows to find out. | **Needs me** shows only real signals: the agent asked a question, a PR it opened has red CI or changes requested, a task failed, a snooze ended. Everything else stays quiet. |
-| 🚧 | **Agents open PRs and then stall.** Review comments pile up, CI goes red, merge order gets forgotten. | A **PR shepherd** answers review threads and red CI, and merges when the PR's plan allows. Merge order is a real status check on the PR (`perch/plan`), not a sentence in the description. After the merge it checks that the change reached production and held up. |
 | 🧊 | **An agent got stuck or died and nobody noticed for an hour.** | Each chat shows whether it's progressing or stalled. A watchdog resumes stalled chats on its own, and `follow_up` timers wake an agent when a PR merges or a deploy lands, so "I'll check back" actually happens. |
 | 📜 | **Long agent turns are walls of text.** | Turns collapse to their intent. Open the full text only when you need it. |
 | ⏪ | **You want to try a different approach without losing this one.** | Hover any message: **⑂ Branch** copies the chat up to there; **↺ Rewind** continues from there. Code follows: perch snapshots your working tree at the start of every turn (a hidden git ref, no stash, no branch), so a rewind can put the files back. |
