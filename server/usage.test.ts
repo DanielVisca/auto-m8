@@ -33,3 +33,16 @@ test('a Claude 5h window at 100% stays usable while extra usage is allowed', () 
   assert.equal(subscriptionBudget(parseClaudeUsage(ev(undefined), now), 'opus', now).exhausted, true)
   assert.equal(subscriptionBudget(parseClaudeUsage(ev('rejected', 'rejected'), now), 'opus', now).exhausted, true)
 })
+
+test('a workspace refusal recorded under another limit_id blocks Codex past the freshness window', async () => {
+  const { codexBlockedAt } = await import('./usage.ts')
+  const now = Date.now()
+  const rl = { limit_id: 'premium', primary: null, secondary: null, credits: { has_credits: true }, rate_limit_reached_type: 'workspace_member_usage_limit_reached' }
+  const u = parseCodexUsage(rl, now - 2 * 3_600_000)!
+  assert.equal(u.blocked, true)
+  assert.equal(codexBlockedAt(u, now), true) // 2h old: still out
+  assert.equal(codexBlockedAt(u, now + 11 * 3_600_000), false) // 13h old: try again
+  assert.equal(parseCodexUsage({ limit_id: 'premium', rate_limit_reached_type: null }, now), null)
+  const full = parseCodexUsage({ limit_id: 'codex', primary: { used_percent: 100, window_minutes: 10080, resets_at: Math.floor(now / 1000) + 3600 }, rate_limit_reached_type: 'usage_limit_reached' }, now - 5 * 3_600_000)!
+  assert.equal(codexBlockedAt(full, now), true) // window still full: out until it resets
+})

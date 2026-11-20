@@ -54,8 +54,13 @@ function bootClaude() {
 // ---------- Codex ----------
 let codex: Usage | null = null, codexAt = 0
 const codexLabel = (mins: number) => mins <= 360 ? `${Math.round(mins / 60)}h` : mins >= 10080 ? 'week' : `${Math.round(mins / 60 / 24)}d`
+// When the workspace refuses Codex outright, Codex writes a record under another limit_id ("premium")
+// with rate_limit_reached_type "workspace_member_usage_limit_reached" and no windows. Ignoring it as
+// another model's limit meant Auto never saw Codex was out and kept handing it chats that failed.
+const WORKSPACE_BLOCK = /workspace|spend|member_usage/i
 export function parseCodexUsage(rl: any, at: number): Usage | null {
-  if (!rl || (rl.limit_id && rl.limit_id !== 'codex')) return null
+  if (rl && rl.limit_id && rl.limit_id !== 'codex') return typeof rl.rate_limit_reached_type === 'string' && WORKSPACE_BLOCK.test(rl.rate_limit_reached_type) ? { windows: [], at, blocked: true } : null
+  if (!rl) return null
   const windows: Win[] = [rl.primary, rl.secondary].filter(w => w && Number.isFinite(w.used_percent) && Number.isFinite(w.window_minutes) && w.window_minutes > 0 && Number.isFinite(w.resets_at)).map(w => ({ key: `m${w.window_minutes}`, label: codexLabel(w.window_minutes), pct: w.used_percent / 100, resetsAt: w.resets_at * 1000, minutes: w.window_minutes }))
   return windows.length ? { windows, at, plan: rl.plan_type, creditsAvailable: rl.credits?.has_credits === true || rl.credits?.unlimited === true, blocked: rl.spend_control_reached === true || !!rl.rate_limit_reached_type } : null
 }
@@ -83,5 +88,13 @@ const hot = (u: Usage | null) => !!u && u.windows.some(w => w.pct >= HOT)
 export const claudeHot = () => hot(live(claudeUsage()))
 export const codexHot = () => { readCodex(); return hot(live(codex)) }
 // Included usage at 100% can still be usable on an account with existing credits.
-export const codexExhausted = () => { readCodex(); return subscriptionBudget(live(codex)).exhausted }
+// A refusal stays true after the 30-minute freshness window: once Codex is out, no new sessions run to
+// report it again. It holds until a full window resets, or 12 hours for a workspace block with no reset.
+export const CODEX_BLOCK_MS = 12 * 3_600_000
+export function codexBlockedAt(u: Usage | null, now = Date.now()): boolean {
+  if (!u?.blocked) return false
+  const resets = u.windows.filter(w => w.pct >= 1).map(w => w.resetsAt).filter(t => t > now)
+  return resets.length ? true : !u.windows.some(w => w.pct >= 1) && now - u.at < CODEX_BLOCK_MS
+}
+export const codexExhausted = () => { readCodex(); return codexBlockedAt(codex) || subscriptionBudget(live(codex)).exhausted }
 if (!UNDER_TEST) { bootClaude(); readCodex() }
