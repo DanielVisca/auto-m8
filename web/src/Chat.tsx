@@ -1,8 +1,8 @@
 import { BoardButton } from './Boards'
 import { marked } from 'marked'
-import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
-import { ago, api, baseName, post, sendChat, shortPath, useOutbox, titleOf, useLive, type Conversation, type Item, type Term } from './api'
+import { ago, api, cachedThread, loadThread, baseName, post, sendChat, shortPath, useOutbox, titleOf, useLive, type Conversation, type Item, type Term } from './api'
 import { adopt, apply, emptyLive, toolLabel, toolSummary, type Live } from './stream'
 import { StateMenu } from './List'
 import { OpenIn } from './OpenIn'
@@ -360,8 +360,22 @@ function PhaseResults({ p, renderEntry }: { p: Phase; renderEntry: (entry: Entry
   </div>
 }
 
+const TAIL_ROWS = 8 // rows (turns) drawn on the first paint of a thread
 export function Messages({ items, running, onBranch, onRewind, convId }: { items: Item[]; running?: boolean; onBranch?: (u: string) => void; onRewind?: (u: string) => void; convId?: string | null }) {
   const [menu, setMenu] = useState<{ x: number; y: number; uuid?: string; text: string } | null>(null)
+  // Opening a long thread drew every message before showing anything (0.3-0.5s for ~1,000). The
+  // latest turns paint first; the rest follow in a transition that never blocks typing or scrolling.
+  const threadKey = convId ?? ''
+  const [fullFor, setFullFor] = useState<string | null>(null)
+  const has = items.length > 0
+  useEffect(() => {
+    if (!has) return
+    const f = requestAnimationFrame(() => startTransition(() => setFullFor(threadKey)))
+    // A chat that is streaming updates every frame, which keeps restarting the transition (the rest
+    // of a running chat's thread took 5s+ to appear). Past 700ms, draw it in one go.
+    const t = setTimeout(() => setFullFor(threadKey), 700)
+    return () => { cancelAnimationFrame(f); clearTimeout(t) }
+  }, [threadKey, has])
   // Right-click a message for the same actions (only when no text is selected, so copy still works).
   const msgMenu = (e: React.MouseEvent, uuid: string | undefined, text: string) => {
     if (String(getSelection() ?? '').trim()) return
@@ -415,7 +429,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
           </>}
         </div>
       )}
-      {groupMessages(items, running).map(row => row.kind === 'item' ? renderEntry(row.entry) : <div key={`${convId ?? ''}:turn:${row.index}`} className="chat-turn">
+      {(fullFor === threadKey ? groupMessages(items, running) : groupMessages(items, running).slice(-TAIL_ROWS)).map(row => row.kind === 'item' ? renderEntry(row.entry) : <div key={`${convId ?? ''}:turn:${row.index}`} className="chat-turn">
         {(row.running || row.work.length > 0) && <WorkingCard turn={row} renderEntry={renderEntry} startedAt={(items[row.index - 1] as { ts?: number } | undefined)?.ts} />}
         {row.attention.map(renderEntry)}
         {row.answer.map(renderEntry)}
@@ -434,7 +448,11 @@ function useStickToBottom(dep: unknown) {
     const el = ref.current!
     const onScroll = () => { stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }
     el.addEventListener('scroll', onScroll)
-    return () => el.removeEventListener('scroll', onScroll)
+    // Content also changes without this component rendering (the rest of a long thread filling in,
+    // markdown and images settling): stay pinned through those too.
+    const mo = new MutationObserver(() => { if (stuck.current) el.scrollTop = el.scrollHeight })
+    mo.observe(el, { childList: true, subtree: true, characterData: true })
+    return () => { el.removeEventListener('scroll', onScroll); mo.disconnect() }
   }, [])
   useLayoutEffect(() => { if (stuck.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight })
   void dep
@@ -460,8 +478,11 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
   // Load the transcript, then attach to the live stream.
   useEffect(() => {
     live.current = emptyLive()
-    setHistory([])
-    setLoading(id ? 0 : null)
+    // A chat opened before shows what it had at once; the load below then brings it up to date.
+    const had = id ? cachedThread<Item>(id) : undefined
+    if (had) adopt(live.current, had)
+    setHistory(had ?? [])
+    setLoading(id && !had ? 0 : null)
     bump()
     if (!id) return
     let ws: WebSocket | null = null
@@ -473,9 +494,16 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
     // leaving the chat blank or silently no longer updating.
     let retry: any = null, attempt = 0
     const again = () => { if (closed || retry) return; setLoading(l => l === null ? l : attempt + 1); retry = setTimeout(() => { retry = null; connect() }, Math.min(10_000, 500 * 2 ** attempt++)) }
-    const connect = () => api.get<{ items: Item[] }>(`/api/conversations/${id}/messages`).then(({ items }) => {
+    // A thread not opened before: its last messages come first (a few KB, not the whole thread).
+    let whole = !!had
+    if (!had) api.get<{ items: Item[] }>(`/api/conversations/${id}/messages?tail=30`).then(({ items }) => {
+      if (closed || whole || !Array.isArray(items) || !items.length) return
+      setLoading(null); setHistory(items); render()
+    }).catch(() => {})
+    const connect = () => loadThread<Item>(id).then(({ items }) => {
       if (closed) return
       if (!Array.isArray(items)) return again()
+      whole = true
       live.current = emptyLive()
       setLoading(null)
       setHistory(items)
@@ -494,7 +522,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
         if (ev.type === 'result') {
           post(`/api/conversations/${encodeURIComponent(id)}/seen`)
           // Swap the streamed turn for the saved transcript: same content, plus message ids.
-          setTimeout(() => api.get<{ items: Item[] }>(`/api/conversations/${id}/messages`).then(({ items }) => {
+          setTimeout(() => loadThread<Item>(id).then(({ items }) => {
             if (closed || live.current.running) return
             live.current = emptyLive()
             adopt(live.current, items)

@@ -11,7 +11,7 @@ import { preview, prWorkers, snoozed } from './pr.ts'
 import { areaOf } from './prflow.ts'
 import { presence, refreshPresence, scoutPresence } from './presence.ts'
 import { sectionsFor } from './prsections.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 
 const exec = promisify(execFile)
 const FIELDS = `url number title isDraft state createdAt updatedAt mergedAt reviewDecision headRefName baseRefName additions deletions
@@ -140,7 +140,7 @@ function latestStep(id: string) {
   if (!c) return null
   if (!c.path || !existsSync(c.path)) return c.summary ? String(c.summary).split('\n')[0].slice(0, 160) : null
   try {
-    const items = toItems(readFileSync(c.path, 'utf8'))
+    const items = itemsOf(c.path)
     for (let i = items.length - 1; i >= 0; i--) {
       const it: any = items[i]
       if (it.kind !== 'assistant') continue

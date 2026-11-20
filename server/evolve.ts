@@ -22,7 +22,7 @@ import { recordError, resolveErrors } from './errors.ts'
 import { profile } from './profile.ts'
 import { localSkills } from './search.ts'
 import { autonomyOn, DATA_DIR, settings } from './settings.ts'
-import { toItems, type Item } from './transcript.ts'
+import { toItems, itemsOf, type Item } from './transcript.ts'
 import { intentOf, isCorrection } from './turns.ts'
 import { agentSender } from '../shared/messageOrigin.ts'
 
@@ -87,7 +87,7 @@ export function ingest(days = 30) {
     try { mtime = statSync(c.path).mtimeMs } catch { continue }
     if (get<any>('select mtime from ask_files where conversation_id = ?', c.id)?.mtime === mtime) continue
     let items: Item[] = []
-    try { items = toItems(readFileSync(c.path, 'utf8')) } catch { continue }
+    try { items = itemsOf(c.path) } catch { continue }
     const users = items.filter((i): i is Extract<Item, { kind: 'user' }> => i.kind === 'user' && !/^\s*</.test(i.text) && !PERCH_PROMPT.test(i.text) && !agentSender(i.text) && i.text.trim().length > 3)
     db.exec('begin')
     try {
@@ -212,7 +212,7 @@ function excerpt(conversationId: string, max = 7000) {
   const c = get<any>('select path, coalesce(title, first_prompt) title from conversations where id = ?', conversationId)
   if (!c?.path || !existsSync(c.path)) return ''
   const lines: string[] = []
-  for (const i of toItems(readFileSync(c.path, 'utf8'))) {
+  for (const i of itemsOf(c.path)) {
     if (i.kind === 'user') { if (!/^\s*</.test(i.text)) lines.push(`USER: ${i.text.slice(0, 1200)}`) }
     else for (const b of i.blocks) {
       if (b.type === 'text') lines.push(`AGENT: ${b.text.slice(0, 800)}`)

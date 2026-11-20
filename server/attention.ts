@@ -5,7 +5,7 @@ import { ephemeral } from './chat.ts'
 import { all, get, run } from './db.ts'
 import { settings } from './settings.ts'
 import { needByKey, reportNeed } from './needsstore.ts'
-import { toItems, type Item } from './transcript.ts'
+import { toItems, itemsOf, type Item } from './transcript.ts'
 
 run(`create table if not exists attention (
   id text primary key, verdict integer not null, reason text, judged_at integer not null, judged_updated_at integer not null)`)
@@ -74,7 +74,7 @@ export async function sweep(rows: Candidate[]) {
     for (let i = 0; i < todo.length; i += BATCH) {
       const batch = todo.slice(i, i + BATCH).map(r => {
         let text = ''
-        try { text = tail(toItems(readFileSync(r.path!, 'utf8'))) } catch {}
+        try { text = tail(itemsOf(r.path!)) } catch {}
         const open = (r.prs ?? []).filter((p: any) => p.state === 'OPEN').length
         return { r, id: r.id, text, head: `Title: ${(r.title ?? r.first_prompt ?? '').slice(0, 120)} | last active ${Math.round((now - r.updated_at) / 60_000)} min ago${open ? ` | ${open} open PR(s) it created` : ''}` }
       }).filter(b => b.text)

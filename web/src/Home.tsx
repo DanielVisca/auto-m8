@@ -20,7 +20,7 @@ type HomeData = {
   stacks: Stack[]; stale: (PR & { updated_at: number })[]; later: number; brief: Brief | null; briefing: boolean
   focus: { name: string; query: string }[] | null
   zen: boolean
-  decisions?: Decision[]; projects?: Project[]; interventions?: NeedsData
+  decisions?: Decision[]; projects?: Project[]; interventions?: { counts: NeedsData['counts'] }
 }
 
 function greeting() {

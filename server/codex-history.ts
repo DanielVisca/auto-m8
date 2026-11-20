@@ -17,12 +17,12 @@ const entries = (path: string): any[] => !existsSync(path) ? [] : readFileSync(p
 // What append needs from a transcript (ids already written, the last main-thread id), kept per file
 // and advanced by reading only the bytes added since. Re-reading and parsing the whole file on every
 // append made long Codex chats quadratic: a 52.7s event-loop stall after the 2026-11-16 wake.
-type Seen = { size: number; uuids: Set<string>; last: string | null }
+type Seen = { size: number; uuids: Set<string>; last: string | null; activity: Set<string>; answered: Set<string> } // activity, answered: turn ids
 const seen = new Map<string, Seen>()
 function seenOf(path: string): Seen {
   const size = existsSync(path) ? statSync(path).size : 0
   let c = seen.get(path)
-  if (!c || size < c.size) c = { size: 0, uuids: new Set(), last: null } // new, truncated or replaced: start over
+  if (!c || size < c.size) c = { size: 0, uuids: new Set(), last: null, activity: new Set(), answered: new Set() } // new, truncated or replaced: start over
   if (size > c.size) {
     const buf = Buffer.alloc(size - c.size), fd = openSync(path, 'r')
     try { readSync(fd, buf, 0, buf.length, c.size) } finally { closeSync(fd) }
@@ -30,6 +30,8 @@ function seenOf(path: string): Seen {
     for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
       let e: any; try { e = JSON.parse(line) } catch { continue }
       if (e?.uuid) { c.uuids.add(e.uuid); if (!e.isSidechain) c.last = e.uuid }
+      if (e?.type === 'perch-codex-activity' && e.perchTurnId) c.activity.add(e.perchTurnId)
+      if (e?.type === 'assistant' && e.perchTurnId) c.answered.add(e.perchTurnId)
     }
     c.size += end
   }
@@ -67,9 +69,12 @@ export function recordCodexMessage(o: Chat & { turnId: string; itemId: string; t
 }
 export function recordCodexTurn(o: Chat & { turnId?: string; messageId?: string; prompt: string; reply: string; tools: string[] }) {
   const turnId = o.turnId ?? randomUUID(), path = transcriptPath(o.id, o.cwd)
-  if (entries(path).some(e => e.uuid === turnId || (e.type === 'perch-codex-activity' && e.perchTurnId === turnId))) return path
+  // From the per-file record kept by seenOf, not a fresh read: parsing the whole transcript twice
+  // per turn showed up in freeze profiles.
+  const before = seenOf(path)
+  if (before.uuids.has(turnId) || before.activity.has(turnId)) return path
   recordCodexPrompt({ ...o, messageId: o.messageId ?? randomUUID() })
-  if (!entries(path).some(e => e.type === 'assistant' && e.perchTurnId === turnId)) {
+  if (!seenOf(path).answered.has(turnId)) {
     recordCodexMessage({ ...o, turnId, itemId: 'answer', text: o.reply || '(no reply)' })
   }
   // Metadata attaches to the last saved answer without appending the entire answer again.

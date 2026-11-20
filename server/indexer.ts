@@ -288,12 +288,15 @@ export async function syncPrs() {
   tx(() => {
     for (const [url, pr] of prs) {
       const [, owner, repo, , n] = new URL(url).pathname.split('/')
+      const was = get<{ title: string | null; head: string | null }>('select title, head from prs where url = ?', url)
       run(`insert into prs (url, repo, number, title, state, draft, review, checks, updated_at, fetched_at, base, head) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            on conflict(url) do update set title = excluded.title, state = excluded.state, draft = excluded.draft, review = excluded.review,
              checks = excluded.checks, updated_at = excluded.updated_at, fetched_at = excluded.fetched_at, base = excluded.base, head = excluded.head, gone_at = null`,
         url, `${owner}/${repo}`, Number(n), pr.title, pr.state, pr.isDraft ? 1 : 0, pr.reviewDecision,
         pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null, Date.parse(pr.updatedAt), Date.now(), pr.baseRefName, pr.headRefName)
-      for (const r of all<{ conversation_id: string }>('select conversation_id from conversation_prs where url = ?', url)) touched.add(r.conversation_id)
+      // Search text holds a PR's title, repo and branch: only a change to those is worth re-indexing
+      // its conversations. Re-indexing all of them on every sync was 13% of profiled freeze time.
+      if (!was || was.title !== pr.title || was.head !== pr.headRefName) for (const r of all<{ conversation_id: string }>('select conversation_id from conversation_prs where url = ?', url)) touched.add(r.conversation_id)
     }
     for (const url of missing) {
       const [, owner, repo, , n] = new URL(url).pathname.split('/')

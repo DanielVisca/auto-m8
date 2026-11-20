@@ -2,7 +2,7 @@
 // context block. Ranking is FTS5 bm25 over titles and message text; titles weigh 3x.
 import { readFileSync } from 'node:fs'
 import { all, get, run } from './db.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 import { oneLine } from './transcript.ts'
 
 const STOP = new Set('the and for that this with from have what when where which there their about would could should into your just like make want need some then them they will been also more very can how why are was not but all any our out get use its it\'s you'.split(' '))
@@ -33,7 +33,7 @@ export function contextBlock(ids: string[]) {
     if (!c) return ''
     let last = ''
     if (c.path) {
-      const items = toItems(readFileSync(c.path, 'utf8'))
+      const items = itemsOf(c.path)
       for (let i = items.length - 1; i >= 0 && !last; i--) {
         const it = items[i]
         if (it.kind === 'assistant') last = it.blocks.filter(b => b.type === 'text').map(b => (b as any).text).join('\n')
