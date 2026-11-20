@@ -112,7 +112,6 @@ import { explainStall, startStallProfiler } from './stallprof.ts'
 import { localResources } from './resources.ts'
 import { endTrace, report as latencyReport, routeOf, runInTrace, startLatency, startTrace } from './latency.ts'
 import { ghUsage } from './gh.ts'
-import * as kits from './kits.ts'
 const importsMs = performance.now() // every module above has loaded and run its top level by here
 startStallProfiler().catch(e => console.error('stall profiler', e)) // before startup work, so boot stalls are explained too
 try { backfillStartedBy() } catch (e) { console.error('backfill started_by', e) }
@@ -939,17 +938,6 @@ route('POST', '/api/routines/:id/resume', m => { run('update routines set enable
 route('GET', '/api/routines', () => ({ routines: listRoutines(), webhookBase: `http://127.0.0.1:${PORT}/hooks/` }))
 route('POST', '/api/routines', async (_m, req) => saveRoutine(await body(req)))
 route('DELETE', '/api/routines/:id', m => { deleteRoutine(m[1]); return { ok: true } })
-// Kits (docs/kits.md): import someone's skills, routines and CLAUDE.md snippet; preview first.
-route('GET', '/api/kits', () => ({ kits: kits.installed() }))
-route('POST', '/api/kits/preview', async (_m, req) => {
-  const b = await body(req); const { values, paths } = await kits.myValues(); const k = kits.openKit(String(b.src ?? ''))
-  try { return { manifest: k.manifest, items: kits.plan(k, values, paths) } } finally { k.cleanup() }
-})
-route('POST', '/api/kits/import', async (_m, req) => {
-  const b = await body(req); const { values, paths } = await kits.myValues(); const k = kits.openKit(String(b.src ?? ''))
-  try { const items = kits.apply(k, values, paths, Array.isArray(b.only) ? b.only : undefined); broadcast('autopilot'); return { manifest: k.manifest, items } } finally { k.cleanup() }
-})
-route('DELETE', '/api/kits/:name', async m => { const { paths } = await kits.myValues(); const r = kits.remove(decodeURIComponent(m[1]), paths); broadcast('autopilot'); return r })
 route('POST', '/api/routines/:id/run', m => {
   const r = listRoutines().find(x => x.id === m[1])
   return r ? { conversationId: fire(r, undefined, true) } : { error: 'not found' }
