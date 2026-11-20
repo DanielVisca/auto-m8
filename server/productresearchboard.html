@@ -1,0 +1,102 @@
+<div class="pr">
+<style>
+.pr{font-size:12.5px;padding:10px 12px;overflow:auto;height:100%;box-sizing:border-box}
+.pr h3{margin:14px 0 6px;font-size:13px}
+.pr .head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.pr .head b{font-size:14px}
+.pr .muted{color:var(--muted)}
+.pr .chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.pr .chip{border:1px solid var(--line);border-radius:10px;padding:1px 8px;background:none;color:var(--fg);cursor:pointer;font:inherit}
+.pr .chip.on{border-color:var(--accent)}
+.pr .badge{border-radius:9px;padding:0 7px;font-size:11px;border:1px solid var(--line);white-space:nowrap}
+.pr .tested{color:var(--ok);border-color:var(--ok)} .pr .blocked{color:var(--bad);border-color:var(--bad)}
+.pr .observed{color:var(--accent);border-color:var(--accent)} .pr .not_found{color:var(--warn);border-color:var(--warn)}
+.pr .documented,.pr .queued{color:var(--muted)}
+.pr .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.pr .card{border:1px solid var(--line);border-radius:8px;padding:8px}
+.pr .card p{margin:4px 0}
+.pr table{border-collapse:collapse;width:100%}
+.pr td,.pr th{border-top:1px solid var(--line);padding:5px 6px;vertical-align:top;text-align:left}
+.pr th{font-weight:600;color:var(--muted);font-size:11px}
+.pr img{max-width:100%;border:1px solid var(--line);border-radius:6px;margin-top:4px;display:block}
+.pr img.thumb{max-width:150px}
+.pr select{font:inherit;background:none;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+.pr a{color:var(--accent)}
+.pr .item{border-top:1px solid var(--line);padding:8px 0}
+.pr details{margin-top:4px}
+</style>
+<div class="head"><b>Product research</b><span class="muted" id="gen"></span><a href="/api/product-research/export" target="_blank" class="muted" style="margin-left:auto">Export JSON</a></div>
+<p class="muted">Docs only ≠ tested. Not found ≠ absent. Accounts pending for Datadog, Better Stack and PostHog; Grafana Play and the local test app are the live trials.</p>
+<div class="chips" id="counts"></div>
+<div id="root" class="muted">Loading…</div>
+<script>
+(() => {
+  const LABEL = { queued: 'To explore', documented: 'Docs only', observed: 'Observed', tested: 'Tested', blocked: 'Blocked', not_found: 'Not found' }
+  const SOURCE = { docs: 'Documentation', product: 'Real product', sandbox: 'Local test app' }
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+  const badge = s => `<span class="badge ${esc(s)}">${esc(LABEL[s] ?? s)}</span>`
+  const img = e => `<img class="thumb" loading="lazy" src="/api/product-research/evidence/${encodeURIComponent(e.id)}/image" alt="${esc(e.summary)}">`
+  const when = t => t ? new Date(t).toLocaleDateString() : ''
+  let data = null, product = 'all', status = ''
+  const $ = id => document.getElementById(id)
+
+  function render() {
+    if (!data) return
+    const { products, items, evidence, generated_at } = data
+    $('gen').textContent = 'Updated ' + new Date(generated_at).toLocaleTimeString()
+    const counts = {}
+    for (const it of items) counts[it.status] = (counts[it.status] || 0) + 1
+    $('counts').innerHTML = Object.keys(LABEL).filter(k => counts[k]).map(k =>
+      `<button class="chip ${status === k ? 'on' : ''}" data-status="${k}">${esc(LABEL[k])} ${counts[k]}</button>`).join('') + (status ? ' <button class="chip" data-status="">clear</button>' : '')
+    const evFor = id => evidence.filter(e => e.item_id === id)
+    const shownItems = items.filter(it => (product === 'all' || it.product_id === product) && (!status || it.status === status))
+    const shot = (pid, key) => { const it = items.find(i => i.product_id === pid && i.key === key); const e = it && evFor(it.id).find(x => x.screenshot && x.source === 'product') || it && evFor(it.id).find(x => x.screenshot); return e ? img(e) : '' }
+
+    // Products as cards
+    const cards = products.map(p => {
+      const its = items.filter(i => i.product_id === p.id)
+      const c = {}; for (const i of its) c[i.status] = (c[i.status] || 0) + 1
+      return `<div class="card"><b>${esc(p.name)}</b>${p.sandbox ? ' <span class="muted">· local test app</span>' : ''}
+        <p class="muted">${esc(p.scope)}</p><p>${Object.keys(c).map(k => `${badge(k)} ${c[k]}`).join(' &nbsp; ') || '<span class="muted">nothing mapped</span>'}</p>
+        <p class="small"><a href="${esc(p.url)}" target="_blank">Open</a> · <a href="${esc(p.docs_url)}" target="_blank">Docs</a>${p.trial_url ? ` · <a href="${esc(p.trial_url)}" target="_blank">Trial</a>` : ''}</p>
+        <p class="muted small">${esc(p.context)}</p></div>`
+    }).join('')
+
+    // Comparison grid: one row per workflow key, one column per product
+    const keys = [...new Map(items.filter(i => i.key.startsWith('workflow:') || i.key.startsWith('docs:')).map(i => [i.key, i.title])).entries()]
+    const grid = keys.length ? `<table><tr><th>Workflow</th>${products.map(p => `<th>${esc(p.name)}</th>`).join('')}</tr>
+      ${keys.map(([key, title]) => `<tr><td><b>${esc(title)}</b><div class="muted small">${esc(key)}</div></td>${products.map(p => {
+        const it = items.find(i => i.product_id === p.id && i.key === key)
+        if (!it) return '<td class="muted">—</td>'
+        return `<td>${badge(it.status)}<div class="small">${esc(it.notes)}</div>${shot(p.id, key)}</td>` }).join('')}</tr>`).join('')}</table>` : '<p class="muted">No workflows mapped yet.</p>'
+
+    // Item list, filterable
+    const list = shownItems.map(it => {
+      const ev = evFor(it.id)
+      const p = products.find(x => x.id === it.product_id)
+      return `<div class="item"><div>${badge(it.status)} <b>${esc(it.title)}</b> <span class="muted small">${esc(p?.name ?? '')} · ${esc(it.kind)}${it.capability ? ' · ' + esc(it.capability) : ''}</span></div>
+        ${it.notes ? `<div class="small">${esc(it.notes)}</div>` : ''}
+        ${ev.length ? `<details><summary class="small">${ev.length} evidence</summary>${ev.map(e => `<div class="small"><b>${esc(SOURCE[e.source] ?? e.source)}</b> · ${esc(e.summary)} <span class="muted">${when(e.captured_at)}</span>${e.screenshot ? img(e) : ''}</div>`).join('')}</details>` : ''}
+      </div>` }).join('') || '<p class="muted">Nothing matches these filters.</p>'
+
+    $('root').className = ''
+    $('root').innerHTML = `
+      <h3>Products</h3><div class="cards">${cards}</div>
+      <h3>Compare by workflow</h3><div style="overflow:auto">${grid}</div>
+      <h3>Items</h3>
+      <div class="small" style="margin-bottom:4px">Product: <select id="pick"><option value="all">All products</option>${products.map(p => `<option value="${esc(p.id)}" ${p.id === product ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
+      ${list}`
+    $('pick').onchange = e => { product = e.target.value; render() }
+  }
+
+  $('counts').onclick = e => { const b = e.target.closest('[data-status]'); if (b) { status = b.dataset.status; render() } }
+
+  async function load() {
+    try { data = await window.perch.data({ source: 'perch', path: '/api/product-research' }); render() }
+    catch (e) { $('root').textContent = 'Could not load product research: ' + (e && e.message || e) }
+  }
+  window.perch.onRefresh(load)
+  load()
+})()
+</script>
+</div>

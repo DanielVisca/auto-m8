@@ -1,0 +1,18 @@
+/* Agent browser: the live view fills its width at the page's own shape (no side bars), up to 75% of the window. */
+.browser-dock.fit:not(.collapsed) { height: auto; max-height: 75vh; resize: none; }
+.browser-dock.fit .browserview { height: auto; }
+.browser-stage.fit { flex: none; width: 100%; max-height: calc(75vh - 40px); }
+.browserview .open-chrome { font-size: 12px; padding: 3px 10px; white-space: nowrap; }
+.browser-flag.has-windows { opacity: .8; }
+.browser-flag.has-windows .flag-n { background: var(--muted, #888); }
+.browser-list { padding: 6px 0; min-width: 300px; }
+.browser-list-head { padding: 2px 12px 6px; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.browser-list-row { display: flex; gap: 6px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line); }
+.browser-list-row button { font-size: 12px; padding: 3px 9px; white-space: nowrap; }
+.browser-list-row .min0 { min-width: 0; }
+/* The dock's top edge: drag to any height. */
+.browser-dock { position: relative; }
+.browser-dock.sized:not(.collapsed) { max-height: none; resize: none; }
+.browser-dock-grip { position: absolute; top: 0; left: 0; right: 0; height: 9px; cursor: ns-resize; z-index: 5; }
+.browser-dock-grip::after { content: ''; position: absolute; left: 50%; top: 3px; width: 36px; height: 3px; margin-left: -18px; border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .15s; }
+.browser-dock-grip:hover::after, .browser-dock-grip:active::after { opacity: 1; background: var(--accent, #f5a623); }

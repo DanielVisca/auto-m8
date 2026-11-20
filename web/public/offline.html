@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>perch · Mac unavailable</title>
+<style>
+  body { font: 16px/1.45 -apple-system, system-ui, sans-serif; background: #16171a; color: #e6e6e6; margin: 0; padding: calc(24px + env(safe-area-inset-top)) 20px 24px; }
+  h2 { margin: 0 0 6px; } p { color: #8b9099; margin: 0 0 18px; }
+  a.row { display: block; padding: 14px 12px; border-radius: 10px; background: #1d1f23; color: #e6e6e6; text-decoration: none; margin-bottom: 8px; }
+  a.row small { display: block; color: #8b9099; margin-top: 2px; }
+  button { font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid #2c2f36; background: #1d1f23; color: #e6e6e6; }
+</style></head>
+<body>
+  <h2>perch</h2>
+  <p>Your Mac can't be reached right now (asleep, offline, or off the tailnet).</p>
+  <div id="list"></div>
+  <button onclick="location.href='/#home'">Try again</button>
+<script>
+  // Written by the app (CloudBar) whenever a conversation is continuing in the cloud.
+  var items = []; try { items = JSON.parse(localStorage.getItem('perch.cloud') || '[]') } catch (e) {}
+  var el = document.getElementById('list')
+  if (!items.length) el.innerHTML = '<p>No conversations are continuing in the cloud. Next time, use ☁ Continue in cloud before the Mac sleeps.</p>'
+  else {
+    el.insertAdjacentHTML('beforeend', '<p>These are continuing in the cloud; open one to follow or steer it in PostHog:</p>')
+    items.forEach(function (x) {
+      var a = document.createElement('a'); a.className = 'row'; a.href = x.url; a.target = '_blank'; a.rel = 'noreferrer'
+      a.textContent = '☁ ' + (x.title || x.id)
+      var s = document.createElement('small'); s.textContent = 'since ' + new Date(x.at).toLocaleString(); a.appendChild(s)
+      el.appendChild(a)
+    })
+  }
+</script>
+</body></html>

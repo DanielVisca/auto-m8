@@ -1,0 +1,10 @@
+node_modules
+web/dist
+*.log
+.perch-test
+.perch-worktrees
+perch.db
+perch.db-*
+.DS_Store
+.env
+.env.*
