@@ -2,6 +2,7 @@
 // PostHog Code writes the same format under its own config dir, so one parser covers both.
 // Pure functions only: the indexer and the messages endpoint share them, and the test runs them.
 
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import { parseTaskNotification, type TaskDone } from '../shared/waits.ts'
 
 export type Meta = {
@@ -205,64 +206,122 @@ function codexFooter(text: string): { text: string; activity?: Activity } {
 }
 
 // The conversation as the chat view shows it. Tool results attach to their tool block.
-export function toItems(jsonl: string): Item[] {
-  const items: Item[] = []
-  const tools = new Map<string, Extract<Block, { type: 'tool' }>>()
-  const codexAnswers = new Map<string, Extract<Item, { kind: 'assistant' }>>()
-  let last: Extract<Item, { kind: 'assistant' }> | null = null
-  let lastMsgId: string | null = null
-  let recovered = false
-  for (const line of jsonl.split('\n')) {
-    if (!line) continue
-    let e: any
-    try { e = JSON.parse(line) } catch { continue }
-    if (e.type === 'perch-recovered-message' && e.entry) { e = e.entry; recovered = true }
-    if (e.isSidechain) continue
-    if (e.type === 'perch-codex-activity') {
-      const answer = codexAnswers.get(e.perchTurnId)
-      if (answer && Array.isArray(e.tools)) answer.activity = { tools: e.tools.filter((t: unknown): t is string => typeof t === 'string') }
-      continue
-    }
-    if (e.type === 'user' && !e.isMeta && e.message?.role === 'user') {
-      const content = e.message.content
-      if (Array.isArray(content)) for (const b of content) {
-        if (b?.type === 'tool_result') {
-          const tool = tools.get(b.tool_use_id)
-          if (tool) { tool.result = resultText(b.content); tool.isError = !!b.is_error }
+// A parser that can be fed a transcript in pieces: transcripts only grow, so a reader that keeps
+// the parser (itemsOf) parses each line once instead of the whole file on every read.
+export class ItemsParser {
+  private items: Item[] = []
+  private tools = new Map<string, Extract<Block, { type: 'tool' }>>()
+  private codexAnswers = new Map<string, Extract<Item, { kind: 'assistant' }>>()
+  private last: Extract<Item, { kind: 'assistant' }> | null = null
+  private lastMsgId: string | null = null
+  private recovered = false
+  feed(jsonl: string) {
+    for (const line of jsonl.split('\n')) {
+      if (!line) continue
+      let e: any
+      try { e = JSON.parse(line) } catch { continue }
+      if (e.type === 'perch-recovered-message' && e.entry) { e = e.entry; this.recovered = true }
+      if (e.isSidechain) continue
+      if (e.type === 'perch-codex-activity') {
+        const answer = this.codexAnswers.get(e.perchTurnId)
+        if (answer && Array.isArray(e.tools)) answer.activity = { tools: e.tools.filter((t: unknown): t is string => typeof t === 'string') }
+        continue
+      }
+      if (e.type === 'user' && !e.isMeta && e.message?.role === 'user') {
+        const content = e.message.content
+        if (Array.isArray(content)) for (const b of content) {
+          if (b?.type === 'tool_result') {
+            const tool = this.tools.get(b.tool_use_id)
+            if (tool) { tool.result = resultText(b.content); tool.isError = !!b.is_error }
+          }
         }
-      }
-      // A background agent, command or workflow finished: mark the call that started it.
-      const note = parseTaskNotification(typeof content === 'string' ? content : Array.isArray(content) ? content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('\n') : '')
-      if (note) { const tool = tools.get(note.toolUseId); if (tool) tool.done = { status: note.status, summary: note.summary, at: ts(e.timestamp) ?? undefined } }
-      const text = userText(content)
-      if (text) { items.push({ kind: 'user', text, ts: ts(e.timestamp) ?? undefined, uuid: e.uuid }); last = null }
-    } else if (e.type === 'assistant' && Array.isArray(e.message?.content)) {
-      // One API message is stored as several lines (one per content block) sharing message.id.
-      if (!last || e.message.id !== lastMsgId) {
-        last = { kind: 'assistant', blocks: [], ts: ts(e.timestamp) ?? undefined, mid: typeof e.message.id === 'string' ? e.message.id : undefined, model: typeof e.message.model === 'string' && e.message.model !== '<synthetic>' ? e.message.model : undefined }
-        items.push(last)
-        lastMsgId = e.message.id
-      }
-      if (e.perchTurnId) codexAnswers.set(e.perchTurnId, last)
-      last.uuid = e.uuid // the last line of the answer: branching after it keeps the whole answer
-      if (Array.isArray(e.perchActivity?.tools)) {
-        last.activity = { tools: e.perchActivity.tools.filter((t: unknown): t is string => typeof t === 'string') }
-      }
-      for (const b of e.message.content) {
-        if (b?.type === 'text' && b.text) {
-          const parsed = e.version === 'perch-codex' && !e.perchActivity ? codexFooter(b.text) : { text: b.text }
-          if (parsed.text) last.blocks.push({ type: 'text', text: parsed.text })
-          if ('activity' in parsed && parsed.activity) last.activity = parsed.activity
+        // A background agent, command or workflow finished: mark the call that started it.
+        const note = parseTaskNotification(typeof content === 'string' ? content : Array.isArray(content) ? content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('\n') : '')
+        if (note) { const tool = this.tools.get(note.toolUseId); if (tool) tool.done = { status: note.status, summary: note.summary, at: ts(e.timestamp) ?? undefined } }
+        const text = userText(content)
+        if (text) { this.items.push({ kind: 'user', text, ts: ts(e.timestamp) ?? undefined, uuid: e.uuid }); this.last = null }
+      } else if (e.type === 'assistant' && Array.isArray(e.message?.content)) {
+        // One API message is stored as several lines (one per content block) sharing message.id.
+        if (!this.last || e.message.id !== this.lastMsgId) {
+          this.last = { kind: 'assistant', blocks: [], ts: ts(e.timestamp) ?? undefined, mid: typeof e.message.id === 'string' ? e.message.id : undefined, model: typeof e.message.model === 'string' && e.message.model !== '<synthetic>' ? e.message.model : undefined }
+          this.items.push(this.last)
+          this.lastMsgId = e.message.id
         }
-        else if (b?.type === 'thinking' && b.thinking) last.blocks.push({ type: 'thinking', text: b.thinking })
-        else if (b?.type === 'tool_use') {
-          const tool = { type: 'tool' as const, id: b.id, name: b.name, input: b.input }
-          tools.set(b.id, tool)
-          last.blocks.push(tool)
+        if (e.perchTurnId) this.codexAnswers.set(e.perchTurnId, this.last)
+        this.last.uuid = e.uuid // the last line of the answer: branching after it keeps the whole answer
+        if (Array.isArray(e.perchActivity?.tools)) {
+          this.last.activity = { tools: e.perchActivity.tools.filter((t: unknown): t is string => typeof t === 'string') }
+        }
+        for (const b of e.message.content) {
+          if (b?.type === 'text' && b.text) {
+            const parsed = e.version === 'perch-codex' && !e.perchActivity ? codexFooter(b.text) : { text: b.text }
+            if (parsed.text) this.last.blocks.push({ type: 'text', text: parsed.text })
+            if ('activity' in parsed && parsed.activity) this.last.activity = parsed.activity
+          }
+          else if (b?.type === 'thinking' && b.thinking) this.last.blocks.push({ type: 'thinking', text: b.thinking })
+          else if (b?.type === 'tool_use') {
+            const tool = { type: 'tool' as const, id: b.id, name: b.name, input: b.input }
+            this.tools.set(b.id, tool)
+            this.last.blocks.push(tool)
+          }
         }
       }
     }
   }
-  const visible = items.filter(i => i.kind === 'user' || i.blocks.length || i.activity?.tools.length)
-  return recovered ? visible.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)) : visible
+  // A new array each time; the items in it are shared with later reads, so don't change them.
+  result(): Item[] {
+    const visible = this.items.filter(i => i.kind === 'user' || i.blocks.length || i.activity?.tools.length)
+    return this.recovered ? visible.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)) : visible
+  }
+}
+export function toItems(jsonl: string): Item[] {
+  const p = new ItemsParser()
+  p.feed(jsonl)
+  return p.result()
+}
+
+// A transcript file's items, parsed once and kept: each call reads only the bytes appended since
+// the last one. Every chat open, attention sweep, promise scan and brief used to read and parse
+// the whole file (the largest are 20-50 MB), on the event loop, which froze the server for seconds at a time.
+// Kept for the transcripts in use, up to ITEMS_CACHE_BYTES of source text, least recently read out first.
+const ITEMS_CACHE_BYTES = 160 << 20
+type Kept = { parser: ItemsParser; offset: number; ino: number; guard: Buffer; used: number }
+const kept = new Map<string, Kept>()
+export const itemsCache = { hits: 0, grows: 0, full: 0 }
+export function itemsOf(path: string): Item[] {
+  const fd = openSync(path, 'r')
+  try {
+    const st = fstatSync(fd)
+    let k = kept.get(path)
+    if (k && (k.ino !== st.ino || st.size < k.offset || !sameTail(fd, k))) k = undefined // replaced, truncated or rewritten: start over
+    if (!k) { k = { parser: new ItemsParser(), offset: 0, ino: st.ino, guard: Buffer.alloc(0), used: 0 }; itemsCache.full++ }
+    else if (st.size > k.offset) itemsCache.grows++
+    else itemsCache.hits++
+    kept.delete(path); kept.set(path, k) // most recently used last
+    if (st.size > k.offset) {
+      const buf = Buffer.allocUnsafe(st.size - k.offset)
+      let n = 0
+      while (n < buf.length) { const r = readSync(fd, buf, n, buf.length - n, k.offset + n); if (!r) break; n += r }
+      let end = buf.subarray(0, n).lastIndexOf(0x0a) + 1 // whole lines only; a half-written one is read next time
+      // A last line with no newline yet counts when it is complete JSON (half a line never parses).
+      if (end < n) try { JSON.parse(buf.toString('utf8', end, n)); end = n } catch {}
+      if (end) {
+        k.parser.feed(buf.toString('utf8', 0, end))
+        k.offset += end
+        k.guard = Buffer.from(buf.subarray(Math.max(0, end - 64), end))
+      }
+    }
+    k.used = Date.now()
+    let total = 0
+    for (const v of kept.values()) total += v.offset
+    for (const [p, v] of kept) { if (total <= ITEMS_CACHE_BYTES || p === path) break; kept.delete(p); total -= v.offset }
+    return k.parser.result()
+  } finally { closeSync(fd) }
+}
+// The bytes just before where we stopped are still what we read: the file was appended to, not rewritten.
+function sameTail(fd: number, k: Kept) {
+  if (!k.guard.length) return true
+  const b = Buffer.alloc(k.guard.length)
+  try { readSync(fd, b, 0, b.length, k.offset - b.length) } catch { return false }
+  return b.equals(k.guard)
 }

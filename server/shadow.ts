@@ -30,7 +30,7 @@ import { promisify } from 'node:util'
 import { all, db, get, run } from './db.ts'
 import { prSpend, prSpendDetail } from './prspend.ts'
 import { codeRoots, DATA_DIR, settings } from './settings.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 import { agentEnv, loadedModels, localStatus, unloadModel } from './local.ts'
 import { isQuiet, isUnderPressure, quietState, startQuiet } from './quiet.ts'
 import { learningGate, type UsageSnapshot } from './learning-budget.ts'
@@ -146,7 +146,7 @@ function userMessages(session: string) {
   // Only what you typed: perch's own injections (follow-up alarms, helper reports, PR events,
   // task notifications) would send the replay chasing things that no longer exist.
   const injected = /^(\[perch|\(perch:|⏰|<task-notification>|HELPER REPORT|NEEDS HELP|EVENTS\b|\[SYSTEM NOTIFICATION|Caveat:|<command-|<local-command|You stopped here before the work was finished)/
-  const items = toItems(readFileSync(c.path, 'utf8'))
+  const items = itemsOf(c.path)
   const messages = items.filter((i: any) => i.kind === 'user').map((i: any) => clean(String(i.text ?? ''))).filter(m => m && !injected.test(m))
   return { cwd: c.cwd as string | null, messages, items, path: c.path as string }
 }

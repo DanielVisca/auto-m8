@@ -182,9 +182,15 @@ export function refreshMeta(id: string) {
            coalesce((select branch from conversations where id = ?), '') || ' ' ||
            coalesce((select group_concat(coalesce(p.title, '') || ' ' || coalesce(p.repo, '') || ' ' || coalesce(p.head, ''), ' ')
                      from conversation_prs cp left join prs p on p.url = cp.url where cp.conversation_id = ?), '') text`, id, id, id, id, id)
+  // Called on every transcript append and task sync, almost always with nothing changed: only a
+  // different text is worth two full-text writes.
+  const text = row?.text.trim() ? row.text : ''
+  if (metaText.get(id) === text) return
   run('delete from meta_search where id = ?', id)
-  if (row?.text.trim()) run('insert into meta_search (id, text) values (?, ?)', id, row.text.replace(/-/g, ' ') + ' ' + row.text)
+  if (text) run('insert into meta_search (id, text) values (?, ?)', id, text.replace(/-/g, ' ') + ' ' + text)
+  metaText.set(id, text)
 }
+const metaText = new Map<string, string>() // what this process last wrote per conversation
 
 // One-time data fixes, each run once and remembered.
 db.exec('create table if not exists migrations (name text primary key, at integer)')

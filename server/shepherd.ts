@@ -30,7 +30,7 @@ import { autonomyOn, settings, updateSettings } from './settings.ts'
 import { isPaused } from './pausehold.ts'
 import { MARK, revive, reviveBackoff, watch } from './shepherdstore.ts'
 import { raise, resolveKey } from './decisionstore.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 import { ownerName } from './owner.ts'
 
 export { MARK } from './shepherdstore.ts'
@@ -389,7 +389,7 @@ function lastReply(id: string, since: number) {
   const c = get<any>('select path, updated_at from conversations where id = ?', id)
   if (!c?.path || !existsSync(c.path) || c.updated_at < since) return null
   try {
-    const last = toItems(readFileSync(c.path, 'utf8')).at(-1)
+    const last = itemsOf(c.path).at(-1)
     if (!last || last.kind !== 'assistant') return null
     return last.blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n')
   } catch { return null }

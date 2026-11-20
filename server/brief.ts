@@ -9,7 +9,7 @@ import { editLabels, focusIds, focusWords, list, type Row } from './conversation
 import { all, get, run } from './db.ts'
 import { settings } from './settings.ts'
 import { recordError, resolveErrors } from './errors.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 import { snoozed } from './pr.ts'
 
 const DAY = 86400_000
@@ -51,7 +51,9 @@ export function home() {
     recentNotes: all<Row>('select day, body from notes where day < ? and body != \'\' order by day desc limit 5', day),
     running: now.filter(c => c.effective === 'running'),
     needsMe: now.filter(c => c.effective === 'waiting'),
-    interventions: needsList(),
+    // Home shows only the count; the Needs me card loads the list itself (/api/needs). Sending every
+    // item with its context and history made each Home answer several hundred KB heavier.
+    interventions: { counts: needsList().counts },
     decisions: openDecisions(),
     projects: projects(),
     active: now.filter(c => c.effective === 'active').slice(0, 12),
@@ -87,7 +89,7 @@ function briefFor(day: string) {
 
 function lastAnswer(path: string | null) {
   if (!path || !existsSync(path)) return ''
-  const items = toItems(readFileSync(path, 'utf8'))
+  const items = itemsOf(path)
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i]
     if (it.kind === 'assistant') {

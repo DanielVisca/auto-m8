@@ -8,7 +8,7 @@ import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { all, get } from './db.ts'
 import { HOME } from './settings.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 import { ATTACH_DIR } from './attachments.ts'
 
 const exec = promisify(execFile)
@@ -48,7 +48,7 @@ export function conversationFiles(conversationId: string): FileRef[] {
   if (hit?.m === m) { hit.files.forEach(f => allowed.add(f.path)); return hit.files }
   const seen = new Map<string, string>() // path → how we know about it
   const add = (p: string, how: string) => { if (p && !seen.has(p)) seen.set(p, how) }
-  for (const it of toItems(readFileSync(c.path, 'utf8')) as any[]) {
+  for (const it of itemsOf(c.path) as any[]) {
     if (it.kind !== 'assistant') continue
     for (const b of it.blocks ?? []) {
       if (b.type === 'tool') {

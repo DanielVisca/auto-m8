@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { ephemeral } from './chat.ts'
 import { all, get, run } from './db.ts'
 import { autonomyOn, settings } from './settings.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 
 run(`create table if not exists attention (id text primary key, verdict integer not null, reason text, judged_at integer not null, judged_updated_at integer not null)`)
 run(`create table if not exists lifecycle (
@@ -77,7 +77,7 @@ Conversation "${c.title.slice(0, 120)}" (last active ${new Date(c.updated_at).to
 ${transcript}`
 
 function condensedTranscript(path: string) {
-  const items = toItems(readFileSync(path, 'utf8'))
+  const items = itemsOf(path)
   const lines: string[] = []
   let users = 0
   for (const i of items) {

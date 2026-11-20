@@ -106,23 +106,40 @@ export function needsReason(r: Row): string | null {
 
 // Browser and model columns read tables other modules create (browser.ts, spend.ts); until both
 // exist (tests, first boot) the list leaves them out instead of failing.
-let extras = ''
-function extraCols() {
-  if (extras) return extras
-  const have = new Set(all<{ name: string }>(`select name from sqlite_master where type = 'table' and name in ('browser_sessions', 'usage_msgs')`).map(t => t.name))
-  if (have.size < 2) return ''
-  return (extras = `
+const USED_MODELS = `(select group_concat(f || ':' || last) from (select case when um.model like 'claude%' then 'claude' when um.model like 'codex%' then 'codex' else 'ollama' end f, max(um.ts) last
+      from usage_msgs um where um.session = c.id and um.model is not null and um.model <> '<synthetic>' group by 1)) used_models,`
+let extras: boolean | null = null
+function extraCols(models: boolean) {
+  if (!extras) {
+    const have = new Set(all<{ name: string }>(`select name from sqlite_master where type = 'table' and name in ('browser_sessions', 'usage_msgs')`).map(t => t.name))
+    if (have.size < 2) return ''
+    extras = true
+  }
+  return `
     -- An Agent Chrome window open for this chat right now (browser.ts deletes the row when it closes).
     exists (select 1 from browser_sessions b where b.owner = c.id) has_browser,
     -- Which model families it has run on, with when each was last used ("claude:1794..,ollama:1794.."),
     -- plus the engine it is set to now (chat_prefs), so the row can stack them with the current one on top.
-    (select group_concat(f || ':' || last) from (select case when um.model like 'claude%' then 'claude' when um.model like 'codex%' then 'codex' else 'ollama' end f, max(um.ts) last
-      from usage_msgs um where um.session = c.id and um.model is not null and um.model <> '<synthetic>' group by 1)) used_models,
+    ${models ? USED_MODELS : ''}
     (select x.engine from chat_prefs x where x.id = c.id) engine_pref,
-    (select x.engine from chat_prefs x where x.id = c.id and coalesce(x.engine, '') not in ('', 'auto') and x.engine not like 'claude:%' and x.engine not like 'codex%') local_engine,`)
+    (select x.engine from chat_prefs x where x.id = c.id and coalesce(x.engine, '') not in ('', 'auto') and x.engine not like 'claude:%' and x.engine not like 'codex%') local_engine,`
+}
+// The same "used_models" for every conversation in one grouped pass. As a per-row subquery it was
+// over half of the full-list query (39 of ~70ms on 3,700 conversations); usage is only scanned
+// every few minutes, so one pass a minute is as fresh as the data.
+let usedModels: { at: number; map: Map<string, string> } | null = null
+function usedModelsBySession() {
+  if (usedModels && Date.now() - usedModels.at < 60_000) return usedModels.map
+  const map = new Map<string, string>()
+  try {
+    for (const r of all<{ session: string; f: string; last: number }>(`select session, case when model like 'claude%' then 'claude' when model like 'codex%' then 'codex' else 'ollama' end f, max(ts) last
+      from usage_msgs where session is not null and model is not null and model <> '<synthetic>' group by 1, 2`)) map.set(r.session, (map.has(r.session) ? map.get(r.session) + ',' : '') + `${r.f}:${r.last}`)
+  } catch {} // no usage table yet (tests, first boot)
+  usedModels = { at: Date.now(), map }
+  return map
 }
 
-const baseSql = () => `
+const baseSql = (models = true) => `
   select c.*, coalesce(u.title, c.title) title, u.state, u.state_auto, u.pinned, u.note, u.snooze_until, u.seen_at, u.state_at, a.reason ai_reason, a.judged_at ai_at,
     (select coalesce(ps.by, 'you') from perch_started ps where ps.id = c.id) started_by,
     (select title from decisions d where d.conversation_id = c.id and d.status = 'open' and coalesce(d.stakes, 'high') = 'high' order by d.created_at desc limit 1) decision,
@@ -130,7 +147,7 @@ const baseSql = () => `
         'review', p.review, 'checks', p.checks, 'number', p.number, 'repo', p.repo, 'title', p.title))
       from conversation_prs cp left join prs p on p.url = cp.url where cp.conversation_id = c.id and cp.created = 1) prs,
     (select json_group_array(label) from labels where conversation_id = c.id) labels,
-    ${extraCols()}
+    ${extraCols(models)}
     -- Two indexed counts, not one 'a = id or b = id' (that scanned every link for every row).
     ((select count(*) from links l where l.a = c.id) + (select count(*) from links l where l.b = c.id and l.a <> c.id)) link_count
   from conversations c left join user_state u on u.id = c.id left join attention a on a.id = c.id and a.verdict = 1`
@@ -162,17 +179,21 @@ function hydrate(r: Row, live: Set<string>) {
   r.models = [...last.keys()].sort((a, b) => (a === now ? -1 : b === now ? 1 : last.get(b)! - last.get(a)!))
   if (now && !r.models.includes(now) && r.models.length) r.models.unshift(now)
   delete r.used_models; delete r.engine_pref
-  r.effective = effectiveState(r, live)
   // Unread, like an inbox: something arrived after you last opened it. Never-opened threads count
   // only when recent, so years of imported history don't all show up bold.
   r.unread = r.seen_at ? r.updated_at > r.seen_at + 2000 : r.updated_at > Date.now() - 2 * 86400_000
   r.promise = promiseFor(r.id)
   r.where = whereRuns(r)
   r.place = placeOf(r)
-  r.returned = r.state === 'later' && r.snooze_until && r.snooze_until <= Date.now()
   // Search sessions live in the search view; shepherd runs (PR watch, push-through) are automation, not your threads.
   r.agent_kind = agentKind(r)
   r.automated = !!r.agent_kind
+  return derive(r, live)
+}
+// The fields that change when a chat starts or stops running, without re-reading the row.
+function derive(r: Row, live: Set<string>) {
+  r.effective = effectiveState(r, live)
+  r.returned = r.state === 'later' && r.snooze_until && r.snooze_until <= Date.now()
   r.reason = r.effective === 'waiting' ? (r.state === 'waiting' ? r.note || 'flagged' : r.returned ? 'back from snooze' : needsReason(r)) : null
   return r
 }
@@ -315,10 +336,17 @@ export function list(input: { q?: string; states?: string[]; source?: string; so
   const live = new Set(runningChats().filter(c => c.state === 'running').map(c => c.id))
   let rows: Row[]
   if (where.length) {
-    rows = all<Row>(`${baseSql()} where ${where.join(' and ')}`, ...params)
-    for (const r of rows) {
-      hydrate(r, live)
-      if (scores) r.snippet = scores.get(r.id)?.snippet
+    // Only the matching ids come from SQL; the rows are the shared hydrated ones. Running the whole
+    // list query (a dozen subqueries per row) again for every folder, label and search was a third
+    // of the list's cost.
+    const byId = everyRow(live) && base!.byId
+    rows = []
+    for (const { id } of all<{ id: string }>(`select c.id from conversations c where ${where.join(' and ')}`, ...params)) {
+      const r = byId.get(id) ?? detail(id) // indexed a moment ago, not in the shared list yet
+      if (!r) continue
+      const copy = { ...r }
+      if (scores) copy.snippet = scores.get(id)?.snippet
+      rows.push(copy)
     }
   } else rows = everyRow(live)
   const shared = !where.length
@@ -376,18 +404,44 @@ export function list(input: { q?: string; states?: string[]; source?: string; so
 // three times in 7 minutes frozen inside this rebuild (hydrate, placeOf, whereRuns). Now a write you'd
 // see (state, labels, decisions...) or a chat starting/stopping rebuilds at once; background churn
 // rebuilds at most every max(2s, 5x the last build), which keeps this under ~20% of the server's time.
-let base: { key: string; writes: number; at: number; ms: number; rows: Row[] } | null = null
+// It still froze the server under load: any chat starting or stopping rebuilt every row, and
+// background writes rebuilt it inside whichever request came next. Now only a write you'd see
+// rebuilds inline. A chat starting or stopping re-derives just its own row. Background churn, other
+// processes' writes (pragma data_version) and the clock are served from the rows in hand while one
+// rebuild runs after the response; if that changed anything a list shows, onListChange tells the
+// open pages to refetch.
+type Base = { userWrites: number; writes: number; dataVersion: number; live: Set<string>; at: number; ms: number; rows: Row[]; byId: Map<string, Row>; sig: string }
+let base: Base | null = null
+let rebuilding: NodeJS.Timeout | null = null
 export let listBuilds = 0
+export const onListChange = new Set<() => void>()
+const dataVersion = () => { try { return Number(get<{ data_version: number }>('pragma data_version')?.data_version ?? 0) } catch { return 0 } }
+const signature = (rows: Row[]) => { let h = 0; for (const r of rows) { const s = `${r.id}|${r.updated_at}|${r.effective}|${r.title}|${r.unread}|${r.reason}|${r.pinned}|${r.messages}|${r.labels.length}|${r.prs.length}`; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0 } return `${rows.length}:${h}` }
+function build(live: Set<string>): Base {
+  const t = performance.now()
+  const uw = userWrites, w = writes, dv = dataVersion()
+  const rows = all<Row>(baseSql(false))
+  const models = usedModelsBySession()
+  for (const r of rows) { r.used_models = models.get(r.id); hydrate(r, live) }
+  listBuilds++
+  return (base = { userWrites: uw, writes: w, dataVersion: dv, live, at: Date.now(), ms: performance.now() - t, rows, byId: new Map(rows.map(r => [r.id, r])), sig: signature(rows) })
+}
 function everyRow(live: Set<string>): Row[] {
-  const key = `${userWrites}|${[...live].sort().join(',')}`
-  const age = base ? Date.now() - base.at : 0
-  const stale = base && ((base.writes !== writes && age > Math.max(2000, 5 * base.ms)) || age > 30_000) // 30s: time-based fields (snoozes, unread)
-  if (!base || base.key !== key || stale) {
-    const t = performance.now()
-    const rows = all<Row>(baseSql())
-    for (const r of rows) hydrate(r, live)
-    base = { key, writes, at: Date.now(), ms: performance.now() - t, rows }
-    listBuilds++
+  if (!base || base.userWrites !== userWrites) return build(live).rows
+  if (base.live !== live) {
+    for (const id of live) if (!base.live.has(id)) { const r = base.byId.get(id); if (r) derive(r, live) }
+    for (const id of base.live) if (!live.has(id)) { const r = base.byId.get(id); if (r) derive(r, live) }
+    base.live = live
+  }
+  const age = Date.now() - base.at
+  const dirty = base.writes !== writes || base.dataVersion !== dataVersion()
+  if (!rebuilding && ((dirty && age > Math.max(1500, 10 * base.ms)) || age > 30_000)) { // 30s: time-based fields (snoozes, unread)
+    rebuilding = setTimeout(() => {
+      rebuilding = null
+      const before = base?.sig
+      try { build(new Set(runningChats().filter(c => c.state === 'running').map(c => c.id))) } catch (e) { console.error('list rebuild', e); return }
+      if (base!.sig !== before) onListChange.forEach(f => { try { f() } catch {} })
+    }, 0)
   }
   return base.rows
 }

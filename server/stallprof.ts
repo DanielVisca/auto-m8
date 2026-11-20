@@ -1,7 +1,7 @@
 // What blocked the event loop. The stall logger only knows how long a stall was and which request
 // came last, which is often just whatever arrived next; on 2026-11-14 stalls of 2-10s under load got
 // a live server killed as hung three times and the cause was never on record. A sampling CPU
-// profiler runs all the time (one sample per 10ms, negligible), restarted every 30s; when a stall
+// profiler runs all the time (one sample per 10ms), restarted every 5 minutes; when a stall
 // over STALL_MS ends, the samples from inside it are summarised by self time into the stall row,
 // and the profile is saved to <data>/hangs (open it in Chrome DevTools → Performance).
 import { Session } from 'node:inspector'
@@ -41,13 +41,20 @@ export async function startStallProfiler(intervalUs = 10_000) {
   if (session || process.env.PERCH_STALL_PROFILER === '0') return
   session = new Session(); session.connect()
   await post('Profiler.enable'); await post('Profiler.setSamplingInterval', { interval: intervalUs }); await post('Profiler.start')
-  setInterval(() => { restart().catch(() => {}) }, 30_000).unref() // keep each profile short
+  // Keeps each profile bounded. Stopping and starting is itself synchronous work (V8 re-logs every
+  // compiled function on start): at one restart per 30s it was 18% of the time inside profiled
+  // freezes, so it now runs every 5 minutes.
+  setInterval(() => { if (Date.now() - lastRestart > 4 * 60_000) restart().catch(() => {}) }, 60_000).unref()
 }
-const restart = async () => { if (!session) return null; const { profile } = await post<{ profile: Profile }>('Profiler.stop'); await post('Profiler.start'); return profile }
+let lastRestart = Date.now()
+const restart = async () => { if (!session) return null; lastRestart = Date.now(); const { profile } = await post<{ profile: Profile }>('Profiler.stop'); await post('Profiler.start'); return profile }
 
 // Called right after a stall ends: its samples are the newest in the running profile.
 export async function explainStall(ms: number): Promise<string | null> {
   if (!session || ms < STALL_MS) return null
+  // Back-to-back stalls: the profile was cut seconds ago and holds little of this one; cutting it
+  // again would only add to the pile-up.
+  if (Date.now() - lastRestart < Math.min(ms, 5000)) return null
   const profile = await restart()
   if (!profile) return null
   const summary = summarize(profile, ms)

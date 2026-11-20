@@ -197,9 +197,10 @@ export function onTopic(topic: Topic, f: () => void) {
 // (Insights, Spend, Home...) paints at once with the last data, even after a reload, then updates when
 // the fresh answer lands. Big or failed answers are never cached.
 const CACHE_PREFIX = 'perch.swr:'
-const CACHE_MAX_BYTES = 400_000
+const CACHE_MAX_BYTES = 1_500_000 // the sidebar and Home are ~300-800 KB: the views most worth painting at once
 const CACHE_MAX_ENTRIES = 80
 const memCache = new Map<string, any>()
+const etags = new Map<string, string>() // url -> ETag of the body memCache holds for it
 function cacheGet(url: string | null): any {
   if (!url) return undefined
   if (memCache.has(url)) return memCache.get(url)
@@ -214,12 +215,31 @@ function cachePut(url: string, d: any) {
   try {
     const raw = JSON.stringify(d)
     if (raw.length > CACHE_MAX_BYTES) { localStorage.removeItem(CACHE_PREFIX + url); return }
-    localStorage.setItem(CACHE_PREFIX + url, raw)
     const idx: string[] = JSON.parse(localStorage.getItem(CACHE_PREFIX + '#index') ?? '[]').filter((u: string) => u !== url)
+    // Storage full: drop the least recently stored answers until this one fits.
+    for (;;) {
+      try { localStorage.setItem(CACHE_PREFIX + url, raw); break } catch (e) { const old = idx.shift(); if (!old) throw e; localStorage.removeItem(CACHE_PREFIX + old) }
+    }
     idx.push(url)
     while (idx.length > CACHE_MAX_ENTRIES) { const old = idx.shift()!; memCache.delete(old); localStorage.removeItem(CACHE_PREFIX + old) }
     localStorage.setItem(CACHE_PREFIX + '#index', JSON.stringify(idx))
   } catch { /* quota: the memory copy still works */ }
+}
+
+// A chat's saved thread, kept for the chats opened lately: reopening one paints from here at once,
+// and the refetch sends its ETag, so an unchanged thread (often megabytes) isn't downloaded again.
+const threads = new Map<string, { etag: string | null; items: any[] }>()
+export const cachedThread = <T = any>(id: string): T[] | undefined => threads.get(id)?.items
+export async function loadThread<T = any>(id: string): Promise<{ items: T[] }> {
+  const c = threads.get(id)
+  const r = await fetch(`/api/conversations/${id}/messages`, c?.etag ? { headers: { 'If-None-Match': c.etag } } : undefined)
+  if (r.status === 304 && c) { threads.delete(id); threads.set(id, c); return { items: c.items } }
+  const d = await r.json()
+  if (r.ok && Array.isArray(d?.items)) {
+    threads.delete(id); threads.set(id, { etag: r.headers.get('ETag'), items: d.items })
+    for (const old of threads.keys()) { if (threads.size <= 12) break; threads.delete(old) }
+  }
+  return d
 }
 
 export function useLive<T>(url: string | null, topics: Topic[] = [], initial?: T, poll?: number, keep = false) {
@@ -233,8 +253,22 @@ export function useLive<T>(url: string | null, topics: Topic[] = [], initial?: T
     if (!urlRef.current) return
     const u = urlRef.current
     setInFlight(n => n + 1)
-    fetch(u).then(async r => {
+    // The server answers 304 when we already hold this exact body: no download, parse or re-render.
+    const tag = memCache.has(u) ? etags.get(u) : undefined
+    fetch(u, tag ? { headers: { 'If-None-Match': tag } } : undefined).then(async r => {
+      if (r.status === 304) {
+        if (!memCache.has(u)) { etags.delete(u); load(); return } // evicted meanwhile: fetch it whole
+        if (urlRef.current === u) { setData(memCache.get(u)); setDataUrl(u); setError(null) }
+        return
+      }
       const d = await r.json().catch(() => ({ error: `Mothership answered ${r.status}` }))
+      const etag = r.ok ? r.headers.get('ETag') : null
+      etags.delete(u)
+      if (etag && !(d && typeof d === 'object' && 'error' in d)) {
+        memCache.set(u, d); etags.set(u, etag)
+        // Bounded: bodies too big for localStorage (long threads) live only here.
+        for (const old of etags.keys()) { if (etags.size <= CACHE_MAX_ENTRIES) break; etags.delete(old); memCache.delete(old) }
+      }
       if (urlRef.current !== u) return
       if (!r.ok || (d && typeof d === 'object' && 'error' in d && Object.keys(d).length <= 3)) setError((d as any).error ?? `Mothership answered ${r.status}`) // keep the last good data
       else { setData(d); setDataUrl(u); setError(null); cachePut(u, d) }

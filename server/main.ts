@@ -19,6 +19,7 @@ import { cloudBlockers, describe as describeRuntimes, needsFrom } from './runtim
 import { codexDefaultModel, codexModels, codexReady } from './codex.ts'
 import { syncAgents } from './agentsync.ts'
 import { chatUsage, engineFor, setEngine, usageSummary } from './turns.ts'
+import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { check as checkFile, conversationFiles, fileAction, fileRaw } from './files.ts'
 import { dismissDraft, draftInSlack, draftsFor, editDraft, getDraft, refreshContext, sendDraft } from './slack.ts'
@@ -64,7 +65,7 @@ import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, sendTerm, te
 import { completePairing, deviceFor, isLoopback, lanHosts, listDevices, revokeDevice, setRemoteOnlyPort, startPairing, UNPAIRED_PAGE } from './remote.ts'
 import { gitInfo, idleFromLogs, leaseFor, leases, makeCloud, RETURN_BY } from './cloud.ts'
 import { beat, getDraft as getComposeDraft, handoff, macIdleMs, mobileStatus, notify, notifyTick, openProdAlerts, pushKey, putDraft, refreshTailscale, remotePort, setTailscale, stayAwakeTick, subscribe as pushSubscribe, tailscale, tailscaleUrl, unsubscribe as pushUnsubscribe } from './mobile.ts'
-import { backfillStartedBy, focusSuggestions } from './conversations.ts'
+import { backfillStartedBy, focusSuggestions, onListChange } from './conversations.ts'
 import { openFile, openIn, targets, type Target } from './open.ts'
 import { enrich } from './enrich.ts'
 import { addAgent, fixCi, orchestrate, prWorkers, deepAudit, preview as prPreview, pushThrough, snooze } from './pr.ts'
@@ -87,7 +88,7 @@ import { deleteFolder, folder, folders, onFolders, organize, organizerStatus, sa
 import { summarizePrs, addTactic, evaluatePlaybook, feedback as searchFeedback, history as searchHistory, learn as learnSearch, maybeLearn, searchStats, startSearch, steer as steerSearch } from './seek.ts'
 import { dryRun as dryRunSuggestion, later as laterSuggestion, undo as undoSuggestion } from './autopilot.ts'
 import { accept as acceptSuggestion, dismiss as dismissSuggestion, onAutopilot, overview as autopilotOverview, review, scan as autopilotScan, startAutopilot } from './autopilot.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 import { cycle as evolveCycle, forge, ignore as ignoreUseCase, onEvolve, overview as evolveOverview, restore as restoreSkill, retire as retireSkill, rollback as rollbackSkill, startEvolve } from './evolve.ts'
 import { startShepherd } from './shepherd.ts'
 import { localScoutSpend, scanTranscripts, spendSummary, startSpend } from './spend.ts'
@@ -139,6 +140,7 @@ function broadcast(what: string) {
   for (const s of streams) s.write(`data: ${JSON.stringify({ what })}\n\n`)
 }
 onChange.add(broadcast)
+onListChange.add(() => broadcast('conversations')) // a background rebuild of the list changed what it shows
 onChatsChange.add(() => broadcast('chats'))
 onTermsChange.add(() => broadcast('terms'))
 onBrowserChange.add(() => broadcast('browser'))
@@ -228,9 +230,17 @@ async function body(req: IncomingMessage): Promise<Row> {
   for await (const chunk of req) data += chunk
   return data ? JSON.parse(data) : {}
 }
-function json(res: ServerResponse, code: number, value: unknown) {
-  res.writeHead(code, { 'Content-Type': 'application/json' })
-  res.end(JSON.stringify(value))
+// A GET answer carries an ETag of its body; a page that already holds that body (useLive sends
+// If-None-Match) gets an empty 304 and skips the download, the parse and the re-render. Most polls
+// and live-update refetches return exactly what the page already has.
+function json(res: ServerResponse, code: number, value: unknown, req?: IncomingMessage) {
+  const text = JSON.stringify(value)
+  if (req?.method === 'GET' && code === 200) {
+    const tag = String(res.getHeader('ETag') ?? `"${createHash('sha1').update(text).digest('base64url').slice(0, 20)}"`)
+    if (req.headers['if-none-match'] === tag) { res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-store' }); return void res.end() }
+    res.writeHead(code, { 'Content-Type': 'application/json', ETag: tag, 'Cache-Control': 'no-store' })
+  } else res.writeHead(code, { 'Content-Type': 'application/json' })
+  res.end(text)
 }
 const MIME: Record<string, string> = { '.webmanifest': 'application/manifest+json', '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' }
 function serveStatic(path: string, res: ServerResponse) {
@@ -340,15 +350,24 @@ route('POST', '/api/ask', async (_m, req, res) => {
   return undefined
 })
 route('GET', '/api/conversations/:id', m => conversationDetail(decodeURIComponent(m[1])) ?? { error: 'not found' })
-route('GET', '/api/conversations/:id/messages', m => {
+route('GET', '/api/conversations/:id/messages', (m, req, res, q) => {
   markSeen(decodeURIComponent(m[1]))
   const c = get<Row>('select path from conversations where id = ?', decodeURIComponent(m[1]))
-  const items: any[] = c?.path && existsSync(c.path) ? toItems(readFileSync(c.path, 'utf8')) : []
+  const notices = noticesFor(decodeURIComponent(m[1]))
+  // Unchanged transcript and notes: answer before building (and serialising) a thread that can be tens of MB.
+  const st = c?.path ? statSync(c.path, { throwIfNoEntry: false }) : undefined
+  // ?tail=N: only the last N items, for the first paint of a long thread (the whole one follows).
+  const tail = Math.max(0, Number(q.get('tail')) || 0)
+  const tag = `"m${st?.size ?? 0}.${Math.floor(st?.mtimeMs ?? 0)}.${createHash('sha1').update(JSON.stringify(notices)).digest('base64url').slice(0, 10)}${tail ? `.t${tail}` : ''}"`
+  if (req.headers['if-none-match'] === tag) { res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-store' }); res.end(); return undefined }
+  res.setHeader('ETag', tag)
+  const items: any[] = c?.path && st ? itemsOf(c.path) : []
   // perch's saved notes, placed where they happened in the thread.
-  for (const n of noticesFor(decodeURIComponent(m[1]))) {
+  for (const n of notices) {
     const i = items.findIndex(it => (it.ts ?? 0) > n.at)
     items.splice(i < 0 ? items.length : i, 0, { kind: 'notice', text: n.text, ts: n.at })
   }
+  if (tail) return { items: items.slice(-tail), partial: items.length > tail }
   return { items }
 })
 route('POST', '/api/conversations/:id/title', async (m, req) => {
@@ -1017,7 +1036,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (!m) continue
     try {
       const out = await h(m, req, res, url.searchParams)
-      if (out !== undefined) json(res, 200, out)
+      if (out !== undefined) json(res, 200, out, req)
     } catch (e: any) {
       // One plain sentence for the user, and a record that perch can act on.
       const f = recordError(`${req.method} ${url.pathname.replace(/\/[0-9a-f-]{8,}|\/task:[^/]+/g, '/:id')}`, e)

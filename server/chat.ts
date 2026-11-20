@@ -14,7 +14,7 @@ import { runTextJobs } from './job-fallback.ts'
 import { allCapped, available, capFrom, capScope, claudeFixed, isCodex, isLocal, markCapped, route, tierLabel, wantsCodex, type Tier } from './router.ts'
 import { claudeFallbackTier, codexFallbackModel, codexDefaultModel, codexJob, codexReady, codexReadySync, codexThread, codexTurn, forgetCodexThread, codexMessageUuid, recordedCodexPrompt, recordCodexPrompt, recordCodexMessage, recordCodexTurn, transcriptPath, recoverableCodex, type CodexProcess } from './codex.ts'
 import { condensed } from './mcp.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 import { GRACE_MS, strained, toStop } from './reaper.ts'
 import { kindProtected, pendingWork, transcriptTail } from './protection.ts'
 import { detail } from './conversations.ts'
@@ -567,7 +567,7 @@ const CODEX_NOTE = (id: string) => `You are Codex, working inside Mothership for
 function handoff(c: Chat): string {
   const path = transcriptPath(c.id, c.cwd)
   if (!existsSync(path)) return ''
-  const text = condensed(toItems(readFileSync(path, 'utf8')), 40_000)
+  const text = condensed(itemsOf(path), 40_000)
   return text.trim() ? `THE CONVERSATION SO FAR (condensed from the transcript; tool output omitted, so re-read files or re-run checks you depend on):\n\n${text}\n\n---\nTHE USER'S NEW MESSAGE:\n` : ''
 }
 function imageFiles(images?: any[]): string[] {
