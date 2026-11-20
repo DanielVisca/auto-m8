@@ -21,7 +21,9 @@ Agents can write code in parallel. You can't review it, unblock it, merge it and
 - **PRs finish without you pushing them.** A shepherd carries each one through review threads, red CI, merge order, the merge itself and a production check.
 - **You only see what needs you.** Questions, red CI, changes requested and stalls surface; everything else stays quiet.
 
-Mothership sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), `gh`, your own MCP servers and skills). It builds no connectors of its own and Mothership itself sends nothing anywhere: every chat is an ordinary `claude` session, so `claude --resume` works on all of them.
+Mothership brings all your coding-agent chats into one place, and gives each one the context of the others. It reads the Claude Code and Cursor chats you already have and runs new chats on Claude Code or Codex. Every chat can search, read and message every other one, so an agent picks up where the last one left off instead of starting from zero.
+
+It sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), [Codex](https://github.com/openai/codex), `gh`, your own MCP servers and skills) and builds no connectors of its own. Mothership itself sends nothing anywhere: chats run the real `claude` and `codex` CLIs on your own login, so `claude --resume` works on every Claude chat.
 
 ## Why I built it: one bottleneck at a time
 
