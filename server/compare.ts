@@ -7,11 +7,11 @@ import { link, links } from './context.ts'
 import { detail } from './conversations.ts'
 import { all, get, run } from './db.ts'
 import { settings } from './settings.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 
 function ends(path: string | null) {
   if (!path || !existsSync(path)) return { first: '', last: '' }
-  const items = toItems(readFileSync(path, 'utf8'))
+  const items = itemsOf(path)
   const first = items.find(i => i.kind === 'user') as any
   let last = ''
   for (let i = items.length - 1; i >= 0 && !last; i--) {

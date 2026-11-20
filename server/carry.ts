@@ -9,7 +9,7 @@ import { get, refreshMeta, run } from './db.ts'
 import { condensed } from './mcp.ts'
 import { profile, profiles } from './profile.ts'
 import { DATA_DIR } from './settings.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 
 export type Carry = { title: string; text: string; from: string; sourceId: string; mode: 'brief' | 'full' }
 
@@ -19,7 +19,7 @@ export function carryText(id: string, mode: 'brief' | 'full'): Carry {
   if (!c) throw new Error('No such conversation.')
   let text = ''
   if (c.path) {
-    const items = toItems(readFileSync(c.path, 'utf8'))
+    const items = itemsOf(c.path)
     if (mode === 'full') text = condensed(items, 40_000)
     else {
       const first = items.find(i => i.kind === 'user') as any

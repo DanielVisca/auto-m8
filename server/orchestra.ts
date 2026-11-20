@@ -15,7 +15,7 @@ import { parsePr, pool, prLine, prState, type PrState } from './ghpr.ts'
 import { scorePrs, todaysArm } from './learn.ts'
 import { liveSessions } from './presence.ts'
 import { titleFor } from './relay.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 
 run(`create table if not exists watches (
   owner text not null, target text not null, kind text not null, events text, idle_minutes integer,
@@ -203,7 +203,7 @@ function lastAgentLine(id: string) {
   const path = get<{ path: string }>('select path from conversations where id = ?', id)?.path
   if (!path) return ''
   try {
-    const items = toItems(readFileSync(path, 'utf8'))
+    const items = itemsOf(path)
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i]
       if (it.kind === 'assistant') { const t = it.blocks.filter(b => b.type === 'text').map((b: any) => b.text).join(' ').replace(/\s+/g, ' ').trim(); if (t) return `Last said: ${t.length > 220 ? '…' + t.slice(-220) : t}` }

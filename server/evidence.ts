@@ -6,7 +6,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { get } from './db.ts'
 import { HOME, settings } from './settings.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 
 export type Evidence = { at: number | null; source: 'grafana' | 'posthog'; tool: string; title: string; query: string; numbers: { label: string; value: string }[]; link: string | null; linkLabel: string }
 
@@ -83,7 +83,7 @@ export function evidence(conversationId: string): Evidence[] {
   const hit = cache.get(conversationId)
   if (hit?.m === m) return hit.items
   const items: Evidence[] = []
-  for (const it of toItems(readFileSync(c.path, 'utf8')) as any[]) {
+  for (const it of itemsOf(c.path) as any[]) {
     for (const b of it.blocks ?? []) {
       if (b.type !== 'tool' || b.isError || !b.result || /^Error:/.test(String(b.result))) continue
       const name: string = b.name

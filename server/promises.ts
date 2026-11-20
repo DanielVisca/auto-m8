@@ -8,7 +8,7 @@
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { all, db, get, run } from './db.ts'
-import { toItems } from './transcript.ts'
+import { toItems, itemsOf } from './transcript.ts'
 
 db.exec(`create table if not exists promises (
   id text primary key, conversation_id text not null, text text not null, source text not null,
@@ -91,7 +91,7 @@ export function scanForPromises() {
       try { const st = statSync(r.path); stamp = `${st.size}:${st.mtimeMs}` } catch { continue }
       if (seenFile.get(r.id) === stamp) continue
       seenFile.set(r.id, stamp)
-      try { items = toItems(readFileSync(r.path, 'utf8')) } catch { continue }
+      try { items = itemsOf(r.path) } catch { continue }
       const last = items.at(-1)
       if (!last || last.kind !== 'assistant') continue
       text = last.blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n')
