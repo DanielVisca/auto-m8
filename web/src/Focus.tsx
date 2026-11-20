@@ -46,7 +46,7 @@ function FocusPicker({ focus, onDone }: { focus: { active: boolean; areas: Area[
   )
   return (
     <div className="focus-pop">
-      <div className="focus-title"><b>Zen</b><span className="muted small">A calmer perch with only one or two areas in it. Pinned conversations stay. ⌘⇧F to leave.</span></div>
+      <div className="focus-title"><b>Zen</b><span className="muted small">A calmer Mothership with only one or two areas in it. Pinned conversations stay. ⌘⇧F to leave.</span></div>
       {areas.length > 0 && (
         <div className="chips">{areas.map(a => <span key={a.query} className="chip">◎ {a.name} <button onClick={() => toggle(a)}>×</button></span>)}</div>
       )}

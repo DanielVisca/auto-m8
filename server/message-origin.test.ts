@@ -21,17 +21,17 @@ test('queued agent messages retain sender identity after history reload', () => 
 
 test('historical queued helper reports and unmarked automation show their origin', () => {
   assert.equal(agentSender(QUEUED + 'HELPER REPORT (from a helper): finished')?.label, 'helper report')
-  assert.equal(agentSender(QUEUED + 'Continue the work.')?.label, 'perch: queued message')
-  assert.equal(agentSender('⏰ Follow-up from perch. Earlier you told the user: “check CI”')?.label, 'perch: follow-up')
-  assert.equal(agentSender('perch restarted while you were working, carry on.')?.label, 'perch: resume')
-  assert.equal(agentSender('Decision on "CI": perch decided this one without asking the user')?.label, 'perch: decision relay')
+  assert.equal(agentSender(QUEUED + 'Continue the work.')?.label, 'Mothership: queued message')
+  assert.equal(agentSender('⏰ Follow-up from perch. Earlier you told the user: “check CI”')?.label, 'Mothership: follow-up')
+  assert.equal(agentSender('perch restarted while you were working, carry on.')?.label, 'Mothership: resume')
+  assert.equal(agentSender('Decision on "CI": perch decided this one without asking the user')?.label, 'Mothership: decision relay')
 })
 
 test('unmarked automation is attributed at send time, independently of its wording', () => {
   const text = stampPrompt('Looks good, ship it.', 'routine')
-  assert.deepEqual(agentSender(text), { label: 'perch: routine', body: 'Looks good, ship it.' })
+  assert.deepEqual(agentSender(text), { label: 'Mothership: routine', body: 'Looks good, ship it.' })
   assert.equal(stampPrompt(text, 'routine'), text)
-  assert.equal(agentSender(stampPrompt('Continue.'))?.label, 'perch: automation')
+  assert.equal(agentSender(stampPrompt('Continue.'))?.label, 'Mothership: automation')
   assert.equal(stampPrompt(relayed, 'helper'), relayed)
 })
 

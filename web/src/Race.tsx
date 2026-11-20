@@ -25,7 +25,7 @@ export function Models() {
   return (
     <>
       <div className="row-flex"><h2 className="grow">Models: who is good at what</h2>{o.running ? <span className="small" style={{ color: '#58f' }}>{o.running} {o.running === 1 ? 'race' : 'races'} running</span> : null}</div>
-      <div className="muted small">From model races (one task, several models, cross-review, one merged answer) and shadow replays of PRs you shipped. Perch spots suitable coding requests and has the working agent scope and start a race automatically.</div>
+      <div className="muted small">From model races (one task, several models, cross-review, one merged answer) and shadow replays of PRs you shipped. Mothership spots suitable coding requests and has the working agent scope and start a race automatically.</div>
       {o.automatic && <section className="card">
         {o.automatic.enabled && o.automatic.subscriptionGates?.map((g: any, i: number) => <div key={i} className="small" style={{ color: '#c90', marginBottom: 6 }}>Automatic races paused: {g.reason} {g.resumesAt ? `Available again after ${new Date(g.resumesAt).toLocaleString()}.` : 'Resumes when usage reports room.'}</div>)}
         <div className="row-flex"><h3 className="grow">Automatic races</h3>

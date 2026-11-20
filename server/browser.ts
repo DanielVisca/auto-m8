@@ -114,7 +114,7 @@ async function launch() {
   // A hung Agent Chrome can hold the profile lock with no reachable debug port (2026-11-18, pid 35888):
   // nothing ever times out, so quit it here. Only a process launched with our --user-data-dir.
   if (pid && await quitStaleAgentChrome(pid)) pid = lockPid()
-  if (pid) throw new Error(`The Agent Chrome profile is already open (pid ${pid}) without perch's debug port. Quit that Chrome window (it's the one using ${PROFILE_DIR}) and try again.`)
+  if (pid) throw new Error(`The Agent Chrome profile is already open (pid ${pid}) without Mothership's debug port. Quit that Chrome window (it's the one using ${PROFILE_DIR}) and try again.`)
   rmSync(join(PROFILE_DIR, 'DevToolsActivePort'), { force: true })
   const path = settings.browser.chromePath
   if (!existsSync(path)) throw new Error(`Chrome not found at ${path} (settings.browser.chromePath).`)
@@ -873,7 +873,7 @@ const pillScript = (owner: string) => `(() => {
   const host = document.createElement('div'); host.id = '__perch_pill'
   host.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483647;all:initial;position:fixed;right:14px;bottom:14px;z-index:2147483647'
   const root = host.attachShadow({ mode: 'closed' })
-  root.innerHTML = '<button style="font:600 13px -apple-system,system-ui,sans-serif;background:#f5a623;color:#1a1a1a;border:0;border-radius:999px;padding:8px 14px;box-shadow:0 4px 14px rgba(0,0,0,.3);cursor:pointer">← perch</button>'
+  root.innerHTML = '<button style="font:600 13px -apple-system,system-ui,sans-serif;background:#f5a623;color:#1a1a1a;border:0;border-radius:999px;padding:8px 14px;box-shadow:0 4px 14px rgba(0,0,0,.3);cursor:pointer">← Mothership</button>'
   root.querySelector('button').onclick = e => { e.preventDefault(); e.stopPropagation(); window.open('about:blank#perch-back:' + ${JSON.stringify(encodeURIComponent(owner))}, '_blank') }
   ;(document.body || document.documentElement).appendChild(host)
 })()`

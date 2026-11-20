@@ -40,7 +40,7 @@ test('CPU, disk and Perch stalls can each identify the bottleneck', () => {
   const disk = comfortable(); disk.disk!.availableBytes = 4 * GiB
   assert.equal(resourcePressure(disk).reasons[0].label, 'Disk nearly full')
   const perch = comfortable(); perch.perch.eventLoopDelayMs = 3500
-  assert.equal(resourcePressure(perch).reasons[0].label, 'Perch delayed')
+  assert.equal(resourcePressure(perch).reasons[0].label, 'Mothership delayed')
 })
 test('indicator ignores spikes, waits for recovery and starts fresh after sleep', () => {
   const gate = new ResourcePressureGate()

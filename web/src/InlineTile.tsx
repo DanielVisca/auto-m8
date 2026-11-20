@@ -47,7 +47,7 @@ export function InlineTile({ info, body }: { info: string; body: string }) {
       const m = e.data ?? {}
       const reply = (data: any, err?: string) => frame.current?.contentWindow?.postMessage({ perch: 'reply', id: m.id, data, error: err }, '*')
       if (m.perch === 'data') {
-        if (!SOURCES.has(m.payload?.source)) return reply(null, `A chat tile can read posthog, github or perch data, not ${m.payload?.source ?? 'nothing'}.`)
+        if (!SOURCES.has(m.payload?.source)) return reply(null, `A chat tile can read posthog, github or Mothership data, not ${m.payload?.source ?? 'nothing'}.`)
         const r = await post<any>('/api/canvas/data', m.payload).catch((err: any) => ({ error: String(err?.message ?? err) }))
         if (r?.error) { reply(null, r.error); setError(r.error) } else { reply(r.data); setUpdated(r.at); setError(null) }
       }
@@ -90,7 +90,7 @@ export function InlineTile({ info, body }: { info: string; body: string }) {
                   onChange={e => setVar(k, typeof v === 'number' ? (e.target.value === '' ? 0 : Number(e.target.value)) : e.target.value)} />}
           </label>
         ))}
-        {updated && <span className="small muted tile-fresh" title="When perch last served this tile's data">updated {new Date(updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
+        {updated && <span className="small muted tile-fresh" title="When Mothership last served this tile's data">updated {new Date(updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
       </div>}
       <iframe ref={frame} sandbox="allow-scripts" srcDoc={doc} title={meta.title ?? 'tile'} style={{ height: meta.height }} onLoad={() => frame.current?.contentWindow?.postMessage({ perch: 'refresh' }, '*')} />
       {error && <div className="bad small inline-tile-err">{error}</div>}

@@ -84,7 +84,7 @@ export function fork(id: string, uuid: string | null) {
 // even this can be undone. Files created after that point are left alone.
 export async function restoreFiles(id: string, turn: number) {
   const snap = get<any>('select * from snapshots where conversation_id = ? and turn <= ? order by turn desc limit 1', id, turn)
-  if (!snap) throw new Error('There is no restore point for that moment (only chats run in perch have them).')
+  if (!snap) throw new Error('There is no restore point for that moment (only chats run in Mothership have them).')
   const undo = await snapshot(`${id}-before-restore`, snap.cwd)
   await git(snap.cwd, ['restore', `--source=${snap.sha}`, '--worktree', '--', '.'])
   return { restored: snap.sha.slice(0, 8), undo: undo?.slice(0, 8), cwd: snap.cwd }

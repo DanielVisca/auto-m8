@@ -609,14 +609,14 @@ route('POST', '/api/terms', async (_m, req) => {
 route('DELETE', '/api/terms/:id', m => { closeTerm(m[1]); return { ok: true } })
 route('GET', '/api/terms/:id/read', async (m, _req, _res, q) => {
   const t = terms.get(m[1])
-  if (!t) return { error: 'No such terminal (closed, or perch restarted).' }
+  if (!t) return { error: 'No such terminal (closed, or Mothership restarted).' }
   const wait = Number(q.get('wait')) || 0
   if (wait > 0) await waitTerm(t, wait * 1000)
   return readTerm(t, { since: q.get('since') ? Number(q.get('since')) : undefined, maxChars: Number(q.get('max')) || undefined })
 })
 route('POST', '/api/terms/:id/input', async (m, req) => {
   const t = terms.get(m[1]), b = await body(req)
-  if (!t) return { error: 'No such terminal (closed, or perch restarted).' }
+  if (!t) return { error: 'No such terminal (closed, or Mothership restarted).' }
   try { sendTerm(t, String(b.text ?? ''), b.enter !== false) } catch (e: any) { return { error: e.message } }
   return { ok: true }
 })
@@ -692,7 +692,7 @@ route('PUT', '/api/mobile/tailscale', async (_m, req) => {
 route('GET', '/api/push/key', () => ({ key: pushKey() }))
 route('POST', '/api/push/subscribe', async (_m, req) => pushSubscribe(req, (await body(req)).subscription))
 route('POST', '/api/push/unsubscribe', async (_m, req) => { pushUnsubscribe(String((await body(req)).endpoint ?? '')); return { ok: true } })
-route('POST', '/api/push/test', () => notify({ title: 'perch', body: 'Notifications work. You will hear from perch when something needs you and you are away from the Mac.', url: '/#home', tag: 'perch-test' }))
+route('POST', '/api/push/test', () => notify({ title: 'Mothership', body: 'Notifications work. You will hear from Mothership when something needs you and you are away from the Mac.', url: '/#home', tag: 'perch-test' }))
 route('POST', '/api/presence', async (_m, req) => { const b = await body(req); beat(req, b.view, b.title); return { ok: true } })
 route('GET', '/api/handoff', (_m, req) => ({ handoff: handoff(req) }))
 route('GET', '/api/drafts/:id', m => ({ draft: getComposeDraft(decodeURIComponent(m[1])) }))
@@ -964,7 +964,7 @@ let lastRequest = ''
     tick = now
     if (late > 1000) console.log(`[stall] event loop blocked ${Math.round(late)}ms (last request: ${lastRequest || 'none'})`)
     // Over a minute late is the Mac sleeping (timers don't run), not perch: say so, don't profile it.
-    if (late > 60_000) recordAvailability('stall', late, 'mac asleep or perch suspended')
+    if (late > 60_000) recordAvailability('stall', late, 'mac asleep or Mothership suspended')
     else if (late > 2000) {
       const last = lastRequest || 'background work'
       explainStall(late).then(why => { recordAvailability('stall', late, last, why ?? ''); if (why) console.log(`[stall] ${Math.round(late)}ms was: ${why}`) }, () => recordAvailability('stall', late, last))
@@ -1116,8 +1116,8 @@ const server = createServer(handle).on('upgrade', onUpgrade)
 // Losing the port means another perch already serves this profile: leave at once. Living on
 // (uncaughtException swallows it) runs a second set of shepherds, indexers and chat readers
 // against the same db and FIFOs; 17 of those piled up on 2026-11-10.
-server.on('error', e => { console.error('perch: cannot listen, exiting', e); process.exit(1) })
-server.listen(PORT, '127.0.0.1', () => { console.log(`perch on http://127.0.0.1:${PORT}`); ensureProductBoard().catch(e => console.error('product research board', e)); noteBoot(performance.now(), `modules ${Math.round(importsMs)}ms, then startup ${Math.round(performance.now() - importsMs)}ms`) })
+server.on('error', e => { console.error('Mothership: cannot listen, exiting', e); process.exit(1) })
+server.listen(PORT, '127.0.0.1', () => { console.log(`Mothership on http://127.0.0.1:${PORT}`); ensureProductBoard().catch(e => console.error('product research board', e)); noteBoot(performance.now(), `modules ${Math.round(importsMs)}ms, then startup ${Math.round(performance.now() - importsMs)}ms`) })
 
 // Phone access: one extra listener per LAN address (never 0.0.0.0), re-checked as networks
 // change. Every request on these still needs a paired device.
@@ -1129,7 +1129,7 @@ function syncLan() {
     if (lan.has(ip)) continue
     const srv = createServer(handle).on('upgrade', onUpgrade)
     srv.on('error', e => { console.error('[lan]', ip, e.message); lan.delete(ip) })
-    srv.listen(PORT, ip, () => console.log(`perch for paired phones on http://${ip}:${PORT}`))
+    srv.listen(PORT, ip, () => console.log(`Mothership for paired phones on http://${ip}:${PORT}`))
     lan.set(ip, srv)
   }
 }
@@ -1146,7 +1146,7 @@ function syncTailnet() {
     setRemoteOnlyPort(remotePort())
     tailnet = createServer(handle).on('upgrade', onUpgrade)
     tailnet.on('error', e => { console.error('[tailnet]', e.message); tailnet = null })
-    tailnet.listen(remotePort(), '127.0.0.1', () => console.log(`perch for the tailnet on 127.0.0.1:${remotePort()} (${tailscaleUrl() ?? 'serve not set up'})`))
+    tailnet.listen(remotePort(), '127.0.0.1', () => console.log(`Mothership for the tailnet on 127.0.0.1:${remotePort()} (${tailscaleUrl() ?? 'serve not set up'})`))
   }
 }
 setRemoteOnlyPort(remotePort())

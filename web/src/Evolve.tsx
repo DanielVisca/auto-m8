@@ -35,7 +35,7 @@ export function Evolve({ onOpen }: { onOpen: (id: string) => void }) {
         <span className="muted small">{s.running ? `${s.step || 'working'}…` : s.lastRun ? `last looked ${ago(s.lastRun)} ago` : 'looks every 4 hours'}</span>
         <button disabled={s.running} onClick={() => act('run', '/api/evolve/run')}>{s.running ? 'Working…' : 'Look now'}</button>
       </div>
-      <div className="muted small">perch reads every ask you make to agents, groups them into the jobs you keep handing over, and writes a skill (perch-*) for each job you come back to. It watches each skill afterwards: it rewrites the ones agents don't load or get corrected on, and retires the ones nobody needs. Autopilot turns the same use cases into scheduled jobs.</div>
+      <div className="muted small">Mothership reads every ask you make to agents, groups them into the jobs you keep handing over, and writes a skill (perch-*) for each job you come back to. It watches each skill afterwards: it rewrites the ones agents don't load or get corrected on, and retires the ones nobody needs. Autopilot turns the same use cases into scheduled jobs.</div>
       <div className="row-flex small">
         {(['enabled', 'forge', 'tune', 'resume'] as const).map(k => (
           <label key={k}><input type="checkbox" checked={data.settings[k]} onChange={() => toggle(k)} /> {{ enabled: 'Always on', forge: 'Write new skills', tune: 'Tune and retire skills', resume: 'Resume dropped work' }[k]}</label>
@@ -48,7 +48,7 @@ export function Evolve({ onOpen }: { onOpen: (id: string) => void }) {
         <div className="stat"><b>{data.totals.conversations}</b><span>conversations</span></div>
         <div className="stat"><b>{pct(data.totals.corrected, data.totals.asks)}</b><span>corrected</span></div>
         <div className="stat"><b>{data.totals.useCases}</b><span>use cases</span></div>
-        <div className="stat"><b>{data.totals.skills}</b><span>skills perch made</span></div>
+        <div className="stat"><b>{data.totals.skills}</b><span>skills Mothership made</span></div>
         <div className="stat"><b>{data.dropped.length}</b><span>dropped</span></div>
       </div>
 
@@ -75,7 +75,7 @@ export function Evolve({ onOpen }: { onOpen: (id: string) => void }) {
       </section>
 
       <section className="card">
-        <div className="card-head"><h3>Skills perch made</h3><span className="muted small">installed in your Claude skills folder; every agent can load them</span></div>
+        <div className="card-head"><h3>Skills Mothership made</h3><span className="muted small">installed in your Claude skills folder; every agent can load them</span></div>
         {!data.skills.length && <div className="muted small">None yet. A job you ask for 3+ times in 3+ conversations, with no skill behind it, gets one.</div>}
         {data.skills.map(k => (
           <div key={k.id} className="sugg">
@@ -100,7 +100,7 @@ export function Evolve({ onOpen }: { onOpen: (id: string) => void }) {
       </section>
 
       <section className="card">
-        <div className="card-head"><h3>Dropped work</h3><span className="muted small">{data.settings.resume ? 'perch resumes its own sessions automatically, once each; terminal sessions wait for you' : 'agents that stopped before the job was done, and nobody came back'}</span></div>
+        <div className="card-head"><h3>Dropped work</h3><span className="muted small">{data.settings.resume ? 'Mothership resumes its own sessions automatically, once each; terminal sessions wait for you' : 'agents that stopped before the job was done, and nobody came back'}</span></div>
         {!data.dropped.length && <div className="muted small">Nothing dropped in the last two weeks.</div>}
         {data.dropped.map(d => (
           <div key={d.id} className="sugg">
@@ -124,7 +124,7 @@ export function Evolve({ onOpen }: { onOpen: (id: string) => void }) {
       </section>
 
       <section className="card">
-        <div className="card-head"><h3>Journal</h3><span className="muted small">what perch did on its own</span></div>
+        <div className="card-head"><h3>Journal</h3><span className="muted small">what Mothership did on its own</span></div>
         {data.log.map((l, i) => <div key={i} className="small"><span className="muted">{ago(l.at)} ago</span> <span className={`chip ${l.kind === 'error' ? 'bad' : ''}`}>{l.kind}</span> {l.text}</div>)}
       </section>
     </div>

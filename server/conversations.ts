@@ -100,7 +100,7 @@ export function needsReason(r: Row): string | null {
   // is the agent's to resume (main.ts resumes it). Both go through the judge below, which flags only what a human must do.
   // The judgement call: a model read where it ended and thinks you should look (clears when you open it).
   // It expires after a day: a guess nobody acted on for 24h was not really waiting on you.
-  if (r.ai_reason && (!r.seen_at || r.seen_at < r.ai_at) && age < DAY) return `perch flagged: ${r.ai_reason}`
+  if (r.ai_reason && (!r.seen_at || r.seen_at < r.ai_at) && age < DAY) return `Mothership flagged: ${r.ai_reason}`
   return null
 }
 

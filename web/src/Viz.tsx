@@ -360,11 +360,11 @@ function VegaLite({ spec }: { spec: any }) {
         const v = (n: string) => css.getPropertyValue(n).trim()
         const fg = v('--fg'), muted = v('--muted'), line = v('--line')
         const loader = vega.loader()
-        loader.sanitize = async () => { throw new Error('perch charts only use inline data (data.values)') }
+        loader.sanitize = async () => { throw new Error('Mothership charts only use inline data (data.values)') }
         // Vega reports a refused load asynchronously and draws nothing, so catch external data up front.
         const external = (o: any): boolean => !!o && typeof o === 'object' && (Object.entries(o).some(([k, v]) => (k === 'url' && typeof v === 'string') || external(v)))
         if (external(spec.data) || external(spec.datasets) || ['layer', 'concat', 'hconcat', 'vconcat'].some(k => Array.isArray(spec[k]) && spec[k].some((x: any) => external(x?.data))))
-          throw new Error('it loads data from a URL; perch charts only use inline data (data.values)')
+          throw new Error('it loads data from a URL; Mothership charts only use inline data (data.values)')
         const s = { ...spec }
         if (!['facet', 'concat', 'hconcat', 'vconcat', 'repeat'].some(k => k in s) && s.width === undefined) s.width = 'container'
         const r = await embed(ref.current, s, {

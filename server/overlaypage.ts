@@ -588,7 +588,7 @@ function perchOverlay() {
       if (a && d && !d.error && d.clicks != null && (d.cohort ?? cohort()) === cohort()) { a.clicks = d.clicks; a.rage = d.rage; a.dead = d.dead; a.people = d.people ?? a.people; a.orgs = d.orgs ?? a.orgs }
       if (id === selected) drawCard(d); else draw()
     },
-    investigated(id, ok, text) { if (id !== selected) return; const go = root.querySelector('.go'); if (go) { go.textContent = ok ? 'Investigation started in perch ✓' : 'Could not start: ' + text } },
+    investigated(id, ok, text) { if (id !== selected) return; const go = root.querySelector('.go'); if (go) { go.textContent = ok ? 'Investigation started in Mothership ✓' : 'Could not start: ' + text } },
     setMode,
     remove() { clearInterval(tick); removeEventListener('scroll', redraw, true); removeEventListener('resize', redraw); removeEventListener('mousemove', onMove, true); removeEventListener('click', onClick, true); removeEventListener('keydown', onKey, true); host?.remove(); delete globalThis.__perchOverlay },
   }

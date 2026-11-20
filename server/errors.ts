@@ -18,25 +18,25 @@ export function friendly(e: unknown, what = 'That'): Friendly {
   const raw = String((e as any)?.message ?? e)
   const m = (re: RegExp) => re.test(raw)
   if (m(/No PostHog personal API key/)) return { message: `${what} needs your PostHog key.`, action: 'Add it in Settings → Connections.', status: 'needs-you', transient: false, setup: true }
-  if (m(/does not support personal API key/)) return { message: `PostHog only allows ${what.toLowerCase()} from its web app, not with a personal API key.`, action: 'perch used a different way where it can; otherwise do this one in PostHog.', status: 'needs-you', transient: false }
+  if (m(/does not support personal API key/)) return { message: `PostHog only allows ${what.toLowerCase()} from its web app, not with a personal API key.`, action: 'Mothership used a different way where it can; otherwise do this one in PostHog.', status: 'needs-you', transient: false }
   if (m(/PostHog 401|authentication_failed|invalid.*(api )?key/i)) return { message: 'PostHog rejected your key.', action: 'Create a new personal API key and save it in Settings.', status: 'needs-you', transient: false }
   if (m(/PostHog 403|permission_denied|missing.*scope/i)) return { message: `Your PostHog key can't do this: ${what.toLowerCase()}.`, action: 'Add the missing scope to the key in PostHog → Personal API keys.', status: 'needs-you', transient: false }
-  if (m(/^(Error: )?GitHub budget: /)) return { message: raw.replace(/^(Error: )?GitHub budget: /, ''), action: 'Shared by every tool on your GitHub account; when it runs out perch pauses those calls until the reset. GET /api/github/budget has the per-hour breakdown.', status: 'open', transient: false }
+  if (m(/^(Error: )?GitHub budget: /)) return { message: raw.replace(/^(Error: )?GitHub budget: /, ''), action: 'Shared by every tool on your GitHub account; when it runs out Mothership pauses those calls until the reset. GET /api/github/budget has the per-hour breakdown.', status: 'open', transient: false }
   // GitHub before PostHog: gh's "API rate limit already exceeded" used to be reported as PostHog's.
   if (m(/rate limit is used up|API rate limit (already )?exceeded|graphql_rate_limit|secondary rate limit/i) && !m(/PostHog \d/)) {
     const at = raw.match(/resumes at ([^)]+)\)/)?.[1]
-    return { message: `GitHub's API limit for your account is used up${at ? ` until ${at}` : ' for now'}, so ${what.toLowerCase()} is paused.`, action: 'perch stops calling that GitHub API until it resets, then carries on. Settings → Health shows which parts of perch used it.', status: 'retrying', transient: false }
+    return { message: `GitHub's API limit for your account is used up${at ? ` until ${at}` : ' for now'}, so ${what.toLowerCase()} is paused.`, action: 'Mothership stops calling that GitHub API until it resets, then carries on. Settings → Health shows which parts of Mothership used it.', status: 'retrying', transient: false }
   }
-  if (m(/PostHog 429/i) || m(/PostHog/) && m(/rate.?limit|throttled/i)) return { message: 'PostHog is rate-limiting perch for a moment.', action: 'Retrying automatically after a short wait.', status: 'retrying', transient: true }
+  if (m(/PostHog 429/i) || m(/PostHog/) && m(/rate.?limit|throttled/i)) return { message: 'PostHog is rate-limiting Mothership for a moment.', action: 'Retrying automatically after a short wait.', status: 'retrying', transient: true }
   if (m(/PostHog 5\d\d|terminated|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|socket hang up|NGHTTP2|network/i)) return { message: 'The connection dropped.', action: 'Retrying automatically.', status: 'retrying', transient: true }
-  if (m(/api\.github\.com was unreachable|error connecting to api\.github\.com|TLS handshake timeout|connection reset by peer|i\/o timeout|no such host/i)) return { message: `${what} couldn't reach GitHub (network or VPN).`, action: 'perch pauses GitHub calls and retries with a growing wait, up to 15 minutes.', status: 'retrying', transient: true }
+  if (m(/api\.github\.com was unreachable|error connecting to api\.github\.com|TLS handshake timeout|connection reset by peer|i\/o timeout|no such host/i)) return { message: `${what} couldn't reach GitHub (network or VPN).`, action: 'Mothership pauses GitHub calls and retries with a growing wait, up to 15 minutes.', status: 'retrying', transient: true }
   if (m(/gh auth|not logged in.*github|gh: command not found/i)) return { message: 'GitHub CLI isn\'t logged in, so PR status can\'t update.', action: 'Run gh auth login (Settings has a button).', status: 'needs-you', transient: false, setup: true }
   if (m(/spawn claude ENOENT|claude not found/)) return { message: 'Claude Code isn\'t installed yet.', action: 'Install it, then log in from Settings → Connections.', status: 'needs-you', transient: false, setup: true }
   if (m(/claude.*(not logged in|login)/i)) return { message: 'Claude Code isn\'t logged in.', action: 'Log in from Settings → Connections.', status: 'needs-you', transient: false, setup: true }
   if (m(/spend limit|usage-credits|Claude AI usage limit|hit your [\w -]*limit/i)) return { message: `${what} is waiting for Claude's usage limit to reset.`, action: 'It retries on its next pass; nothing was changed.', status: 'retrying', transient: false }
   if (m(/unreadable reply/i)) return { message: `${what} got an answer from Claude it couldn't read.`, action: 'It tries again on its next pass; nothing was changed.', status: 'retrying', transient: false }
   if (m(/timed out|timeout/i)) return { message: `${what} took too long.`, action: 'Retrying with a longer wait.', status: 'retrying', transient: true }
-  return { message: `${what} failed: ${raw.replace(/^Error:\s*/, '').slice(0, 140)}`, action: 'Logged. perch will flag it if it keeps happening.', status: 'open', transient: false }
+  return { message: `${what} failed: ${raw.replace(/^Error:\s*/, '').slice(0, 140)}`, action: 'Logged. Mothership will flag it if it keeps happening.', status: 'open', transient: false }
 }
 
 // Failures that aren't bugs in perch's code: they fix themselves (network, rate limits, an expired

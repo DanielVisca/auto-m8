@@ -88,7 +88,7 @@ export function FileViewer() {
           {f.kind === 'pdf' && <iframe src={raw(f.path)} title={f.name} />}
           {f.kind === 'text' && (text == null ? <div className="muted small pad">{f.size > 2e6 ? 'Too big to show here: download it or open it in its app.' : 'Loading…'}</div>
             : /\.(md|markdown)$/i.test(f.name) ? <div className="pad"><Markdown text={text} /></div> : <pre className="file-text">{text}</pre>)}
-          {(f.kind === 'archive' || f.kind === 'other') && <div className="pad muted">perch can’t show this kind of file. Download it, copy it to your clipboard, or show it in Finder.</div>}
+          {(f.kind === 'archive' || f.kind === 'other') && <div className="pad muted">Mothership can’t show this kind of file. Download it, copy it to your clipboard, or show it in Finder.</div>}
         </div>
       </div>
     </div>

@@ -38,7 +38,7 @@ export function noteBoot(readyMs: number, split = '') {
   try { reason = readFileSync(REASON_FILE, 'utf8').trim(); rmSync(REASON_FILE) } catch {}
   const last = get<any>(`select kind, cause, detail, at from availability where kind in ('stop', 'boot') order by id desc limit 1`)
   const how = last?.kind === 'stop'
-    ? (reason || last.detail ? `${last.cause}: ${reason || last.detail}` : `${last.cause} from another process (usually an agent restarting perch for new code)`)
+    ? (reason || last.detail ? `${last.cause}: ${reason || last.detail}` : `${last.cause} from another process (usually an agent restarting Mothership for new code)`)
     : last ? `died without stopping (crash, SIGKILL, or frozen)${reason ? `: ${reason}` : ''}` : 'first start'
   recordAvailability('boot', readyMs, how, split)
   console.log(`[boot] listening ${Math.round(readyMs)}ms after start (${split}); last server: ${how}`)

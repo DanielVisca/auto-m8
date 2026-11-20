@@ -401,7 +401,7 @@ function backfillFindings() {
 export function startAutopilot() {
   // Scans, judging, duplicate-finding and self-fix act on their own, so they follow the autonomy switch.
   const on = (f: () => unknown) => () => { if (autonomyOn()) f() }
-  const fix = () => selfFix().catch(e => recordError('Self-fix', e, 'Fixing a recurring perch error'))
+  const fix = () => selfFix().catch(e => recordError('Self-fix', e, 'Fixing a recurring Mothership error'))
   setTimeout(backfillFindings, 30_000).unref()
   setTimeout(on(fix), 5 * 60_000).unref()
   setInterval(on(fix), 2 * 3600_000).unref()

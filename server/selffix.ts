@@ -60,11 +60,11 @@ export async function selfFix() {
   }
   const key = `perchfix:${e.key}`
   const id = send({ by: 'self-fix', cwd: dir, prompt: PROMPT(e, branch, key), resume: false, context: true })
-  setTitle(id, `perch fixes itself: ${e.source}`)
+  setTitle(id, `Mothership fixes itself: ${e.source}`)
   editLabels([id], ['perch', 'self-fix'])
   // The decision exists from the start, so the queue shows a fix is under way; the agent's own
   // ask_decision (merge it?) lands next to it, and answering either goes to this conversation.
-  raise({ key, source: 'autopilot', conversationId: id, title: `perch is fixing its own bug: ${e.message}`.slice(0, 300), context: `Seen ${e.count} times. An agent is on it in ${dir} (branch ${branch}); it will ask before merging.`, options: ['Let it finish', 'Stop it'], recommendation: 'Let it finish', stakes: 'low' })
+  raise({ key, source: 'autopilot', conversationId: id, title: `Mothership is fixing its own bug: ${e.message}`.slice(0, 300), context: `Seen ${e.count} times. An agent is on it in ${dir} (branch ${branch}); it will ask before merging.`, options: ['Let it finish', 'Stop it'], recommendation: 'Let it finish', stakes: 'low' })
 }
 
 // An autopilot finding becomes a decision instead of a card in a tab you don't open.

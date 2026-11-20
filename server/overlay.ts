@@ -31,7 +31,7 @@ const states = new Map<string, State>()
 export async function ph(path: string, init: { method?: string; body?: any } = {}) {
   const url = PH + path
   const { cookie, userAgent } = await B.cookiesFor(url)
-  if (!cookie) throw new Error(`Not signed in to ${PH} in the Agent Chrome. Open it in a perch browser window and sign in once.`)
+  if (!cookie) throw new Error(`Not signed in to ${PH} in the Agent Chrome. Open it in a Mothership browser window and sign in once.`)
   const method = init.method ?? 'GET'
   const r = await fetch(url, { method, signal: AbortSignal.timeout(60_000), body: init.body ? JSON.stringify(init.body) : undefined,
     headers: { 'User-Agent': userAgent, Accept: 'application/json', 'Content-Type': 'application/json', Cookie: cookie, ...B.csrfHeaders(method, url, cookie) } })

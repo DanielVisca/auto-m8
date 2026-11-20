@@ -62,7 +62,7 @@ export function StateMenu({ c }: { c: Conversation }) {
             <button key={s.id} onClick={() => set(s.id)} title={s.hint}><span className={`dot s-${s.id}`} /> {s.label}</button>
           ))}
           <hr />
-          <button onClick={() => set(null)} title="Let perch decide from activity and PRs">Automatic</button>
+          <button onClick={() => set(null)} title="Let Mothership decide from activity and PRs">Automatic</button>
           <button onClick={() => { post(`/api/conversations/${encodeURIComponent(c.id)}/state`, { pinned: !c.pinned }); setOpen(false) }}>{c.pinned ? 'Unpin' : 'Pin'}</button>
         </div>
       </Popover>
@@ -94,7 +94,7 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
         <span className="muted small" title={snoozed ? `snoozed until ${new Date(c.snooze_until!).toLocaleString()}` : ''}>{snoozed ? `⏾ ${ago(2 * Date.now() - c.snooze_until!)}` : ago(c.updated_at)}</span>
       </div>
       {c.snippet && <div className="snippet small" dangerouslySetInnerHTML={{ __html: escapeSnippet(c.snippet) }} />}
-      {c.reason && <div className="reason small">{c.reason}{c.reason.startsWith('perch flagged') && <button className="linklike small" title="Not worth my attention: stop flagging it until it moves again" onClick={e => { e.stopPropagation(); post(`/api/conversations/${encodeURIComponent(c.id)}/not-needed`) }}> · not needed</button>}</div>}
+      {c.reason && <div className="reason small">{c.reason}{c.reason.startsWith('Mothership flagged') && <button className="linklike small" title="Not worth my attention: stop flagging it until it moves again" onClick={e => { e.stopPropagation(); post(`/api/conversations/${encodeURIComponent(c.id)}/not-needed`) }}> · not needed</button>}</div>}
       <div className="row-meta conv-meta">
         {(c as any).promise && <PromiseMark p={(c as any).promise} />}
         {c.source === 'claude' && (c as any).models?.length
@@ -102,7 +102,7 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
           : <Brand id={sourceBrand(c)} size={13} title={c.source === 'posthog-task' && c.origin === 'slack' ? 'Asked in Slack' : SOURCE_LABEL[c.source]} />}
         {(c as any).has_browser && <Brand id="chrome" size={13} title="Has an Agent Chrome window open" />}
         <span className="muted small ellipsis" title={c.source === 'posthog-task' ? '' : `Folder it ran in: ${c.cwd ?? '?'}${c.branch ? `\nBranch: ${c.branch}` : ''}`}>{c.source === 'posthog-task' ? (c.origin ?? 'task') : [(c as any).place, c.branch && !['main', 'master', 'HEAD'].includes(c.branch) ? c.branch : ''].filter(Boolean).join(' · ')}</span>
-        {(c as any).agent_kind && c.source !== 'posthog-task' && <span className="label" title="Started by perch's automation, not you. Write in it and it becomes yours.">{(c as any).agent_kind}</span>}
+        {(c as any).agent_kind && c.source !== 'posthog-task' && <span className="label" title="Started by Mothership's automation, not you. Write in it and it becomes yours.">{(c as any).agent_kind}</span>}
         {SHOW_LABELS && c.labels?.slice(0, 2).map(l => <span key={l} className="label">#{l}</span>)}
         {c.link_count > 0 && <span className="muted small" title={`Linked to ${c.link_count} other conversation${c.link_count > 1 ? 's' : ''} (same PR, follow-ups, or ones an agent used). Open it to see them.`}>⇄{c.link_count}</span>}
         <span className="grow" />
@@ -342,7 +342,7 @@ function Organised({ selectedId, selected, onOpen, onMenu, onSelect, onSearch }:
         return (
           <div className="section">
             <div className="section-head row-flex">
-              <button className="toggle grow" style={{ background: "none", border: 0, cursor: "pointer", padding: 0 }} onClick={() => toggle('agents')} title="Threads perch started for you: helpers, shepherds, routines, autopilot fixes. Write in one and it moves into your list.">
+              <button className="toggle grow" style={{ background: "none", border: 0, cursor: "pointer", padding: 0 }} onClick={() => toggle('agents')} title="Threads Mothership started for you: helpers, shepherds, routines, autopilot fixes. Write in one and it moves into your list.">
                 🤖 Agent runs <span className="count">{agents.length}</span>{running > 0 && <> · <span className="dot s-running" /> {running} running</>} <span className="muted">{open.agents ? '▾' : '▸'}</span>
               </button>
               <button className="link small" onClick={() => onSearch('is:auto')} title="Every agent run, including finished ones">all</button>

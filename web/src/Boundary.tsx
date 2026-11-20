@@ -15,7 +15,7 @@ export class Boundary extends Component<{ where: string; children: ReactNode }, 
     if (!this.state.error) return this.props.children
     return (
       <div className="crash">
-        <b>This part of perch hit a problem.</b>
+        <b>This part of Mothership hit a problem.</b>
         <span className="muted small">{this.state.retried ? 'It was reported. Retry, or switch views.' : 'It was reported and is retrying…'}</span>
         <code className="small">{String(this.state.error.message).slice(0, 160)}</code>
         {this.state.retried && <button onClick={() => this.setState({ error: null })}>Retry</button>}
