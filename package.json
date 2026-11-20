@@ -9,6 +9,8 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "postinstall": "node scripts/postinstall.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "update": "node scripts/update.mjs",
     "build": "vite build",
     "serve": "node server/main.ts",
     "demo": "node scripts/demo-seed.mjs --serve",

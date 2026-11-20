@@ -24,6 +24,25 @@ if (!has('ollama')) console.log('  (optional) Ollama for local models: https://o
 
 say('Installing dependencies')
 execSync('npm install --no-audit --no-fund', { cwd: ROOT, stdio: 'inherit' })
+
+// npm's install-scripts approval gate (or a flaky download) can silently skip Electron's own
+// postinstall: `npm install` still exits 0 with node_modules/electron present but its dist/
+// binary missing, and setup used to report "Done" for an app that could never launch (2026-11-19).
+const electronBin = join(ROOT, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron')
+if (!existsSync(electronBin)) {
+  say('Electron binary missing after install — fetching it directly')
+  try { execSync('node node_modules/electron/install.js', { cwd: ROOT, stdio: 'inherit' }) } catch {}
+}
+if (!existsSync(electronBin)) {
+  console.error(`\nElectron never downloaded (missing ${electronBin.replace(homedir(), '~')}).\nCheck \`npm install-scripts ls\` for a blocked electron script (approve with \`npm install-scripts approve electron\`), then re-run \`npm run setup\`.`)
+  process.exit(1)
+}
+try { execFileSync(electronBin, ['--version'], { stdio: 'ignore', timeout: 15_000 }) }
+catch (e) {
+  console.error(`\nElectron downloaded but won't run: ${e.message}\nIf macOS quarantined it: xattr -dr com.apple.quarantine ${JSON.stringify(join(ROOT, 'node_modules/electron/dist/Electron.app'))}`)
+  process.exit(1)
+}
+
 say('Building the interface')
 execSync('npm run build', { cwd: ROOT, stdio: 'inherit' })
 

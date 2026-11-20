@@ -266,7 +266,10 @@ type Handler = (m: RegExpMatchArray, req: IncomingMessage, res: ServerResponse, 
 const routes: [string, RegExp, Handler][] = []
 const route = (method: string, path: string, h: Handler) => routes.push([method, new RegExp(`^${path.replace(/:(\w+)/g, '([^/]+)')}$`), h])
 
-route('GET', '/api/health', () => ({ ok: true, pid: process.pid }))
+// root identifies which checkout answered: two checkouts can share a data dir/port (a rename in
+// progress, a stray second clone), and a launcher must tell "I'm already up" from "something
+// else is answering here" before it treats this as healthy (scripts/open-or-repair.sh).
+route('GET', '/api/health', () => ({ ok: true, pid: process.pid, root: process.cwd() }))
 route('GET', '/api/resources', () => localResources())
 // Live latency: per-route percentiles, slowest traces with where the time went, requests still
 // running, event-loop delay, background SQLite, recent stalls and the Mac's pressure (latency.ts).
