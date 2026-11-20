@@ -935,6 +935,17 @@ export function beginGoal(s: Session, goal: string) { s.goal = goal; s.goalStart
 
 // Verify the outcome now, then save the steps since beginGoal as the path for this goal (a wrong path
 // is worse than none, so nothing is cached without a check that passes).
+// The outcome text can arrive a moment after the last step (a submit still navigating, a fetch still
+// rendering), so give it a short window before calling the outcome unverified.
+async function showsText(s: Session, text: string, ms = 3000) {
+  const until = Date.now() + ms
+  for (;;) {
+    if (await call(s, 'hasText', text)) return true
+    if (Date.now() >= until) return false
+    await sleep(100)
+  }
+}
+
 export async function finishGoal(s: Session, opts: { ok: boolean; expect?: { url?: string; text?: string } }) {
   if (!s.goal) return 'No goal was started (pass goal on open, or action=begin).'
   const goal = s.goal
@@ -942,7 +953,7 @@ export async function finishGoal(s: Session, opts: { ok: boolean; expect?: { url
   hook({ type: 'finish', session: s, ok: opts.ok })
   if (!opts.ok) return `Noted: "${goal}" did not succeed; nothing cached.`
   const expect = opts.expect ?? { url: new URL(s.url).pathname }
-  if (expect.text && !(await call(s, 'hasText', expect.text))) return `Not cached: the page doesn't show "${expect.text}", so the outcome isn't verified.`
+  if (expect.text && !(await showsText(s, expect.text))) return `Not cached: the page doesn't show "${expect.text}", so the outcome isn't verified.`
   if (expect.url && !s.url.includes(expect.url)) return `Not cached: the page is at ${s.url}, not ${expect.url}.`
   const steps = s.log.filter(l => l.do !== 'wait' || l.text)
   if (!steps.length) return 'Nothing to cache (no steps since the goal started).'
@@ -1006,7 +1017,7 @@ export async function replay(s: Session, p: SitePath, values: Record<string, str
   // the outcome check that made this path worth caching
   const ex = p.expect ? { ...p.expect } : null
   if (ex?.text) for (const [from, to] of Object.entries(values)) ex.text = ex.text.split(from).join(to)
-  if (ex?.text && !(await call(s, 'hasText', ex.text))) { lines.push(`outcome check failed: "${ex.text}" not on the page`); run('update site_paths set fail_count = fail_count + 1 where id = ?', p.id); return { ok: false, lines, at: p.steps.length, ms: Date.now() - t0 } }
+  if (ex?.text && !(await showsText(s, ex.text))) { lines.push(`outcome check failed: "${ex.text}" not on the page`); run('update site_paths set fail_count = fail_count + 1 where id = ?', p.id); return { ok: false, lines, at: p.steps.length, ms: Date.now() - t0 } }
   if (ex?.url && !s.url.includes(ex.url)) { lines.push(`outcome check failed: at ${s.url}, expected ${ex.url}`); run('update site_paths set fail_count = fail_count + 1 where id = ?', p.id); return { ok: false, lines, at: p.steps.length, ms: Date.now() - t0 } }
   const ms = Date.now() - t0
   if (healed) run('update site_paths set steps = ?, version = version + 1, heal_count = heal_count + ?, ok_count = ok_count + 1, last_ok = ?, last_ms = ? where id = ?', JSON.stringify(newSteps.map(st => st.secret ? { ...st, value: undefined } : st)), healed, Date.now(), ms, p.id)

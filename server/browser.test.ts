@@ -127,6 +127,8 @@ test('steps by name: fill, check, select; irreversible submit is held until appr
   B.answerApproval(id, true)
   const done = await B.runSteps(s, [{ do: 'click', role: 'button', name: 'Submit order' }])
   assert.equal(done.error, false, done.lines.join('\n'))
+  // the submit navigates to the JSON echo; on a slow machine that lands after the click returns
+  await B.runSteps(s, [{ do: 'wait', text: '"custname"', ms: 5000 }])
   const t = await B.pageText(s)
   const form = JSON.parse(t.text).form
   assert.deepEqual(form, { custname: 'Perch Test', custtel: '555-0100', pw: '', size: 'medium', topping: 'bacon', when: 'Later' })
