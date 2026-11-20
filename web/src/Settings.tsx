@@ -5,6 +5,7 @@ import { ProfilesCard } from './Profile'
 import { ClaudeBillingCard } from './ClaudeAccounts'
 import { PrSpendCard, SpendCard } from './Spend'
 import { useBrowser } from './BrowserView'
+import { Kits } from './Kits'
 
 // The agent browser (server/browser.ts): a dedicated Chrome profile perch drives, one window per chat.
 const POLICIES = [['trusted', 'trusted: no confirmations'], ['allow', 'allow: confirm irreversible actions'], ['read', 'read only'], ['deny', 'deny']] as const
@@ -104,6 +105,7 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
           <span className="grow">Let agents act on their own <span className="muted small">PR shepherds, autopilot, evolve, closing passes on quiet chats. They run Claude in the background on your subscription.</span></span>
         </label>
       </section>
+      <Kits />
       <section className="card">
         <h3>Organising</h3>
         <label className="field">Archive done conversations after <input type="number" min={0} style={{ width: 60 }} defaultValue={settings.organize.archiveDoneAfterDays} onBlur={e => save({ organize: { archiveDoneAfterDays: Number(e.target.value) } })} /> days <span className="muted small">0 = never</span></label>
