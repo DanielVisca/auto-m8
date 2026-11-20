@@ -12,7 +12,7 @@ export function Automations({ draft, onOpen, settings }: { draft: Partial<Routin
   return (
     <div className="page">
       <div className="row-flex"><h2 className="grow">Automations</h2><button className="primary" onClick={() => setEdit({ name: '', prompt: '', cwd: settings?.chat.cwd, cron: '0 9 * * 1-5', mode: 'fresh', enabled: 1 })}>New routine</button></div>
-      <div className="muted small">A routine sends a prompt to Claude on a schedule or when its webhook is called. It runs on this machine with all your connectors, only while perch is running. For work that must run while the laptop sleeps, use a PostHog scout (Library → Scouts).</div>
+      <div className="muted small">A routine sends a prompt to Claude on a schedule or when its webhook is called. It runs on this machine with all your connectors, only while Mothership is running. For work that must run while the laptop sleeps, use a PostHog scout (Library → Scouts).</div>
       {edit && <Editor r={edit} onClose={() => { setEdit(null); reload() }} />}
       <Suggested onOpen={onOpen} />
       {(data?.routines ?? []).map(r => (

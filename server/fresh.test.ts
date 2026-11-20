@@ -19,8 +19,8 @@ test('a fresh install starts quiet, with the setup checklist on', { timeout: 60_
   srv.stdout.on('data', d => { out += d }); srv.stderr.on('data', d => { out += d })
   try {
     const get = (p: string) => fetch(`http://127.0.0.1:${port}${p}`, { headers: { Host: `127.0.0.1:${port}` } }).then(r => r.json())
-    for (let i = 0; i < 100 && !out.includes('perch on http'); i++) await new Promise(r => setTimeout(r, 200))
-    assert.match(out, /perch on http/, out)
+    for (let i = 0; i < 100 && !out.includes('Mothership on http'); i++) await new Promise(r => setTimeout(r, 200))
+    assert.match(out, /Mothership on http/, out)
     const s: any = await get('/api/settings')
     assert.equal(s.autonomy.enabled, false)
     assert.equal(s.welcome, true)

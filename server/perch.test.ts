@@ -845,7 +845,7 @@ test('a GitHub budget spent by other tools on the account is reported as theirs 
   assert.equal(budgetNotice({ limit: 5000, used: 3000, remaining: 2000, resetAt, at: Date.now() }), null)
   const n = budgetNotice({ limit: 5000, used: 5000, remaining: 0, resetAt, at: Date.now() })!
   assert.match(n, /^GitHub budget: other tools on your GitHub account have used 5,000 of 5,000/)
-  assert.match(n, /perch made 0 GraphQL calls/)
+  assert.match(n, /Mothership made 0 GraphQL calls/)
   assert.ok(notPerchBug(n))
   // perch's own crashes are still fixable
   assert.ok(!notPerchBug('TypeError: Cannot read properties of undefined (reading \'map\')'))
@@ -949,8 +949,8 @@ test('Needs me recheck HTTP route retains supplied evidence and still invalidate
     return { status: r.status, json: await r.json() as any }
   }
   try {
-    for (let i = 0; i < 100 && !out.includes('perch on http') && srv.exitCode === null; i++) await new Promise(r => setTimeout(r, 100))
-    assert.match(out, /perch on http/, out)
+    for (let i = 0; i < 100 && !out.includes('Mothership on http') && srv.exitCode === null; i++) await new Promise(r => setTimeout(r, 100))
+    assert.match(out, /Mothership on http/, out)
     const created = await request('', 'POST', { key: 'http-recheck', source: 'test', title: 'Check rollout readiness' })
     assert.equal(created.status, 200)
     const n = created.json

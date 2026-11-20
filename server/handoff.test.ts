@@ -191,7 +191,7 @@ test('a queued automation message has the same sender live and in the provider t
   f.send({ prompt: 'Continue the review.', by: 'shepherd' })
   assert.ok(f.messages()[0].startsWith(QUEUED))
   assert.deepEqual(agentSender(f.messages()[0]), agentSender(f.echoes()[0]))
-  assert.equal(agentSender(f.messages()[0])?.label, 'perch: shepherd')
+  assert.equal(agentSender(f.messages()[0])?.label, 'Mothership: shepherd')
 })
 
 test('agent provenance survives a Codex cap and is not duplicated by the retry', async () => {

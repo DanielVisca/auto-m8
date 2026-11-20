@@ -1,33 +1,33 @@
-# perch: full feature guide
+# Mothership: full feature guide
 
 The [README](../README.md) has the short version. This is everything else.
 
 A small window that floats above everything else and holds all your agent work: Claude Code chats and terminals, plus PostHog Code sessions and PostHog tasks (scouts, ReviewHog, your `@PostHog` asks in Slack) if you use PostHog. Search all of it, see which conversations need you and which PRs they opened, and start or continue any of them.
 
-It is a thin layer over tools you already have. Chats run your own `claude` CLI, so they have every connector, MCP server, skill and permission setting your terminal has. perch builds no connectors of its own.
+It is a thin layer over tools you already have. Chats run your own `claude` CLI, so they have every connector, MCP server, skill and permission setting your terminal has. Mothership builds no connectors of its own.
 
 ## Install
 
 You need a Mac, [Node 26+](https://nodejs.org) (`brew install node`), [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) and the [GitHub CLI](https://cli.github.com) (`brew install gh`).
 
 ```sh
-git clone https://github.com/DanielVisca/perch-app.git
-cd perch-app
-npm run setup            # or: npm run setup -- --login  (also start perch when you log in)
+git clone https://github.com/DanielVisca/mothership.git
+cd mothership
+npm run setup            # or: npm run setup -- --login  (also start Mothership when you log in)
 ```
 
-That installs and builds perch and puts **perch.app** in `~/Applications`: open it from Spotlight (⌘Space, "perch"). It runs this checkout, so `git pull && npm run build` updates it. Your data lives in `~/Library/Application Support/perch`, never in the repo.
+That installs and builds Mothership and puts **Mothership.app** in `~/Applications`: open it from Spotlight (⌘Space, "Mothership"). It runs this checkout, so `git pull && npm run build` updates it. Your data lives in `~/Library/Application Support/perch`, never in the repo.
 
 ## First run
 
 Home opens with a short setup checklist:
 
-- **Claude Code** and **GitHub**: needed. perch uses your own logins (`claude`, `gh auth login`); each row has a button.
+- **Claude Code** and **GitHub**: needed. Mothership uses your own logins (`claude`, `gh auth login`); each row has a button.
 - **Your name**: agents work for you by name and sign the GitHub comments they post from your account ("🤖 Ana's agent · …"). It comes from `git config user.name`; change it there or in Settings.
-- **Your code**: where new chats start, and where perch looks for repos (`~/Development`, `~/code`, `~/src`, `~/Projects`… whichever exist).
+- **Your code**: where new chats start, and where Mothership looks for repos (`~/Development`, `~/code`, `~/src`, `~/Projects`… whichever exist).
 - **Chrome** (optional): agents get their own Chrome window to browse in.
 - **PostHog** (optional): a personal API key adds PostHog tasks, the shared skill store, scouts, StampHog and PostHog Review. Without one those parts stay hidden. US, EU or your own host; the project is picked from the key.
-- **Let agents act on their own**: off on a new install. On, perch shepherds the PRs your agents open (answers reviews and red CI), suggests and runs automations, writes skills for things you repeat, and gives quiet chats a closing pass. These run Claude in the background on your subscription.
+- **Let agents act on their own**: off on a new install. On, Mothership shepherds the PRs your agents open (answers reviews and red CI), suggests and runs automations, writes skills for things you repeat, and gives quiet chats a closing pass. These run Claude in the background on your subscription.
 
 Everything else (search, chats, terminals, PR status, routines) works as soon as Claude and GitHub are in.
 
@@ -117,7 +117,7 @@ There are two tiers on one page.
   - GitHub PRs and issues you're involved in.
 
   Results are grouped and folded by source. The cheap sources update as you type.
-- **The search agent**, for questions (⌘↵ or ✦ Ask), is read-only. Its tools are files and repos (rg, git reads), perch's own tools, Slack, Granola meetings, Google Drive, GitHub, the web, and upstream source it clones into `~/Library/Caches/perch/src`.
+- **The search agent**, for questions (⌘↵ or ✦ Ask), is read-only. Its tools are files and repos (rg, git reads), Mothership's own tools, Slack, Granola meetings, Google Drive, GitHub, the web, and upstream source it clones into `~/Library/Caches/perch/src`.
   - **Scope first:** it writes a one-line scope (this repo, all local, people and talk, outside) and widens only when it must.
   - **Stale checkouts:** it notices them and reads `origin/main` without touching your working tree.
   - **Modes:** Fast, Balanced or Deep. Auto picks one from the question, and Deep fans out to parallel subagents.
@@ -130,7 +130,7 @@ There are two tiers on one page.
 Hover any message: **⑂** branches from there, **↺** rewinds to there. Nothing else appears in the UI.
 - **A branch** copies the transcript up to that message into a new session (`claude --resume` works on it). It's linked to the original, which isn't changed.
 - **Rewind** is a branch you continue in. The original moves to Later.
-- **Code follows along.** At the start of every turn of a perch chat, the working tree (tracked and untracked files) is saved as a git commit under `refs/perch/<conversation>/<turn>`: no branch, no stash entry, no change to your checkout.
+- **Code follows along.** At the start of every turn of a Mothership chat, the working tree (tracked and untracked files) is saved as a git commit under `refs/perch/<conversation>/<turn>`: no branch, no stash entry, no change to your checkout.
   - Rewinding can put the files back as they were. The current state is saved first, so the restore can be undone too.
   - These commits are never signed, so 1Password never prompts.
 
@@ -145,14 +145,14 @@ Type `/autoresearch <what to optimise and the command that measures it>` in a ch
 
 ## Skills and MCPs, on demand
 
-- **Skills:** chats search the PostHog skill store and load a matching skill when they need it (`search_skills`, `use_skill`). Installing the whole store as a plugin adds about 190k tokens to every session, so perch doesn't.
+- **Skills:** chats search the PostHog skill store and load a matching skill when they need it (`search_skills`, `use_skill`). Installing the whole store as a plugin adds about 190k tokens to every session, so Mothership doesn't.
 - **Wished-for MCPs:** when an agent can't answer confidently for lack of a data source, it logs what was missing (`report_missing_capability`). Settings → *Agents wished they had…* groups those wishes. Each comes with the MCP servers your PostHog MCP registry ranks for it (liveness, real usage, success rate).
 
 ## Apple Notes
 
 Read-only search over Apple Notes (titles, folders and full text), in search, in chats (`search_notes`), and with "open in Notes" at the note.
 - It needs Full Disk Access: Settings → Connections → Apple Notes → Grant access.
-- Add the perch app (`node_modules/electron/dist/Electron.app`) and `node`, then restart perch.
+- Add the Mothership app (`node_modules/electron/dist/Electron.app`) and `node`, then restart Mothership.
 
 ## Folders
 
@@ -163,7 +163,7 @@ The sidebar shows *Recent*, then folders: workstreams the organiser builds from 
 
 ## Errors and health
 
-Every failure becomes one plain sentence: what happened and what perch is doing about it.
+Every failure becomes one plain sentence: what happened and what Mothership is doing about it.
 - Dropped connections, 429s and 5xx retry with backoff.
 - A crash in the UI stays inside its panel, is reported, and retries itself.
 - Settings → Health lists what broke recently, how often, and whether it recovered.
@@ -184,7 +184,7 @@ Every failure becomes one plain sentence: what happened and what perch is doing 
   - Nothing reaches it until you pair. *Pair a phone* shows a QR code with a one-time code; the phone gets its own long-lived HttpOnly cookie, which you can revoke from the device list.
   - A phone can't pair other devices or turn phone access on or off.
   - Plain HTTP: use it on networks you trust, or over Tailscale (encrypted, and works anywhere).
-  - Long-press replaces right-click. Share → Add to Home Screen installs perch as an app.
+  - Long-press replaces right-click. Share → Add to Home Screen installs Mothership as an app.
 - **Needs me** means the agent asked you something, or the work stalled: it died mid-tool or on a permission prompt, never answered your last message, or ended on an API error. A PostHog task counts if it failed or has made no progress for 45 minutes. Each item says why.
 - **Open in ↗** (chat header, details, right-click) jumps to the right place: the Slack thread a task came from, the task in PostHog, PostHog Code, `claude --resume` in Terminal, or the folder in Cursor or Finder.
 - **No parallel work.** Every autopilot proposal is checked against your existing threads, Slack asks, scouts and routines first. It is then kept as new, turned into "extend what you have", or dropped. Duplicates (two runs on one PR, the same ask started twice, near-identical routines) become one-click **Consolidate**.
@@ -205,7 +205,7 @@ Every failure becomes one plain sentence: what happened and what perch is doing 
 
   Search is full-text over titles and messages. Sort by activity, age, state, PRs or length.
 - **States.** Running and Needs me are worked out for you; Active, Later, Done and Archived you can also set yourself. A state you set sticks (shown with a •) until you set it back to Automatic.
-  - **Running:** an agent is working right now. That means a chat perch is running, a PostHog task that is in progress, or a transcript written to in the last 90 seconds.
+  - **Running:** an agent is working right now. That means a chat Mothership is running, a PostHog task that is in progress, or a transcript written to in the last 90 seconds.
   - **Needs me:** the agent finished in the last day; or a PR it opened has failing checks or requested changes; or a task failed.
   - **Active:** touched in the last 4 days.
   - **Idle:** nothing for 4+ days.
@@ -249,7 +249,7 @@ server/main.ts      Node 26, no build step. HTTP + SSE + WebSocket on 127.0.0.1:
   chat.ts           one long-lived `claude -p --input-format stream-json` per open chat; /btw
   term.ts           node-pty terminals with scrollback
   context.ts        related-conversation search, context briefs, links
-  mcp.ts            the perch MCP server chats get
+  mcp.ts            the `perch` MCP server chats get
   routines.ts       cron + webhooks
   posthog.ts        skills and scouts over the PostHog API
   status.ts         claude / gh / MCP health for Settings
@@ -258,7 +258,7 @@ web/src             React UI (Vite). Also works in a normal browser tab.
 
 - Data lives in `~/Library/Application Support/perch/`: `perch.db` and `settings.json`. Delete `perch.db` to rebuild everything derived; links, states, notes and routines are lost with it.
 - Transcripts are never copied. A chat started here is an ordinary Claude Code session: `claude --resume <id>` works on it, and it appears in Claude Code's `/resume`.
-- The server binds to 127.0.0.1 and rejects any request whose Host or Origin isn't perch itself, so a web page can't drive it through your browser. Webhooks are the one exception, and they need the routine's secret.
+- The server binds to 127.0.0.1 and rejects any request whose Host or Origin isn't Mothership itself, so a web page can't drive it through your browser. Webhooks are the one exception, and they need the routine's secret.
 
 ## Limits worth knowing
 

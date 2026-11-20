@@ -75,7 +75,7 @@ export function fire(r: Routine, payload?: unknown, manual = false) {
   const prompt = payload === undefined ? r.prompt : `${r.prompt}\n\n<webhook-payload>\n${JSON.stringify(payload, null, 2).slice(0, 20000)}\n</webhook-payload>`
   try {
     const resumeId = r.mode === 'resume' ? r.conversation_id ?? undefined : undefined
-    recordOrigin(`routine:${r.id}`, { kind: 'routine', label: r.name, evidence: 'routine configured in this Perch profile' })
+    recordOrigin(`routine:${r.id}`, { kind: 'routine', label: r.name, evidence: 'routine configured in this Mothership profile' })
     const id = send({ manual, by: 'routine', originParent: `routine:${r.id}`, id: resumeId, cwd: r.cwd || undefined, prompt, context: true })
     trackRun(r.id, id) // autopilot follows every run to its end
     if (r.mode === 'resume' && !r.conversation_id) run('update routines set conversation_id = ? where id = ?', id, r.id)

@@ -114,7 +114,7 @@ export const onGhBudget = new Set<(b: GhBudget) => void>()
 // Settings → Health gets a line once 80% of the hour's GraphQL budget is gone, naming the parts of
 // perch that made the most calls this hour; it clears once the budget is back under half.
 // The budget is shared by every tool on the account (agents running gh, editors, CI tokens), so the
-// line says who spent it: when perch's own GraphQL calls in GitHub's window are under half the points
+// line says who spent it: when Mothership's own GraphQL calls in GitHub's window are under half the points
 // used, it's other tools, which no change to perch fixes (self-fix leaves those alone).
 export function budgetNotice(b: GhBudget): string | null {
   if (!b.limit || b.used / b.limit < 0.8) return null
@@ -123,8 +123,8 @@ export function budgetNotice(b: GhBudget): string | null {
   const windowStart = b.resetAt - HOUR
   const mine = hours.filter(h => h.hour + HOUR > windowStart).reduce((s, h) => s + h.callers.reduce((t, c) => t + (c.byResource.graphql ?? 0), 0), 0)
   const used = `${b.used.toLocaleString()} of ${b.limit.toLocaleString()} GitHub GraphQL points this hour (resets ${new Date(b.resetAt).toLocaleTimeString()})`
-  if (mine * 2 < b.used) return `GitHub budget: other tools on your GitHub account have used ${used}; perch made ${mine.toLocaleString()} GraphQL calls of those, and pauses its own until the reset.${top ? ` perch's calls this hour: ${top}.` : ''}`
-  return `GitHub budget: perch's account has used ${used}.${top ? ` perch's calls this hour: ${top}.` : ''}`
+  if (mine * 2 < b.used) return `GitHub budget: other tools on your GitHub account have used ${used}; Mothership made ${mine.toLocaleString()} GraphQL calls of those, and pauses its own until the reset.${top ? ` Mothership's calls this hour: ${top}.` : ''}`
+  return `GitHub budget: Mothership's account has used ${used}.${top ? ` Mothership's calls this hour: ${top}.` : ''}`
 }
 onGhBudget.add(b => {
   const n = budgetNotice(b)
@@ -149,7 +149,7 @@ export async function ghExec(args: string[], opts: { timeout?: number; maxBuffer
   const until = r === 'none' ? 0 : ghLimited(r)
   if (until) {
     tally(caller, r, 'skipped')
-    throw Object.assign(new Error(`gh ${args.slice(0, 2).join(' ')}: skipped, GitHub's ${r} rate limit is used up (perch resumes at ${new Date(until).toLocaleTimeString()})`), { rateLimited: true, stdout: '', stderr: '' })
+    throw Object.assign(new Error(`gh ${args.slice(0, 2).join(' ')}: skipped, GitHub's ${r} rate limit is used up (Mothership resumes at ${new Date(until).toLocaleTimeString()})`), { rateLimited: true, stdout: '', stderr: '' })
   }
   try {
     const out = await span(`gh ${args.filter(a => !a.startsWith('-')).slice(0, 2).join(' ')}`, () => exec('gh', args, opts as any))

@@ -18,7 +18,7 @@ export function Setup({ settings, onTerminal }: { settings: any; onTerminal: (cm
   const claudeMissing = /not found/i.test(st.claude?.error ?? '')
   return (
     <section className="card setup">
-      <h3>{settings.welcome ? 'Set up perch' : 'perch needs a login'}</h3>
+      <h3>{settings.welcome ? 'Set up Mothership' : 'Mothership needs a login'}</h3>
       <Row ok={claudeOk} label="Claude Code" value={claudeOk ? st.claude.email : claudeMissing ? 'Not installed. Chats run your own claude CLI.' : 'Not logged in'}
         action={claudeMissing
           ? <a href="https://docs.anthropic.com/en/docs/claude-code/setup" target="_blank" rel="noreferrer">Install ↗</a>

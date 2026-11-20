@@ -556,7 +556,7 @@ async function finishTrial(tid: string) {
   const local = isLocalModel(t.model)
   try {
     if (['running', 'paused'].includes(t.status)) {
-      if (!t.pid || !t.out) throw new Error('perch restarted before the replay started')
+      if (!t.pid || !t.out) throw new Error('Mothership restarted before the replay started')
       const mins = isLocalModel(t.model) ? cfg().localTimeoutMin : cfg().timeoutMin
       while (alive(t.pid)) {
         if (!local) readReplayUsage(tid, t.out)
@@ -627,7 +627,7 @@ function resume() {
   for (const r of all<any>(`select id, attempts from shadow_runs where status = 'running'`)) {
     if (get<any>('select 1 from shadow_trials where run_id = ?', r.id)) continue
     if ((r.attempts ?? 0) < 3) prepare(r.id)
-    else run(`update shadow_runs set status = 'error', error = 'perch kept restarting while preparing the run', ended_at = ? where id = ?`, Date.now(), r.id)
+    else run(`update shadow_runs set status = 'error', error = 'Mothership kept restarting while preparing the run', ended_at = ? where id = ?`, Date.now(), r.id)
   }
 }
 

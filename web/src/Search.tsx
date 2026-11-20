@@ -62,7 +62,7 @@ export function Search({ initial, onOpen }: { initial: { q: string; mode?: strin
       </div>
       <div className="row-flex">
         <div className="seg">{MODES.map(([k, l]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}
-          title={{ auto: 'perch picks from the question', fast: 'one or two sources, under a minute', balanced: 'the likely sources, widens once', deep: 'parallel agents, upstream source, cross-checked' }[k]}>{l}</button>)}</div>
+          title={{ auto: 'Mothership picks from the question', fast: 'one or two sources, under a minute', balanced: 'the likely sources, widens once', deep: 'parallel agents, upstream source, cross-checked' }[k]}>{l}</button>)}</div>
         {picked && <span className="muted small">{mode === 'auto' ? `auto → ${picked.mode} (${picked.why})` : picked.mode}</span>}
         {searching && <span className="muted small">searching…</span>}
       </div>

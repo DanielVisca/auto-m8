@@ -15,9 +15,9 @@ Carry on from here without asking again. Make any further choices yourself and s
 // Perch decided it (low stakes, or you didn't answer in time): what the owning conversation hears.
 const sayAuto = (d: Decision, answer: string | null) => {
   const age = Date.now() - d.created_at > 6 * 3600_000 ? ` This was raised ${Math.round((Date.now() - d.created_at) / 3600_000)}h ago: check it still applies before acting.` : ''
-  const why = (d.stakes === 'low' ? 'perch decided this one without asking the user (low stakes)'
-    : !askMe() ? 'the user has asked not to be asked, so perch went with the recommendation'
-    : `the user didn't answer within ${Math.round(((d.auto_at ?? Date.now()) - d.created_at) / 3600_000 * 10) / 10}h, so perch went with the recommendation`) + age
+  const why = (d.stakes === 'low' ? 'Mothership decided this one without asking the user (low stakes)'
+    : !askMe() ? 'the user has asked not to be asked, so Mothership went with the recommendation'
+    : `the user didn't answer within ${Math.round(((d.auto_at ?? Date.now()) - d.created_at) / 3600_000 * 10) / 10}h, so Mothership went with the recommendation`) + age
   return answer
     ? `Decision on "${d.title}": ${answer} (${why}). Carry on with it. If it turns out wrong or risky once you're in it, pick the safer reversible path and say so in one line; only raise ask_decision with stakes=high for something irreversible, outward-facing or costly.`
     : `Decision on "${d.title}": ${why}, with no option to pick, so it's yours. If a stakes=high decision on the same thing is already open for the user, wait for that one instead. Otherwise decide it with your own judgement: take the path that keeps the work moving and is easiest to undo, and say in one line what you chose. Only if it truly needs the user (an approval only they can give, a merge they must time, money or people outside the team) raise ask_decision with stakes=high, options and your recommendation.`
@@ -27,7 +27,7 @@ const sayAuto = (d: Decision, answer: string | null) => {
 function override(d: Decision, a: string) {
   markAnswered(d.id, a)
   const target = d.conversation_id && get<any>(`select 1 from conversations where id = ? and source != 'posthog-task'`, d.conversation_id) ? d.conversation_id : null
-  if (target) send({ id: target, prompt: `The user changed the decision on "${d.title}": ${a} (perch had picked "${d.answer}"). Undo what you did for the old choice if needed, then carry on with this one.`, resume: true })
+  if (target) send({ id: target, prompt: `The user changed the decision on "${d.title}": ${a} (Mothership had picked "${d.answer}"). Undo what you did for the old choice if needed, then carry on with this one.`, resume: true })
   return { ok: true, sentTo: target }
 }
 

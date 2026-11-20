@@ -1,23 +1,23 @@
 <div align="center">
 
-# perch
+# Mothership
 
-**Your agents open PRs. perch gets them reviewed, merged and checked in production, so you stop being the bottleneck.**
+**Every agent knows everything. Your PRs get reviewed, merged and checked in production, so you stop being the bottleneck.**
 
-[![CI](https://github.com/DanielVisca/perch-app/actions/workflows/ci.yml/badge.svg)](https://github.com/DanielVisca/perch-app/actions/workflows/ci.yml)
+[![CI](https://github.com/DanielVisca/mothership/actions/workflows/ci.yml/badge.svg)](https://github.com/DanielVisca/mothership/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![macOS](https://img.shields.io/badge/macOS-Electron-black)
 ![Node 26+](https://img.shields.io/badge/node-26%2B-green)
 
-<img src="docs/screenshots/home.png" alt="perch Home: what needs you, and where to pick up" width="900">
+<img src="docs/screenshots/home.png" alt="Mothership Home: what needs you, and where to pick up" width="900">
 
 </div>
 
-perch sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), `gh`, your own MCP servers and skills). It builds no connectors of its own and perch itself sends nothing anywhere: every chat is an ordinary `claude` session, so `claude --resume` works on all of them.
+Mothership sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), `gh`, your own MCP servers and skills). It builds no connectors of its own and Mothership itself sends nothing anywhere: every chat is an ordinary `claude` session, so `claude --resume` works on all of them.
 
-## The pain, and how perch fixes it
+## The pain, and how Mothership fixes it
 
-|  | **The pain** | **How perch fixes it** |
+|  | **The pain** | **How Mothership fixes it** |
 | --- | --- | --- |
 | 🚧 | **Agents open PRs and then stall.** Review comments pile up, CI goes red, merge order gets forgotten. | A **PR shepherd** answers review threads and red CI, and merges when the PR's plan allows. Merge order is a real status check on the PR (`perch/plan`), not a sentence in the description. After the merge it checks that the change reached production and held up, and opens a revert PR if it didn't. |
 | 🗂 | **You have 40 agent chats across terminals and tabs, and you can't find the one from Tuesday.** | One list of every conversation (Claude Code, Codex, cloud tasks), with full-text search, filters (`repo:api state:waiting`) and an *Ask Claude* box that answers from your history, with links. |
@@ -25,7 +25,7 @@ perch sits on top of the tools you already use ([Claude Code](https://docs.anthr
 | 🔔 | **You don't know which agent is waiting on you.** You check six windows to find out. | **Needs me** shows only real signals: the agent asked a question, a PR it opened has red CI or changes requested, a task failed, a snooze ended. Everything else stays quiet. |
 | 🧊 | **An agent got stuck or died and nobody noticed for an hour.** | Each chat shows whether it's progressing or stalled. A watchdog resumes stalled chats on its own, and `follow_up` timers wake an agent when a PR merges or a deploy lands, so "I'll check back" actually happens. |
 | 📜 | **Long agent turns are walls of text.** | Turns collapse to their intent. Open the full text only when you need it. |
-| ⏪ | **You want to try a different approach without losing this one.** | Hover any message: **⑂ Branch** copies the chat up to there; **↺ Rewind** continues from there. Code follows: perch snapshots your working tree at the start of every turn (a hidden git ref, no stash, no branch), so a rewind can put the files back. |
+| ⏪ | **You want to try a different approach without losing this one.** | Hover any message: **⑂ Branch** copies the chat up to there; **↺ Rewind** continues from there. Code follows: Mothership snapshots your working tree at the start of every turn (a hidden git ref, no stash, no branch), so a rewind can put the files back. |
 | ⏳ | **You hit a rate limit mid-task.** | Work moves to Codex, a cloud task or a local model you've allowed and continues with the same context. Or add an Anthropic API key to bill Claude usage to the API instead. |
 | 🔁 | **You keep asking the same thing every week.** | **Autopilot** notices repeated requests and proposes a routine (cron or webhook). **Evolve** writes skills from your own corrections. Both are opt-in. |
 | 🌐 | **Agents need a browser, but not yours.** | Each agent gets its own Chrome window, signed in the way you set it up. Irreversible steps (submit, delete, pay) are held for your OK. Take over at any time. |
@@ -62,14 +62,14 @@ It resizes to fit where you put it: a one-line **command bar**, a **compact** si
 You need a Mac, [Node 26+](https://nodejs.org) (`brew install node`), [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) (log in once with `claude`) and the [GitHub CLI](https://cli.github.com) (`brew install gh && gh auth login`).
 
 ```sh
-git clone https://github.com/DanielVisca/perch-app.git
-cd perch-app
+git clone https://github.com/DanielVisca/mothership.git
+cd mothership
 npm run setup
 ```
 
-Then open **perch** from Spotlight (⌘Space). Toggle the window anywhere with **⌃⌥Space**.
+Then open **Mothership** from Spotlight (⌘Space). Toggle the window anywhere with **⌃⌥Space**.
 
-`npm run setup` installs dependencies, builds the UI and puts `perch.app` in `~/Applications`; it runs this checkout, so `git pull && npm run build` updates it. Your data lives in `~/Library/Application Support/perch`, never in the repo. No Electron? `npm run serve` and open <http://127.0.0.1:4777> in any browser.
+`npm run setup` installs dependencies, builds the UI and puts `Mothership.app` in `~/Applications`; it runs this checkout, so `git pull && npm run build` updates it. Your data lives in `~/Library/Application Support/perch`, never in the repo. No Electron? `npm run serve` and open <http://127.0.0.1:4777> in any browser.
 
 <img src="docs/screenshots/setup.png" alt="First-run checklist on Home" width="640">
 
@@ -77,10 +77,10 @@ A short checklist on Home tells you what's missing (Claude, GitHub, which folder
 
 ## Safe by default
 
-perch runs agents with **your** credentials, so the risky parts are opt-in:
+Mothership runs agents with **your** credentials, so the risky parts are opt-in:
 
 - **Autonomy is off on a fresh install.** The PR shepherd, autopilot, evolve and the closing pass on quiet chats all run Claude in the background on your subscription and can comment on your PRs from your account. One switch turns them on, and it says what it spends.
-- The server binds to `127.0.0.1` and rejects any request whose Host or Origin isn't perch itself, so a web page can't drive it through your browser.
+- The server binds to `127.0.0.1` and rejects any request whose Host or Origin isn't Mothership itself, so a web page can't drive it through your browser.
 - Phone access is off until you pair a device with a one-time QR code.
 - Secrets live in the macOS keychain. No telemetry.
 
@@ -89,8 +89,8 @@ More in [SECURITY.md](SECURITY.md).
 ## Learn more
 
 - [**Full feature guide**](docs/features.md): search, folders, routines, autoresearch, phone access, health, every setting.
-- [Design notes on making perch shareable](docs/distributable.md)
-- How it fits together: `shell/` is Electron (floating window, hotkey); `server/` is Node 26 running TypeScript directly (HTTP + SSE + WebSocket on `127.0.0.1:4777`, SQLite with FTS5); `web/` is React + Vite. Each open chat is one long-lived `claude -p --input-format stream-json` process; transcripts are never copied.
+- [Design notes on making Mothership shareable](docs/distributable.md)
+- How it fits together: `shell/` is Electron (floating window, hotkey); `server/` is Node 26 running TypeScript directly (HTTP + SSE + WebSocket on `127.0.0.1:4777`, SQLite with FTS5); `web/` is React + Vite. Each open chat is one long-lived `claude -p --input-format stream-json` process; transcripts are never copied. Internal identifiers (the `perch-plan` block, `perch/plan` checks, `PERCH_*` env vars, the data folder) keep the project's original name, perch.
 
 ## Limits worth knowing
 

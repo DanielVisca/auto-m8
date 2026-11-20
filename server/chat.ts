@@ -78,7 +78,7 @@ const MCP_SCRIPT = join(import.meta.dirname, 'mcp.ts')
 const SIGN_HOOK = { PreToolUse: [{ matcher: 'Bash|mcp__.*github.*|mcp__.*GitHub.*', hooks: [{ type: 'command', command: `'${process.execPath}' '${join(import.meta.dirname, 'signhook.ts')}'`, timeout: 10 }] }] }
 const agentLabel = (id: string) => {
   const by = get<{ by: string | null }>('select by from perch_started where id = ?', id)?.by
-  return !by || by === 'you' || by === 'agent' ? 'perch chat' : `perch ${by}`
+  return !by || by === 'you' || by === 'agent' ? 'Mothership chat' : `Mothership ${by}`
 }
 
 export function childEnv(configDir?: string, extra?: NodeJS.ProcessEnv) {
@@ -129,7 +129,7 @@ export const PERCH_MCP = (conversationId?: string) => JSON.stringify({ mcpServer
 
 // With context on, Claude gets the perch MCP and is told when to use it, so earlier work is
 // pulled in behind the scenes. "No context" leaves both out: a clean session.
-const contextPrompt = (id: string) => `You are running inside perch, the user's hub for agent conversations. This conversation's id is ${id}.
+const contextPrompt = (id: string) => `You are running inside Mothership, the user's hub for agent conversations. This conversation's id is ${id}.
 The perch MCP tools search and read the user's earlier conversations (${[...settings.sources.map(x => x.label), ...(posthogKey() ? ['PostHog tasks'] : [])].join(', ')}).
 Never promise to come back later ("I'll let you know when…", "I'll check back…"): when this turn ends nothing wakes you. If the result is minutes away, wait for it in this turn. Otherwise call the perch follow_up tool with conversation_id=${id} and a time or PR condition, and tell the user perch will bring you back.
 When a request continues or depends on earlier work that isn't in this conversation (a PR, a branch, "the stack", "like last time", a project name), search before answering, read what is relevant, and say in one short line which earlier conversations you used. Then call link_conversations with from=${id} for each one you relied on.
@@ -352,7 +352,7 @@ export function reattachChats(resumeLost: (id: string) => void) {
     if (!alive(m.pid)) {
       forget(m.id)
       // Died mid-turn while perch was down (a reboot): carry on where it left off.
-      if (m.state === 'running' && !m.profile) { abandonTurns(m.id, 'died while perch was down'); resumeLost(m.id) }
+      if (m.state === 'running' && !m.profile) { abandonTurns(m.id, 'died while Mothership was down'); resumeLost(m.id) }
       continue
     }
     // Keep the idle clock across restarts: perch restarts every 20-60 min on busy days, and resetting
@@ -469,7 +469,7 @@ export function send(opts: SendOpts): string {
       c.tier = pick.tier; pick = null
       engine = c.engine = settings.local.model
       cover = { codex: false, why: '' }
-      if (previousModel !== engine) emit(c, { type: 'perch_notice', text: `Subscription allowances are unavailable. Continuing on ${engine} on this Mac with the same conversation and tools. It is a smaller model; Perch retries the subscriptions on your next turn.` })
+      if (previousModel !== engine) emit(c, { type: 'perch_notice', text: `Subscription allowances are unavailable. Continuing on ${engine} on this Mac with the same conversation and tools. It is a smaller model; Mothership retries the subscriptions on your next turn.` })
     }
   }
   if (!c.profile && !claudeBusy && (isCodex(engine) || cover.codex)) {
@@ -477,7 +477,7 @@ export function send(opts: SendOpts): string {
     // message routed to Codex. Saved turns also remember the last provider across restarts.
     const model = pick ? codexFallbackModel(pick.tier) : engine.includes(':') ? engine.slice(6) : undefined
     if (pick) c.tier = pick.tier
-    if (!isCodex(engine) && !isCodex(previousModel)) emit(c, { type: 'perch_notice', text: `Continuing on Codex · ${model ?? 'default model'}: ${cover.why}. Same context and tools; Perch balances the subscriptions automatically.` })
+    if (!isCodex(engine) && !isCodex(previousModel)) emit(c, { type: 'perch_notice', text: `Continuing on Codex · ${model ?? 'default model'}: ${cover.why}. Same context and tools; Mothership balances the subscriptions automatically.` })
     sendCodex(c, opts, model)
     return id
   }
@@ -563,7 +563,7 @@ function localFallback(c: Chat, at: string, why: string, again: SendOpts[] = [{ 
 }
 
 // ---------- Codex turns ----------
-const CODEX_NOTE = (id: string) => `You are Codex, working inside perch for the user. This chat may have started on Claude Code; you're continuing it with the same tools. Read ~/.codex/AGENTS.md (the user's standing instructions and memory index) and follow it. The perch MCP server is connected with PERCH_CONVERSATION_ID=${id}; tool names in the instructions below like mcp__perch__follow_up mean the perch server's follow_up tool. Claude-only tools (ToolSearch, Agent, Skill, TodoWrite, Monitor) don't exist here: use the shell, the MCP servers you have, and skills under ~/.codex/skills instead.`
+const CODEX_NOTE = (id: string) => `You are Codex, working inside Mothership for the user. This chat may have started on Claude Code; you're continuing it with the same tools. Read ~/.codex/AGENTS.md (the user's standing instructions and memory index) and follow it. The perch MCP server is connected with PERCH_CONVERSATION_ID=${id}; tool names in the instructions below like mcp__perch__follow_up mean the perch server's follow_up tool. Claude-only tools (ToolSearch, Agent, Skill, TodoWrite, Monitor) don't exist here: use the shell, the MCP servers you have, and skills under ~/.codex/skills instead.`
 function handoff(c: Chat): string {
   const path = transcriptPath(c.id, c.cwd)
   if (!existsSync(path)) return ''
@@ -601,7 +601,7 @@ function sendCodex(c: Chat, opts: SendOpts, model?: string, saved?: RunRecord) {
     conversationId: c.id, cwd: c.cwd, mode: c.mode, model, prompt, images: saved ? [] : imageFiles(opts.images), mcpScript: MCP_SCRIPT, node: process.execPath,
     saved, recovery: { turnId, opts, queue: c.codexQueue ?? [], chat: { cwd: c.cwd, mode: c.mode, context: c.context, turbo: c.turbo, engine: c.engine, tier: c.tier } },
     system: `${CODEX_NOTE(c.id)}\n\n${systemPrompt(c.context, c.id)}`,
-    env: childEnv(undefined, { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: 'perch chat (codex)' }),
+    env: childEnv(undefined, { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: 'Mothership chat (codex)' }),
     message: r => { indexTranscript(recordCodexMessage({ id: c.id, cwd: c.cwd, turnId, ...r })); return codexMessageUuid(turnId, r.itemId) },
     before: r => indexTranscript(recordCodexTurn({ id: c.id, turnId, messageId: opts.messageId, cwd: c.cwd, prompt: opts.prompt, reply: r.text, tools: r.tools })),
   }, ev => { turnEvent(c.id, ev, turnId); emit(c, ev) })
@@ -800,7 +800,7 @@ setInterval(() => {
     if (!silent) continue
     c.restarts = (c.restarts ?? []).filter(t => Date.now() - t < 3600_000)
     if (c.restarts.length >= 3 && !backFromLocal) continue // the network or API is down: restarting won't help, its own retries will
-    if (backFromLocal) { c.engine = ''; emit(c, { type: 'perch_notice', text: 'The local model stopped responding and a subscription is available again: Perch moved this chat back to it with the same context.' }) }
+    if (backFromLocal) { c.engine = ''; emit(c, { type: 'perch_notice', text: 'The local model stopped responding and a subscription is available again: Mothership moved this chat back to it with the same context.' }) }
     c.restarts.push(Date.now())
     console.error(`chat ${c.id}: ${hung ? 'API request hung' : 'stalled'}, restarting it`)
     c.requestingAt = undefined
@@ -816,14 +816,14 @@ setInterval(() => {
     // A hung request means the agent did get its messages: don't resend them, just get it going.
     // A local fallback that went quiet with nothing queued is resumed the same way.
     if (hung || (backFromLocal && !fresh.length && !stale.length)) {
-      emit(c, { type: 'perch_notice', text: 'The agent\'s API request got no reply for 3 minutes, so perch restarted it to carry on.' })
+      emit(c, { type: 'perch_notice', text: 'The agent\'s API request got no reply for 3 minutes, so Mothership restarted it to carry on.' })
       send({ id: c.id, prompt: HUNG_PROMPT, by: 'perch', resume: true })
       continue
     }
     const named = stale.filter(p => !p.prompt.startsWith('(')).map(p => `“${p.prompt.slice(0, 60)}${p.prompt.length > 60 ? '…' : ''}”`)
-    if (stale.length) emit(c, { type: 'perch_notice', text: `The agent stopped taking messages, so perch restarted it. ${stale.length === 1 ? 'Your last message' : `Your last ${stale.length} messages`} (from ${new Date(stale[0].at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) never reached it${named.length ? `: ${named.join(', ')}` : ''}. Send again if you still need ${stale.length === 1 ? 'it' : 'them'}.` })
+    if (stale.length) emit(c, { type: 'perch_notice', text: `The agent stopped taking messages, so Mothership restarted it. ${stale.length === 1 ? 'Your last message' : `Your last ${stale.length} messages`} (from ${new Date(stale[0].at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) never reached it${named.length ? `: ${named.join(', ')}` : ''}. Send again if you still need ${stale.length === 1 ? 'it' : 'them'}.` })
     if (fresh.length) {
-      emit(c, { type: 'perch_notice', text: `The agent stopped taking messages, so perch restarted it and is resending ${fresh.length === 1 ? 'your message' : `your ${fresh.length} messages`}.` })
+      emit(c, { type: 'perch_notice', text: `The agent stopped taking messages, so Mothership restarted it and is resending ${fresh.length === 1 ? 'your message' : `your ${fresh.length} messages`}.` })
       for (const p of fresh) send({ id: c.id, prompt: p.prompt, images: p.images, resent: true })
     }
   }

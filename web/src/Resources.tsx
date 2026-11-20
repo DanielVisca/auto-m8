@@ -47,8 +47,8 @@ export function Resources() {
   }, [])
   const severity = delayed && level === 'normal' ? 'warning' : level
   const strained = severity !== 'normal'
-  const label = delayed ? 'Perch responding slowly' : strained ? data?.reasons[0]?.label ?? 'Pressure easing' : ''
-  const title = delayed ? 'Perch is slow or reconnecting. Click for the last Mac resource sample.' : data ? `${data.reasons.map(r => r.label).join(' · ') || 'Mac resources look comfortable'} · CPU ${pct(data.cpuPercent)} · ${gb(data.memory.usedBytes)} of ${gb(data.memory.totalBytes)} memory` : 'Mac resources · waiting for a sample'
+  const label = delayed ? 'Mothership responding slowly' : strained ? data?.reasons[0]?.label ?? 'Pressure easing' : ''
+  const title = delayed ? 'Mothership is slow or reconnecting. Click for the last Mac resource sample.' : data ? `${data.reasons.map(r => r.label).join(' · ') || 'Mac resources look comfortable'} · CPU ${pct(data.cpuPercent)} · ${gb(data.memory.usedBytes)} of ${gb(data.memory.totalBytes)} memory` : 'Mac resources · waiting for a sample'
   const processes = [...data?.processes ?? []].sort((a, b) => sort === 'cpu' ? b.cpuPercent - a.cpuPercent : b.memoryBytes - a.memoryBytes).slice(0, 5)
   return <>
     <button ref={anchor} className={`resource-indicator no-drag ${severity}`} onClick={() => setOpen(!open)} title={title}
@@ -59,7 +59,7 @@ export function Resources() {
     <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} width={360}>
       <section className="resource-panel" role="dialog" aria-label="Mac resources">
         <div className="resource-heading"><b>Mac resources</b><span className="grow" /><button className="icon" aria-label="Close resource monitor" onClick={() => setOpen(false)}>×</button></div>
-        {delayed && <p className="warn">Perch is slow or reconnecting. {data ? 'Showing the last sample until it responds.' : 'Waiting for a resource sample.'}</p>}
+        {delayed && <p className="warn">Mothership is slow or reconnecting. {data ? 'Showing the last sample until it responds.' : 'Waiting for a resource sample.'}</p>}
         {data ? <>
           <div className={`resource-summary ${strained ? severity : ''}`}>{delayed ? 'Current Mac pressure is unknown.' : data.reasons.length ? data.reasons.map(r => r.detail).join(' ') : level !== 'normal' ? 'Pressure is easing. The indicator will settle shortly.' : 'No sustained resource pressure detected.'}</div>
           <div className="resource-metrics">
@@ -68,10 +68,10 @@ export function Resources() {
             <div><span>Swap</span><b>{gb(data.memory.swapBytes)}</b><small>{data.memory.swapBytesPerSecond === null ? 'measuring activity…' : `${(data.memory.swapBytesPerSecond / MiB).toFixed(1)} MB/s moving`}</small></div>
             <div><span>Disk free</span><b>{gb(data.disk?.availableBytes)}</b><small>{gb(data.memory.compressedBytes)} memory compressed</small></div>
           </div>
-          <div className="resource-perch"><b>Perch server</b><span>{memorySize(data.perch.memoryBytes)} · {data.perch.eventLoopDelayMs} ms delay</span></div>
+          <div className="resource-perch"><b>Mothership server</b><span>{memorySize(data.perch.memoryBytes)} · {data.perch.eventLoopDelayMs} ms delay</span></div>
           <div className="resource-heading"><b>Busiest processes</b><span className="grow" /><button className={sort === 'cpu' ? 'on' : ''} onClick={() => setSort('cpu')}>CPU</button><button className={sort === 'memory' ? 'on' : ''} onClick={() => setSort('memory')}>Memory</button></div>
           <table className="resource-processes"><thead><tr><th>Process</th><th>CPU</th><th>Memory</th></tr></thead><tbody>
-            {processes.map(p => <tr key={p.pid}><td title={`${p.name} · PID ${p.pid}${p.perch ? ' · Perch or its agents' : ''}`}><span>{p.name}</span>{p.perch && <small>perch</small>}</td><td>{pct(p.cpuPercent)}</td><td>{memorySize(p.memoryBytes)}</td></tr>)}
+            {processes.map(p => <tr key={p.pid}><td title={`${p.name} · PID ${p.pid}${p.perch ? ' · Mothership or its agents' : ''}`}><span>{p.name}</span>{p.perch && <small>perch</small>}</td><td>{pct(p.cpuPercent)}</td><td>{memorySize(p.memoryBytes)}</td></tr>)}
           </tbody></table>
           {!processes.length && <p className="muted small">Gathering process usage…</p>}
           <p className="muted small">Processes refresh every 15s. CPU is the OS average; 100% is one core. Memory shows resident RAM; local models can also use wired GPU memory.</p>

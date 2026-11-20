@@ -11,12 +11,12 @@ self.addEventListener('activate', e => e.waitUntil(self.clients.claim()))
 
 self.addEventListener('push', e => {
   let n = {}
-  try { n = e.data ? e.data.json() : {} } catch { n = { title: 'perch', body: e.data ? e.data.text() : '' } }
+  try { n = e.data ? e.data.json() : {} } catch { n = { title: 'Mothership', body: e.data ? e.data.text() : '' } }
   e.waitUntil((async () => {
     // Already looking at perch on this device: don't buzz.
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     if (open.some(c => c.visibilityState === 'visible' && c.focused)) return
-    await self.registration.showNotification(n.title || 'perch', { body: n.body || '', tag: n.tag, renotify: !!n.tag, data: { url: n.url || '/#home' }, icon: '/icon-180.png', badge: '/icon-180.png' })
+    await self.registration.showNotification(n.title || 'Mothership', { body: n.body || '', tag: n.tag, renotify: !!n.tag, data: { url: n.url || '/#home' }, icon: '/icon-180.png', badge: '/icon-180.png' })
   })())
 })
 

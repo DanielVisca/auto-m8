@@ -1,5 +1,6 @@
 {
-  "name": "perch",
+  "name": "mothership",
+  "productName": "Mothership",
   "version": "0.1.0",
   "private": true,
   "description": "An always-on home for your agent conversations, PRs and terminals, on macOS",
@@ -57,11 +58,11 @@
   "author": "Daniel Visca",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DanielVisca/perch-app.git"
+    "url": "git+https://github.com/DanielVisca/mothership.git"
   },
-  "homepage": "https://github.com/DanielVisca/perch-app",
+  "homepage": "https://github.com/DanielVisca/mothership",
   "bugs": {
-    "url": "https://github.com/DanielVisca/perch-app/issues"
+    "url": "https://github.com/DanielVisca/mothership/issues"
   },
   "keywords": [
     "claude-code",

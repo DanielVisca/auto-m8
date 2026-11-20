@@ -1,8 +1,8 @@
 # Product research
 
-Open **Product research** in Perch, or `http://127.0.0.1:4777/#products`.
+Open **Product research** in Mothership, or `http://127.0.0.1:4777/#products`.
 This is the first working slice of a persistent product investigation agent. The
-agent explores through Perch's browser and calls `product_research` to preserve
+agent explores through Mothership's browser and calls `product_research` to preserve
 its inventory and evidence. It does not blindly click every control.
 
 ## Current workflow
@@ -44,7 +44,7 @@ claim of complete coverage.
 
 ## Storage and access
 
-- `research_products`, `research_items`, `research_evidence` in Perch's database.
+- `research_products`, `research_items`, `research_evidence` in Mothership's database.
 - Screenshots in `PERCH_DATA/product-research/`, separate from the disposable
   browser recordings. JSON export references their evidence IDs; it is not a
   self-contained screenshot archive.
@@ -57,7 +57,7 @@ claim of complete coverage.
   patterns scrubbed from text. This is not comprehensive secret detection: do not
   capture API-key or billing pages, and use synthetic account data. Screenshots
   can contain application-rendered data.
-- Browser sessions currently share Perch's Agent Chrome profile. Account-isolated
+- Browser sessions currently share Mothership's Agent Chrome profile. Account-isolated
   profiles and credential provisioning are not implemented in this slice.
 
 ## Account-free validation
@@ -86,4 +86,4 @@ It generates no external telemetry and is not evidence about vendor products.
 - More complete state graphs, role/tier variants, screenshot annotations,
   portable image archives and evidence-backed comparison synthesis.
 
-Origin: a perch conversation.
+Origin: a Mothership conversation.

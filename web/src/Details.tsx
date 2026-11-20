@@ -30,7 +30,7 @@ export function Details({ id, onOpen, onMakeRoutine }: { id: string; onOpen: (id
           {c.source}{c.cwd ? ` · ${c.cwd.replace(/^\/Users\/[^/]+/, '~')}` : ''}{c.branch ? ` · ${c.branch}` : ''}
           <br />started {ago(c.started_at)} ago · active {ago(c.updated_at)} · {c.messages} messages
         </div>
-        <div className="d-row"><StateMenu c={c} /><OpenIn id={c.id} />{c.reason && <span className="reason small">{c.reason}{c.reason.startsWith('perch flagged') && <button className="linklike small" title="Not worth my attention: stop flagging it until it moves again" onClick={e => { e.stopPropagation(); post(`/api/conversations/${encodeURIComponent(c.id)}/not-needed`) }}> · not needed</button>}</span>}</div>
+        <div className="d-row"><StateMenu c={c} /><OpenIn id={c.id} />{c.reason && <span className="reason small">{c.reason}{c.reason.startsWith('Mothership flagged') && <button className="linklike small" title="Not worth my attention: stop flagging it until it moves again" onClick={e => { e.stopPropagation(); post(`/api/conversations/${encodeURIComponent(c.id)}/not-needed`) }}> · not needed</button>}</span>}</div>
       </section>
 
       {SHOW_LABELS && <Labels c={c} />}
@@ -221,7 +221,7 @@ function ChatUsage({ id }: { id: string }) {
           {u.switches.map((w: any, i: number) => <div key={i} className="warn" title="The new model had no cache of this conversation, so the whole context was loaded again">⇄ switch to {modelName(w.model)} reloaded {ktok(w.tokens)} tokens (~{money(w.cost)})</div>)}
         </div>
       )}
-      <div className="muted small">{u.measured ? 'What this would cost on the API. On your plan it isn’t billed, but it counts toward your usage limits.' : 'Run outside perch, so no cost was reported; tokens from its transcript.'}</div>
+      <div className="muted small">{u.measured ? 'What this would cost on the API. On your plan it isn’t billed, but it counts toward your usage limits.' : 'Run outside Mothership, so no cost was reported; tokens from its transcript.'}</div>
     </section>
   )
 }
@@ -241,7 +241,7 @@ function Lifecycle({ id }: { id: string }) {
   return (
     <section>
       <h4>Lifecycle <button className="link small" disabled={busy} onClick={run} title="Read this chat, save anything worth remembering to memory, and close it if it's done">{busy ? 'closing out…' : h && !h.none ? 'close out again' : 'close out now'}</button></h4>
-      {(!h || h.none) && !busy && <div className="muted small">When this goes quiet for 2 days, perch closes it out: saves anything worth remembering to memory, with a link back here, and archives it. Unfinished work goes to Needs me instead.</div>}
+      {(!h || h.none) && !busy && <div className="muted small">When this goes quiet for 2 days, Mothership closes it out: saves anything worth remembering to memory, with a link back here, and archives it. Unfinished work goes to Needs me instead.</div>}
       {h && !h.none && <div className="small">
         <div><b>{h.outcome === 'unfinished' ? 'Went stale unfinished' : h.outcome === 'abandoned' ? 'Closed (abandoned)' : 'Closed (complete)'}</b> <span className="muted">· {ago(h.harvested_at)} ago</span></div>
         {h.summary && <div>{h.summary}</div>}

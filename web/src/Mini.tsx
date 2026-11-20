@@ -82,7 +82,7 @@ export function Tab() {
   const needs = data?.needsMe?.length ?? 0, running = data?.running?.length ?? 0
   const left = screenX - ((screen as any).availLeft ?? 0) < screen.availWidth / 2 // which edge we're on: the arrow points back onto the screen
   return (
-    <button className={`tuck-tab ${left ? 'left' : 'right'}`} onClick={() => shell.tuck?.(false)} title={`Bring perch back · ${running} running · ${needs} need you  ⌘⇧.`}>
+    <button className={`tuck-tab ${left ? 'left' : 'right'}`} onClick={() => shell.tuck?.(false)} title={`Bring Mothership back · ${running} running · ${needs} need you  ⌘⇧.`}>
       <span className="tuck-arrow">{left ? '›' : '‹'}</span>
       {needs > 0 && <span className="tuck-n">{needs}</span>}
       {running > 0 && <i className="spin" />}

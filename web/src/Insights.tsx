@@ -142,7 +142,7 @@ function Speed({ days }: { days: number }) {
               <span className="small muted">{r.normal.n}<br />{r.turbo.n}</span>
             </div>))}
         </div>
-        <div className="muted small">Missed = your next message corrected it, you rated it 👎, or it failed. {data.sources.transcript} turns are timed from Claude Code transcripts, {data.sources.perch} live in perch. Rate answers with 👍/👎 to sharpen this.</div>
+        <div className="muted small">Missed = your next message corrected it, you rated it 👎, or it failed. {data.sources.transcript} turns are timed from Claude Code transcripts, {data.sources.perch} live in Mothership. Rate answers with 👍/👎 to sharpen this.</div>
       </div>
     </section>
   )

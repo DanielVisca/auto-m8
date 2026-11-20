@@ -263,7 +263,7 @@ async function hasStamphog(slug: string) {
 
 // ---------- the runs ----------
 export const PLAN_FORMAT = `<!-- perch-plan
-merge: auto            # auto: perch merges once approved, green, and every "after" PR is verified in production. manual: the author merges.
+merge: auto            # auto: Mothership merges once approved, green, and every "after" PR is verified in production. manual: the author merges.
 after: <PR url>        # zero or more lines. This PR waits until each one is merged AND verified in production.
 deploy: <how this reaches production, and how to tell it is live (Kargo stage, ArgoCD app, image tag)>
 intent: <one sentence: what a user or system should see happen in production if this works (the prod scouts check it on real sessions)>
@@ -378,7 +378,7 @@ async function planCheck(url: string, w: any, pr: Snapshot) {
       const d = get<any>('select merged_at, merge_sha, stage, outcome from shepherd_watch where url = ?', u)
       return `- ${u}: merged ${d?.merged_at ? new Date(d.merged_at).toISOString().replace(/\.\d+Z$/, 'Z') : '?'}${d?.merge_sha ? ` as \`${String(d.merge_sha).slice(0, 12)}\`` : ''}, live in production, ${d?.stage === 'verified' ? 'both production checks passed' : 'first production check passed (the two-hour check is still to come)'}.`
     })
-    const body = `Prerequisites for this PR are live in production:\n${lines.join('\n')}\n\nThe check results are in each PR's comments.\n\n${signature({ PERCH_AGENT: 'perch shepherd', PERCH_CONVERSATION_ID: w.conversation_id ?? undefined })}`
+    const body = `Prerequisites for this PR are live in production:\n${lines.join('\n')}\n\nThe check results are in each PR's comments.\n\n${signature({ PERCH_AGENT: 'Mothership shepherd', PERCH_CONVERSATION_ID: w.conversation_id ?? undefined })}`
     const { stdout } = await ghExec(['api', '-X', 'POST', `repos/${p.slug}/issues/${p.number}/comments`, '-f', `body=${body}`, '--jq', '.id'])
     run('update shepherd_watch set receipt_at = ?, seen_comment = max(seen_comment, ?) where url = ?', Date.now(), Number(stdout.trim()) || 0, url)
   }
@@ -551,7 +551,7 @@ async function production(url: string, w: any, pr: Snapshot, isRunning: (id: str
       if (attempts > 8) {
         run(`update shepherd_watch set stage = 'failed', awaiting = null, enabled = 0, outcome = ?, revive_at = ? where url = ?`, `NEEDS YOU: no verification after ${attempts} tries (${o.detail})`, Date.now() + reviveBackoff(w.revives ?? 0), url)
         const p = parse(url)
-        raise({ reopen: true, key: `unverified:${url}`, source: 'shepherd', url, title: `${p.repo}#${p.number} merged but perch couldn't verify it in production`, context: o.detail || 'the verify runs gave no clear answer', options: ['Verify it again', 'Mark it verified', 'Leave it'], recommendation: 'Verify it again', stakes: 'low' })
+        raise({ reopen: true, key: `unverified:${url}`, source: 'shepherd', url, title: `${p.repo}#${p.number} merged but Mothership couldn't verify it in production`, context: o.detail || 'the verify runs gave no clear answer', options: ['Verify it again', 'Mark it verified', 'Leave it'], recommendation: 'Verify it again', stakes: 'low' })
       }
       // No signal (e.g. zero traffic on a flag-gated page) needs time for usage, not another 15-minute poke.
       else run(`update shepherd_watch set awaiting = null, verify_attempts = ?, verify_due_at = ?, outcome = ?, last_detail = ? where url = ?`, attempts, Date.now() + 15 * MIN, o.detail || 'retrying', o.detail || null, url)
@@ -641,7 +641,7 @@ export function backfillDecisions() {
     if (!URL.canParse(w.url)) continue // not a PR URL (test fixtures once leaked in as r/stopped); it ran in a timer, so it threw uncaught
     const p = parse(w.url)
     if (isHumanGate(w.outcome)) raise({ key: `gate:${w.url}`, source: 'shepherd', url: w.url, title: `${p.repo}#${p.number} is merged but can't reach production on its own`, context: w.outcome, options: ['I cleared it', 'Ask the approver for me (draft it)', 'Leave it'], recommendation: 'Ask the approver for me (draft it)', stakes: 'low' })
-    else raise({ key: `unverified:${w.url}`, source: 'shepherd', url: w.url, title: `${p.repo}#${p.number} merged but perch couldn't verify it in production`, context: w.outcome, options: ['Verify it again', 'Mark it verified', 'Leave it'], recommendation: 'Verify it again', stakes: 'low' })
+    else raise({ key: `unverified:${w.url}`, source: 'shepherd', url: w.url, title: `${p.repo}#${p.number} merged but Mothership couldn't verify it in production`, context: w.outcome, options: ['Verify it again', 'Mark it verified', 'Leave it'], recommendation: 'Verify it again', stakes: 'low' })
   }
 }
 

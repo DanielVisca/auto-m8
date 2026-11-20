@@ -57,7 +57,7 @@ export function inheritChat(id: string, parent: string, evidence = 'launched by 
 export function startChatOrigin(id: string, by?: string, parent?: string) {
   if (originFor(chatSubject(id))) return
   if (parent) inheritChat(id, parent)
-  else if (by === 'you') recordOrigin(chatSubject(id), { kind: 'conversation', evidence: 'user started this Perch conversation' })
+  else if (by === 'you') recordOrigin(chatSubject(id), { kind: 'conversation', evidence: 'user started this Mothership conversation' })
 }
 
 // Public metadata contains no scout names, finding titles, report URLs or private evidence.
