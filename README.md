@@ -9,7 +9,9 @@
 ![macOS](https://img.shields.io/badge/macOS-Electron-black)
 ![Node 26+](https://img.shields.io/badge/node-26%2B-green)
 
-<img src="docs/screenshots/home.png" alt="Mothership Home: what needs you, and where to pick up" width="900">
+<img src="docs/screenshots/pr-flow.png" alt="Where your PRs go: every PR an agent opened in 90 days, by area and outcome, and the ones that need you" width="900">
+
+<sub>Every PR you and your agents opened, where it ended up, and the ones that need you. Click an area or outcome to list those PRs, then summarize them.</sub>
 
 </div>
 
@@ -44,7 +46,7 @@ Mothership sits on top of the tools you already use ([Claude Code](https://docs.
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/prs.png" alt="PR view with checks and review threads"><br><sub><b>PRs as a pipeline.</b> Checks, review threads and what the agent will do next.</sub></td>
-<td width="50%"><img src="docs/screenshots/insights.png" alt="Agent usage insights"><br><sub><b>Insights.</b> Your own usage, from your transcripts.</sub></td>
+<td width="50%"><img src="docs/screenshots/home.png" alt="Mothership Home: what needs you, and where to pick up"><br><sub><b>Home.</b> What needs you, and where to pick up.</sub></td>
 </tr>
 </table>
 

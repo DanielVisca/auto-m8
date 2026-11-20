@@ -2,7 +2,8 @@
 // Builds a throwaway, entirely fictional perch environment for README screenshots and demos.
 // Nothing here touches your real ~/.claude, GitHub or perch data: it writes a fake HOME with
 // synthetic Claude Code transcripts (a fictional engineer, "Ana", on three fictional repos in the
-// fictional GitHub org "acme-co"), a perch data folder with a brief, notes, needs, routines and
+// fictional GitHub org "acme-co", plus a seeded 90-day history of ~300 PRs across ten repos for
+// Insights → PRs), a perch data folder with a brief, notes, needs, routines and
 // labels, and fake `claude`, `gh` and `security` commands that the demo server finds first on PATH.
 //
 // Regenerate and run the demo (then open http://127.0.0.1:4799):
@@ -61,7 +62,10 @@ shim('gh', String.raw`
 const fs = require('fs')
 const a = process.argv.slice(2)
 const fx = JSON.parse(fs.readFileSync(process.env.PERCH_DEMO_FIXTURE || '/dev/null', 'utf8') || '{"prs":[]}')
-const out = v => { process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v)); process.exit(0) }
+// The 90-day history (bulk) only feeds the Insights flow chart and lookups by number; every other
+// view (sidebar, PR list, search) sees the hand-written PRs, so the other screenshots stay the same.
+const current = fx.prs.filter(p => !p.bulk)
+const out = v => { fs.writeSync(1, typeof v === 'string' ? v : JSON.stringify(v)); process.exit(0) } // sync: exit() would cut a piped write at 64 KB
 const key = u => u.replace(/^.*github\.com\//, '')
 const find = (owner, repo, n) => fx.prs.find(p => p.repo === owner + '/' + repo && p.number === Number(n))
 const timeline = p => {
@@ -73,7 +77,7 @@ const timeline = p => {
 }
 const node = p => {
   const checks = p.checks.map(c => ({ name: c[0], conclusion: c[1], status: c[1] ? 'COMPLETED' : 'IN_PROGRESS', completedAt: c[1] ? p.updatedAt : null, isRequired: true }))
-  return { url: p.url, number: p.number, title: p.title, state: p.state, isDraft: !!p.draft, createdAt: p.createdAt, updatedAt: p.updatedAt, mergedAt: p.mergedAt || null, closedAt: p.mergedAt || null,
+  return { url: p.url, number: p.number, title: p.title, state: p.state, isDraft: !!p.draft, createdAt: p.createdAt, updatedAt: p.updatedAt, mergedAt: p.mergedAt || null, closedAt: p.mergedAt || p.closedAt || null,
     reviewDecision: p.review, headRefName: p.head, baseRefName: p.base, headRefOid: 'a1b2c3d' + p.number, mergeable: 'MERGEABLE', mergeStateStatus: p.review === 'APPROVED' ? 'CLEAN' : 'BLOCKED',
     additions: p.additions, deletions: p.deletions, body: '', repository: { nameWithOwner: p.repo }, author: { login: 'ana-dev' },
     commits: { nodes: [{ commit: { oid: 'a1b2c3d' + p.number, committedDate: p.updatedAt, statusCheckRollup: { id: 'R_' + p.number, state: p.rollup, contexts: { totalCount: checks.length, pageInfo: { hasNextPage: false, endCursor: null }, nodes: checks } } } }] },
@@ -90,7 +94,7 @@ if (a[0] === 'auth') { process.stdout.write('github.com\n  ✓ Logged in to gith
 if (a[0] === '--version') out('gh version 2.60.0 (demo)\n')
 if (sub === 'search prs') {
   const mine = a.some(x => x.startsWith('--author')), words = String(a[2] || '').toLowerCase().split(/\s+/).filter(w => w && !w.includes(':'))
-  out(fx.prs.filter(p => mine ? p.state === 'OPEN' : words.every(w => (p.title + ' ' + p.repo).toLowerCase().includes(w)))
+  out(current.filter(p => mine ? p.state === 'OPEN' : words.every(w => (p.title + ' ' + p.repo).toLowerCase().includes(w)))
     .map(p => ({ url: p.url, title: p.title, repository: { nameWithOwner: p.repo }, state: p.state, isDraft: !!p.draft, updatedAt: p.updatedAt, number: p.number })))
 }
 if (a[0] === 'api' && a[1] === 'rate_limit') out({ resources: { core: { limit: 5000, remaining: 4900, reset: 0 }, search: { limit: 30, remaining: 30, reset: 0 }, graphql: { limit: 5000, remaining: 4900, reset: 0 } } })
@@ -99,7 +103,14 @@ if (a[0] === 'api' && a[1] === 'graphql') {
   const o = a.find(x => x.startsWith('o=')), r = a.find(x => x.startsWith('r=')), n = a.find(x => x.startsWith('n='))
   if (o && r && n) { const p = find(o.slice(2), r.slice(2), n.slice(2)); out({ data: { repository: { pullRequest: p ? node(p) : null } } }) }
   if (/viewer\s*\{\s*login/.test(q) && !/search\(/.test(q)) out({ data: { viewer: { login: 'ana-dev' } } })
-  if (/search\(query:/.test(q)) out({ data: { s: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: fx.prs.filter(p => p.state === 'OPEN').map(node) } } })
+  // Insights → PRs (server/prflow.ts): "author:@me is:pr created:>=DATE", "… is:open", and for today "merged:>=" / "closed:>=".
+  if (/search\(query:\$q/.test(q)) {
+    const s = (a.find(x => x.startsWith('q=')) || '').slice(2), since = f => { const m = s.match(new RegExp(f + ':>=(\\S+)')); return m && Date.parse(m[1]) }
+    const keep = p => /is:open/.test(s) ? p.state === 'OPEN' : since('created') ? Date.parse(p.createdAt) >= since('created')
+      : since('merged') ? p.mergedAt && Date.parse(p.mergedAt) >= since('merged') : since('closed') ? (p.mergedAt || p.closedAt) && Date.parse(p.mergedAt || p.closedAt) >= since('closed') : false
+    out({ data: { search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: fx.prs.filter(keep).map(node) } } })
+  }
+  if (/search\(query:/.test(q)) out({ data: { s: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: current.filter(p => p.state === 'OPEN').map(node) } } })
   if (/rateLimit/.test(q)) out({ data: { rateLimit: { remaining: 4900 } } })
   const data = {}
   for (const m of q.matchAll(/(p\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ pullRequest\(number: (\d+)\)/g)) { const p = find(m[2], m[3], m[4]); data[m[1]] = { pullRequest: p ? node(p) : null } }
@@ -137,7 +148,96 @@ const PRS = [
     files: ['docs/quickstart.md', 'docs/sdk/install.md'], checks: [['build', 'SUCCESS'], ['link-check', 'SUCCESS']] },
 ].map(p => ({ ...p, url: prUrl(p.repo, p.number), repo: `${ORG}/${p.repo}`, state: p.state ?? 'OPEN', draft: !!p.draft,
   createdAt: iso(NOW - p.age - 2 * DAY), updatedAt: iso(NOW - p.age), mergedAt: p.state === 'MERGED' ? iso(NOW - p.age) : null }))
-writeFileSync(ENV.PERCH_DEMO_FIXTURE, JSON.stringify({ prs: EMPTY ? [] : PRS }))
+
+// Ninety days of Ana's PRs across ten repos, for Insights → PRs. Seeded, so every run draws the same
+// history (only "now" moves). Outcomes follow server/prflow.ts: merged, closed = abandoned, and for open
+// PRs the idle time (3 and 14 days) plus review decision and CI rollup decide moving / needs you / stalled / stale.
+function history() {
+  let seed = 0x5eed1e5
+  const rnd = () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }
+  const pick = l => l[Math.floor(rnd() * l.length)]
+  const between = (a, b) => a + rnd() * (b - a)
+  const normal = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd())
+  const REPOS = [
+    ['billing-api', 'billing', 48, 140, ['invoice PDFs', 'charge creation', 'refunds', 'subscription renewals', 'tax rates', 'dunning emails']],
+    ['web-dashboard', 'dashboard', 44, 30, ['usage chart', 'settings page', 'team table', 'date picker', 'billing page', 'empty states']],
+    ['ingest', 'ingest', 36, 410, ['batch endpoint', 'event parser', 'dedupe step', 'queue consumer', 'rate limiter']],
+    ['sdk-js', 'sdk', 30, 260, ['fetch client', 'retry queue', 'type definitions', 'browser bundle', 'Node build']],
+    ['search', 'search', 28, 180, ['query parser', 'index builder', 'facets', 'autocomplete', 'ranking']],
+    ['auth', 'auth', 26, 330, ['session tokens', 'SSO login', 'password reset', 'API keys', 'two-factor setup']],
+    ['data-pipeline', 'pipeline', 24, 90, ['nightly export', 'warehouse sync', 'dbt models', 'backfill job', 'schema checks']],
+    ['mobile-app', 'mobile', 22, 520, ['push notifications', 'offline sync', 'onboarding', 'settings screen', 'deep links']],
+    ['infra', 'infra', 22, 640, ['staging cluster', 'CI runners', 'Postgres backups', 'load balancer', 'alert rules']],
+    ['docs-site', 'docs', 20, 1, ['quickstart', 'API reference', 'webhook guide', 'changelog', 'search page']],
+  ]
+  const TEMPLATES = [
+    'fix({s}): handle missing fields in {c}', 'fix({s}): {c} fails on empty input', 'feat({s}): add metrics to {c}', 'refactor({s}): simplify {c}',
+    'perf({s}): speed up {c}', 'test({s}): add tests for {c}', 'chore({s}): clean up {c} config', 'fix({s}): flaky {c} test',
+    'feat({s}): put the new {c} behind a flag', 'fix({s}): clearer error message in {c}', 'chore({s}): remove unused {c} code', 'fix({s}): {c} timeout under load',
+    'feat({s}): log a warning when {c} retries', 'refactor({s}): move {c} into its own module', 'fix({s}): off-by-one in {c} pagination',
+  ]
+  // Outcome mix for 300 PRs: ~72% merged, 6% moving, 7% needs you, 5% stalled, 2% stale, 8% abandoned.
+  const outcomes = [...Array(216).fill('merged'), ...Array(18).fill('moving'), ...Array(21).fill('needs-you'), ...Array(14).fill('stalled'), ...Array(6).fill('stale'), ...Array(25).fill('abandoned')]
+  for (let i = outcomes.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [outcomes[i], outcomes[j]] = [outcomes[j], outcomes[i]] }
+  const repos = REPOS.flatMap(r => Array(r[2]).fill(r))
+  for (let i = repos.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [repos[i], repos[j]] = [repos[j], repos[i]] }
+  const used = new Set(PRS.map(p => p.url)), titles = new Set()
+  let needs = 0
+  const out = outcomes.map((outcome, i) => {
+    const [repo, scope, , , comps] = repos[i]
+    let title
+    do title = pick(TEMPLATES).replace('{s}', scope).replace('{c}', pick(comps)); while (titles.has(title))
+    titles.add(title)
+    let created, updated, state = 'OPEN', mergedAt = null, closedAt = null, review = 'REVIEW_REQUIRED', rollup = 'SUCCESS', draft = false, threads = 0
+    if (outcome === 'merged') {
+      created = NOW - between(0.4, 89.5) * DAY
+      let hours = Math.min(20 * 24, Math.max(0.4, Math.exp(Math.log(10) + 1.1 * normal()))) // median ~10h
+      if (created + hours * HOUR > NOW - 10 * MIN) hours = (NOW - created) / HOUR * between(0.3, 0.9)
+      updated = created + hours * HOUR; state = 'MERGED'; mergedAt = iso(updated); review = 'APPROVED'
+    } else if (outcome === 'abandoned') {
+      created = NOW - between(1, 89.5) * DAY
+      updated = Math.min(NOW - HOUR, created + between(2, 12 * 24) * HOUR); state = 'CLOSED'; closedAt = iso(updated)
+      review = pick(['REVIEW_REQUIRED', 'REVIEW_REQUIRED', 'CHANGES_REQUESTED', null]); rollup = pick(['SUCCESS', 'FAILURE', 'FAILURE'])
+    } else if (outcome === 'moving') {
+      updated = NOW - between(0.05, 2.8) * DAY; created = updated - between(0, 3) * DAY
+      draft = rnd() < 0.3; review = draft ? null : 'REVIEW_REQUIRED'; rollup = pick(['SUCCESS', 'SUCCESS', 'PENDING'])
+    } else if (outcome === 'needs-you') {
+      updated = NOW - between(0.1, 9) * DAY; created = updated - between(0, 4) * DAY
+      const kind = needs++ % 3 // changes requested, red CI, approved and green
+      if (kind === 0) { review = 'CHANGES_REQUESTED'; rollup = pick(['SUCCESS', 'FAILURE']); threads = 1 + Math.floor(rnd() * 4) }
+      else if (kind === 1) rollup = 'FAILURE'
+      else review = 'APPROVED'
+    } else if (outcome === 'stalled') {
+      updated = NOW - between(3.3, 13.5) * DAY; created = updated - between(0, 6) * DAY
+      draft = rnd() < 0.25; review = draft ? null : 'REVIEW_REQUIRED'
+    } else {
+      updated = NOW - between(15, 60) * DAY; created = updated - between(0, 10) * DAY
+      draft = rnd() < 0.4; review = draft ? null : 'REVIEW_REQUIRED'
+    }
+    const additions = Math.round(Math.exp(between(Math.log(6), Math.log(420)))), deletions = Math.round(additions * between(0.05, 0.8))
+    const ok = rollup === 'FAILURE' ? 'FAILURE' : rollup === 'PENDING' ? null : 'SUCCESS'
+    return { repo, title, created, updated, state, mergedAt, closedAt, review, rollup, draft, threads, additions, deletions,
+      checks: [['lint', 'SUCCESS'], ['typecheck', 'SUCCESS'], ['tests', ok]], files: [`src/${scope}/${title.split(': ')[1].split(' ').slice(-1)[0].toLowerCase()}.ts`] }
+  })
+  // Numbers grow with time inside each repo, below the hand-written PRs where those exist.
+  const next = Object.fromEntries(REPOS.map(r => [r[0], r[3]]))
+  const org = out.sort((a, b) => a.created - b.created).map(p => {
+    let n = next[p.repo]; while (used.has(prUrl(p.repo, n))) n++
+    next[p.repo] = n + 1; used.add(prUrl(p.repo, n))
+    const head = 'ana/' + p.title.split(': ')[1].toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
+    return { ...p, bulk: true, number: n, url: prUrl(p.repo, n), repo: `${ORG}/${p.repo}`, head, base: 'main',
+      createdAt: iso(p.created), updatedAt: iso(p.updated), created: undefined, updated: undefined }
+  })
+  // A few in Ana's own dotfiles repo, so the chart offers "All repos" next to the org.
+  const own = ['chore: bump node to 22 in the toolchain file', 'feat: shell alias for the staging tunnel', 'fix: git prune alias on macOS', 'chore: tidy the editor settings'].map((title, i) => {
+    const created = NOW - between(2, 80) * DAY, merged = created + between(0.2, 3) * HOUR
+    return { repo: 'ana-dev/dotfiles', number: 41 + i, url: `https://github.com/ana-dev/dotfiles/pull/${41 + i}`, title, head: `ana/dotfiles-${i}`, base: 'main', bulk: true,
+      state: 'MERGED', review: null, rollup: 'SUCCESS', draft: false, threads: 0, additions: 12, deletions: 4, checks: [], files: ['.zshrc'],
+      createdAt: iso(created), updatedAt: iso(merged), mergedAt: iso(merged), closedAt: null }
+  })
+  return [...org, ...own]
+}
+writeFileSync(ENV.PERCH_DEMO_FIXTURE, JSON.stringify({ prs: EMPTY ? [] : [...PRS, ...history()] }))
 
 const PROJECTS = { 'billing-api': 'billing-api', 'web-dashboard': 'web-dashboard', 'docs-site': 'docs-site' }
 const dir = r => join(HOME, 'Development', r)
