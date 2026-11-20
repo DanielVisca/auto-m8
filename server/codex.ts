@@ -28,15 +28,18 @@ const CANDIDATES = [
   '/Applications/Codex.app/Contents/Resources/codex',
   '/opt/homebrew/bin/codex', '/usr/local/bin/codex', join(HOME, '.local/bin/codex'),
 ]
+// This profile's own default Codex folder: ~/.codex, or another profile's own when applyProfileEnv
+// (profile.ts) set CODEX_HOME, so Personal reads its own cache and config, not Work's.
+const codexHome = () => process.env.CODEX_HOME ?? join(HOME, '.codex')
 // The models this ChatGPT plan offers (Codex's own cache, refreshed by the Codex app), and the one
-// set as default in ~/.codex/config.toml. Picked per chat as `codex:<slug>`.
+// set as default in config.toml. Picked per chat as `codex:<slug>`.
 export function codexModels(): { slug: string; name: string; tier: ModelTier; blurb: string }[] {
   try {
-    const d = JSON.parse(readFileSync(join(HOME, '.codex/models_cache.json'), 'utf8'))
+    const d = JSON.parse(readFileSync(join(codexHome(), 'models_cache.json'), 'utf8'))
     return (d.models ?? []).filter((m: any) => m.visibility === 'list' && m.slug).sort((a: any, b: any) => (a.priority ?? Infinity) - (b.priority ?? Infinity)).map((m: any) => ({ slug: String(m.slug), name: String(m.display_name ?? m.slug), tier: modelTier(String(m.slug)), blurb: String(m.description ?? '') }))
   } catch { return [] }
 }
-export const codexDefaultModel = () => { try { return readFileSync(join(HOME, '.codex/config.toml'), 'utf8').match(/^model\s*=\s*"([^"]+)"/m)?.[1] ?? null } catch { return null } }
+export const codexDefaultModel = () => { try { return readFileSync(join(codexHome(), 'config.toml'), 'utf8').match(/^model\s*=\s*"([^"]+)"/m)?.[1] ?? null } catch { return null } }
 export const codexFallbackModel = (model: string) => codexPeer(model, codexModels(), codexDefaultModel())
 export const claudeFallbackTier = (model?: string) => claudePeer(model || codexDefaultModel() || '')
 export const codexBin = () => CANDIDATES.find(p => p && existsSync(p)) ?? null

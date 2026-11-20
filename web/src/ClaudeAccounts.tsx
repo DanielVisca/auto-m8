@@ -2,6 +2,7 @@
 // key kept in the macOS keychain and passed to claude processes as ANTHROPIC_API_KEY.
 import { useState } from 'react'
 import { api, post, useLive } from './api'
+import { ConnectSub, subDetail, type SubView } from './EnginePicker'
 
 type Win = { key: string; label: string; pct: number; resetsAt: number }
 export type Billing = { billing: 'login' | 'api'; apiKey: boolean; out: boolean; until: number | null; usage: { windows: Win[] } | null; login?: { email: string | null; org: string | null; plan: string | null } | null }
@@ -40,4 +41,35 @@ export function ClaudePressure() {
   const heat = data.out || p >= 0.9 ? 'hot' : 'warm'
   const detail = `${data.usage?.windows?.length ? data.usage.windows.map(w => `${w.label} ${Math.round(w.pct * 100)}%, resets ${time(w.resetsAt)}`).join('; ') : 'no usage seen yet'}${data.out && data.until ? `; at limit until ${time(data.until)}` : ''}`
   return <span className="usage-chips" title={detail}><span className={`usage-chip ${heat}`}>Claude {data.out ? 'full' : `${Math.round(p * 100)}%`}</span></span>
+}
+
+// Settings → Subscriptions: every Claude and OpenAI login (server/subscriptions.ts), who each is
+// signed in as, and the controls: sign in again, rename, remove. Connect more at the bottom.
+export function SubscriptionsCard() {
+  const { data, reload } = useLive<{ subs: SubView[] }>('/api/subscriptions', ['subscriptions'], undefined, 120_000)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const rename = async (id: string) => { if (name.trim()) await post(`/api/subscriptions/${encodeURIComponent(id)}`, { label: name.trim() }); setEditing(null); reload() }
+  return (
+    <section className="card sub-list">
+      <h3>Subscriptions <button className="link small" onClick={() => api.get('/api/subscriptions?refresh=1').then(reload)}>refresh</button></h3>
+      <div className="muted small">Every Claude and OpenAI plan you’re signed in to, personal and team. Pick one per chat in the model menu; a chat keeps its history and tools when you move it between them.</div>
+      {(data?.subs ?? []).map(s => (
+        <div key={s.id} className="sub-row">
+          <span className={`dot ${s.status?.ok ? 'ok' : 'bad'}`} />
+          <span className="grow">
+            {editing === s.id
+              ? <input autoFocus value={name} onChange={e => setName(e.target.value)} onBlur={() => rename(s.id)} onKeyDown={e => { if (e.key === 'Enter') rename(s.id); if (e.key === 'Escape') setEditing(null) }} />
+              : <b title="Rename" style={{ cursor: 'text' }} onClick={() => { setEditing(s.id); setName(s.label) }}>{s.provider === 'claude' ? 'Claude' : 'OpenAI'} · {s.label}</b>}
+            {s.isDefault && <span className="muted small"> · this profile’s default</span>}
+            <div className="muted small">{subDetail(s)}</div>
+            {s.login?.state === 'failed' && s.login.error && <div className="bad small">{s.login.error}</div>}
+          </span>
+          {s.login?.state !== 'waiting' && <button className="small" onClick={async () => { await post(`/api/subscriptions/${encodeURIComponent(s.id)}/login`); reload() }}>{s.status?.ok ? 'Switch account' : 'Sign in'}</button>}
+          {!s.builtin && <button className="link small" onClick={async () => { await api.send('DELETE', `/api/subscriptions/${encodeURIComponent(s.id)}`); reload() }}>remove</button>}
+        </div>
+      ))}
+      <ConnectSub onDone={reload} />
+    </section>
+  )
 }

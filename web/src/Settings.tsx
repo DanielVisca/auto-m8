@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ago, api, post, shell, useLive } from './api'
 import { Brand, brandFor } from './Brand'
 import { ProfilesCard } from './Profile'
-import { ClaudeBillingCard } from './ClaudeAccounts'
+import { ClaudeBillingCard, SubscriptionsCard } from './ClaudeAccounts'
 import { PrSpendCard, SpendCard } from './Spend'
 import { useBrowser } from './BrowserView'
 import { Kits } from './Kits'
@@ -203,10 +203,12 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
       <AgentBrowser settings={settings} save={save} />
       </>}
       {tab === 'accounts' && <>
+      <SubscriptionsCard />
       <ProfilesCard onTerminal={onTerminal} />
       <ClaudeBillingCard />
       </>}
       {tab === 'models' && <>
+      <SubscriptionsCard />
       <ClaudeBillingCard />
       <Routing />
       <LocalModels settings={settings} save={save} />

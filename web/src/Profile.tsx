@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, post, shell, toast, useLive } from './api'
 
-type P = { id: string; label: string; color: string; port: number; enabled: boolean }
+type P = { id: string; label: string; color: string; port: number; enabled: boolean; borrows: string[] }
 export const useProfiles = () => useLive<{ current: string; profiles: P[] }>('/api/profile', ['settings'])
 
 // The pill in the sidebar header, and the profile's colour along the top of the window.
@@ -44,11 +44,13 @@ export function ProfileSwitch({ onSettings }: { onSettings: () => void }) {
 
 // Settings → Profiles: what this profile is logged in to, and one-click logins in its own accounts.
 export function ProfilesCard({ onTerminal }: { onTerminal: (cmd: string, title: string) => void }) {
-  const { data } = useProfiles()
+  const { data, reload } = useProfiles()
   const [st, setSt] = useState<any>(null)
   useEffect(() => { if (data) api.get(`/api/profile/${data.current}/status`).then(setSt).catch(() => {}) }, [data?.current])
   if (!data) return null
   const cur = data.profiles.find(p => p.id === data.current)!
+  const others = data.profiles.filter(p => p.id !== cur.id)
+  const setBorrow = async (other: string, on: boolean) => { await post(`/api/profile/${cur.id}/borrows`, { other, on }); reload() }
   return (
     <section className="card">
       <h3><span className="profile-dot" style={{ background: cur.color }} /> Profile: {cur.label}</h3>
@@ -60,6 +62,17 @@ export function ProfilesCard({ onTerminal }: { onTerminal: (cmd: string, title: 
           <div className="row-flex small"><b>GitHub</b><span className={st.github ? 'ok-text' : 'bad'}>{st.github ?? 'not logged in'}</span><span className="grow" />
             <button onClick={() => onTerminal('gh auth login', `GitHub login (${cur.label})`)}>{st.github ? 'Switch account' : 'Log in'}</button></div>
           <div className="muted small">PostHog: set this profile’s key under Connections above.</div>
+        </div>
+      )}
+      {others.length > 0 && (
+        <div className="profile-logins">
+          <div className="muted small">Borrowing: offer another profile's Claude and OpenAI logins here too, as extra subscriptions in the model menu. One-directional — it doesn't let that profile see {cur.label}'s.</div>
+          {others.map(o => (
+            <label key={o.id} className="line small">
+              <input type="checkbox" checked={cur.borrows.includes(o.id)} onChange={e => setBorrow(o.id, e.target.checked)} />
+              <span className="profile-dot" style={{ background: o.color }} /> Also offer {o.label}'s logins here
+            </label>
+          ))}
         </div>
       )}
     </section>

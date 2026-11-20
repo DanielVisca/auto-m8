@@ -7,7 +7,7 @@ import { adopt, apply, emptyLive, toolLabel, toolSummary, type Live } from './st
 import { StateMenu } from './List'
 import { OpenIn } from './OpenIn'
 import { Popover } from './Popover'
-import { EnginePicker } from './EnginePicker'
+import { EnginePicker, type PickedSubs } from './EnginePicker'
 import { ClaudePressure } from './ClaudeAccounts'
 import { Brand, brandFor } from './Brand'
 import { takeRename } from './Menu'
@@ -654,10 +654,18 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
   const { data: local } = useLive<any>('/api/local', ['settings'])
   const [engine, setEngineS] = useState<string>(() => { try { return id ? '' : localStorage.getItem('perch.engine.next') ?? '' } catch { return '' } })
   useEffect(() => { if (id) api.get<{ engine: string }>(`/api/chat/${encodeURIComponent(id)}/engine`).then(r => setEngineS(r.engine ?? '')).catch(() => {}) }, [id])
-  const pickEngine = (v: string) => {
+  // Which subscription per provider (Claude Personal, Claude Team, ChatGPT Team, ...), picked with the model.
+  const [subs, setSubs] = useState<PickedSubs>(() => { try { return id ? {} : JSON.parse(localStorage.getItem('perch.subs.next') ?? '{}') } catch { return {} } })
+  useEffect(() => { if (id) api.get<PickedSubs>(`/api/chat/${encodeURIComponent(id)}/subs`).then(r => setSubs(r ?? {})).catch(() => {}) }, [id])
+  const pickEngine = (v: string, sub?: { provider: 'claude' | 'openai'; id: string }) => {
     setEngineS(v)
     if (id) post(`/api/chat/${encodeURIComponent(id)}/engine`, { engine: v })
     else try { localStorage.setItem('perch.engine.next', v) } catch {}
+    if (!sub) return
+    const next = { ...subs, [sub.provider]: sub.id }
+    setSubs(next)
+    if (id) post(`/api/chat/${encodeURIComponent(id)}/subs`, { [sub.provider]: sub.id })
+    else try { localStorage.setItem('perch.subs.next', JSON.stringify(next)) } catch {}
   }
   const toggleTurbo = () => {
     const on = !turbo
@@ -778,7 +786,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
     }
     if (/^\/(autoresearch|optimi[sz]e)\b/.test(prompt)) { setOpt({ brief: prompt.replace(/^\/\S+\s*/, ''), direction: 'minimize', iterations: 10, target: '' }); setText(''); return }
     setText('')
-    const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt, cwd: id ? undefined : cwd, mode, context, contextIds: pulled.map(p => p.id), folderId: folder?.id, shared: shared.filter(x => !x.loading && !x.file), attachments: files.map(x => x.file), turbo, engine })
+    const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt, cwd: id ? undefined : cwd, mode, context, contextIds: pulled.map(p => p.id), folderId: folder?.id, shared: shared.filter(x => !x.loading && !x.file), attachments: files.map(x => x.file), turbo, engine, subs: id ? undefined : subs })
     setPulled([])
     setShared([])
     setRelated([])
@@ -884,7 +892,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
         {!id && <input className="cwd" value={cwd} onChange={e => setCwd(e.target.value)} title="Working directory" list="cwds" />}
         {id && conv?.cwd && <span className="muted small" title={conv.cwd}>{baseName(conv.cwd)}{conv.branch ? ` · ${conv.branch}` : ''}</span>}
         {/* Which model: Auto picks per message from what you already pay for; or pin one. */}
-        <EnginePicker value={engine || 'auto'} onChange={pickEngine} local={local} className={isLocalEngine(engine) ? 'local' : ''}
+        <EnginePicker value={engine || 'auto'} subs={subs} onChange={pickEngine} local={local} className={isLocalEngine(engine) ? 'local' : ''}
           title={engine === 'auto' || !engine ? 'Auto: Haiku for quick asks, Sonnet for everyday work, Opus for heavy thinking; Claude and Codex cover for each other: when one hits its cap or is signed out, the other takes over with the same context, tools and memory' : engine.startsWith('codex') ? 'Codex on your ChatGPT plan: same conversation, Mothership tools, MCP servers, instructions, memory and skills. Switch back to Claude any time.' : isLocalEngine(engine) ? (engine.endsWith(':cloud') ? `Runs on ${engine} through Ollama's cloud (your Ollama account), with all of Claude Code's tools` : `Runs on ${engine} on this Mac: private and free, slower and less capable than Claude`) : 'A fixed Claude model on your plan'} />
         <ClaudePressure />
         <select value={mode} onChange={e => setMode(e.target.value)} title="Permission mode (fixed per process; changing it restarts the session)">

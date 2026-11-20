@@ -5,10 +5,11 @@
 import { ATTACH_DIR } from './attachments.ts'
 import './promises.ts' // creates perch_started
 import { hold, shouldHold } from './pausehold.ts'
+import { chatSub, claudeDirForChat, codexEnvForChat, setChatSub } from './subscriptions.ts'
 import { abandonTurns, contextTokens, isCorrection, engineFor, requeueTurns, setEngine, setTurbo, settleTurns, startTurn, turboFor, turnEvent } from './turns.ts'
 import { agentEnv, localJob, localRoomSync, localUpSync } from './local.ts'
 import { usageNow, noteClaude } from './usage.ts'
-import { billing, claudeEnv, noteChatAccount, type Billing } from './account.ts'
+import { billing, claudeEnv, noteChatAccount } from './account.ts'
 import { chooseProvider } from './subscription-budget.ts'
 import { runTextJobs } from './job-fallback.ts'
 import { allCapped, available, capFrom, capScope, claudeFixed, isCodex, isLocal, markCapped, route, tierLabel, wantsCodex, type Tier } from './router.ts'
@@ -66,7 +67,8 @@ export type Chat = {
   codex?: CodexProcess | null // a Codex turn in flight (codex.ts)
   codexQueue?: SendOpts[] // messages that arrived while it ran
   handoffQueue?: SendOpts[] // reserve message order while checking the next provider
-  account?: Billing // how its claude process is billed (account.ts); unset on a local model
+  account?: string // how its claude process is billed: 'login', 'api' or a subscription id (subscriptions.ts); unset on a local model
+  sub?: string | null // the Claude subscription its process runs on (null: this profile's own login)
 }
 
 export const chats = new Map<string, Chat>()
@@ -86,7 +88,9 @@ export function childEnv(configDir?: string, extra?: NodeJS.ProcessEnv) {
   Object.assign(env, extra)
   delete env.CLAUDECODE // set when perch itself was started from Claude Code
   delete env.CLAUDE_CODE_ENTRYPOINT
-  if (configDir && configDir !== join(env.HOME!, '.claude')) env.CLAUDE_CONFIG_DIR = configDir
+  // ~/.claude is claude's own default: unset any override (a Personal profile's) so it really uses it.
+  if (configDir === join(env.HOME!, '.claude')) delete env.CLAUDE_CONFIG_DIR
+  else if (configDir) env.CLAUDE_CONFIG_DIR = configDir
   return env
 }
 
@@ -189,9 +193,9 @@ function systemPrompt(context: boolean, id?: string, turbo = false) {
 const RUN = join(DATA_DIR, 'run')
 mkdirSync(RUN, { recursive: true })
 const files = (id: string) => ({ fifo: join(RUN, `${id}.in`), out: join(RUN, `${id}.out`), meta: join(RUN, `${id}.json`) })
-type Meta = { id: string; pid: number; cwd: string; mode: string; context: boolean; turbo: boolean; engine?: string; tier?: Tier | null; profile?: string[]; offset: number; state: Chat['state']; at: number; account?: Billing }
+type Meta = { id: string; pid: number; cwd: string; mode: string; context: boolean; turbo: boolean; engine?: string; tier?: Tier | null; profile?: string[]; offset: number; state: Chat['state']; at: number; account?: string; sub?: string | null }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
-const saveMeta = (c: Chat) => { if (c.proc) try { writeFileSync(files(c.id).meta, JSON.stringify({ id: c.id, pid: c.proc.pid, cwd: c.cwd, mode: c.mode, context: c.context, turbo: c.turbo, engine: c.engine, tier: c.tier, profile: c.profile, offset: c.proc.offset, state: c.state, at: Date.now(), account: c.account } satisfies Meta)) } catch {} }
+const saveMeta = (c: Chat) => { if (c.proc) try { writeFileSync(files(c.id).meta, JSON.stringify({ id: c.id, pid: c.proc.pid, cwd: c.cwd, mode: c.mode, context: c.context, turbo: c.turbo, engine: c.engine, tier: c.tier, profile: c.profile, offset: c.proc.offset, state: c.state, at: Date.now(), account: c.account, sub: c.sub } satisfies Meta)) } catch {} }
 const forget = (id: string) => { for (const f of Object.values(files(id))) rmSync(f, { force: true }) }
 
 export type Runner = { pid: number; offset: number; write: (line: string) => void; kill: (sig?: NodeJS.Signals) => void; stop: () => void }
@@ -315,14 +319,17 @@ function start(c: Chat, resume: boolean) {
     args.push('--model', model)
   }
   // How it is billed (account.ts): your Claude Code login, or your API key when one is set.
-  c.account = local ? undefined : billing()
+  // Which subscription: the chat's pick (subscriptions.ts), else this profile's own login.
+  c.sub = local || c.profile ? null : chatSub(c.id, 'claude')
+  c.account = local ? undefined : billing() === 'api' ? 'api' : c.sub ?? 'login'
   noteChatAccount(c.id, c.account ?? 'local')
+  const configDir = configDirFor(c.id) ?? (c.sub ? claudeDirForChat(c.id, c.cwd) : undefined)
   const f = files(c.id)
   forget(c.id)
   execFileSync('mkfifo', [f.fifo])
   const fdIn = openSync(f.fifo, 'r+'), fdOut = openSync(f.out, 'w')
   // Detached, in its own process group: it keeps running if perch stops.
-  const proc = spawn('claude', args, { cwd: existsSync(c.cwd) ? c.cwd : settings.chat.cwd, env: childEnv(configDirFor(c.id), { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: agentLabel(c.id), PERCH_ORIGIN_MARKER: originFor(chatSubject(c.id)) ? originMarker(originFor(chatSubject(c.id))!) : '', ...(local ? agentEnv(c.engine) : claudeEnv()) }), stdio: [fdIn, fdOut, fdOut], detached: true })
+  const proc = spawn('claude', args, { cwd: existsSync(c.cwd) ? c.cwd : settings.chat.cwd, env: childEnv(configDir, { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: agentLabel(c.id), PERCH_ORIGIN_MARKER: originFor(chatSubject(c.id)) ? originMarker(originFor(chatSubject(c.id))!) : '', ...(local ? agentEnv(c.engine) : claudeEnv()) }), stdio: [fdIn, fdOut, fdOut], detached: true })
   closeSync(fdIn); closeSync(fdOut)
   proc.unref()
   proc.on('error', () => {}) // reported through the exit check
@@ -361,7 +368,7 @@ export function reattachChats(resumeLost: (id: string) => void) {
     let wrote = m.at ?? Date.now()
     try { wrote = Math.max(wrote, statSync(files(m.id).out).mtimeMs) } catch {}
     const since = m.state === 'running' ? Date.now() : Math.min(Date.now(), wrote) // running: keep the stall watchdog's grace
-    const c: Chat = { id: m.id, cwd: m.cwd, proc: null, state: m.state === 'exited' ? 'idle' : m.state, turn: [], listeners: new Set(), lastUsed: since, mode: m.mode, context: m.context, stderr: '', profile: m.profile, turbo: m.turbo, engine: m.engine ?? '', tier: m.tier ?? null, pending: [], lastOutput: since, account: m.account }
+    const c: Chat = { id: m.id, cwd: m.cwd, proc: null, state: m.state === 'exited' ? 'idle' : m.state, turn: [], listeners: new Set(), lastUsed: since, mode: m.mode, context: m.context, stderr: '', profile: m.profile, turbo: m.turbo, engine: m.engine ?? '', tier: m.tier ?? null, pending: [], lastOutput: since, account: m.account, sub: m.sub ?? null }
     for (const l of waiting.get(m.id) ?? []) c.listeners.add(l)
     waiting.delete(m.id)
     chats.set(m.id, c)
@@ -387,7 +394,7 @@ export const sendInterceptors = new Set<(opts: SendOpts) => boolean>()
 export let cloudFallback: ((opts: SendOpts, id: string) => void) | null = null
 export function setCloudFallback(f: typeof cloudFallback) { cloudFallback = f }
 
-export type SendOpts = { noCloud?: boolean; messageId?: string; retry?: boolean; resent?: boolean; engine?: string; engineOnce?: boolean; turbo?: boolean; images?: any[]; id?: string; cwd?: string; prompt: string; selectionText?: string; mode?: string; context?: boolean; resume?: boolean; profile?: string[]; by?: string; originParent?: string; manual?: boolean }
+export type SendOpts = { subs?: { claude?: string | null; openai?: string | null }; noCloud?: boolean; messageId?: string; retry?: boolean; resent?: boolean; engine?: string; engineOnce?: boolean; turbo?: boolean; images?: any[]; id?: string; cwd?: string; prompt: string; selectionText?: string; mode?: string; context?: boolean; resume?: boolean; profile?: string[]; by?: string; originParent?: string; manual?: boolean }
 
 // Sends a prompt, starting or resuming the process as needed. Returns the session id.
 export function send(opts: SendOpts): string {
@@ -428,6 +435,8 @@ export function send(opts: SendOpts): string {
   if (turbo !== c.turbo && !(c.proc && c.state === 'running')) { if (c.proc) { const old = c.proc; c.proc = null; old.kill(); old.stop() } c.turbo = turbo }
   // The model is per chat and sticky too ('' = Claude). Switching restarts the process (resumes the session).
   if (opts.engine !== undefined && !opts.engineOnce) setEngine(id, opts.engine) // engineOnce: a cap fallback, not your choice
+  // Which subscription per provider, picked with the model (a new chat sends it with its first message).
+  if (opts.subs) for (const p of ['claude', 'openai'] as const) if (opts.subs[p] !== undefined) setChatSub(id, p, opts.subs[p] ?? null)
   const wanted = c.profile ? '' : (opts.engine ?? engineFor(id))
   // A chat pinned to Codex goes to Claude for this message when Codex is capped or signed out (the
   // pin stays); Claude and Codex cover for each other.
@@ -498,7 +507,8 @@ export function send(opts: SendOpts): string {
   if (!opts.resent) c.pending.push({ prompt: opts.prompt, images: opts.images, at: Date.now() })
   // You added or removed the API key: restart this idle process so it picks up the new billing.
   // Same session (--resume), same config dir, so the context carries over.
-  const now = c.proc && c.account && c.state !== 'running' && !isLocal(c.engine) ? billing() : null
+  // Same when you moved the chat to another Claude subscription: the session resumes on that login.
+  const now = c.proc && c.account && c.state !== 'running' && !isLocal(c.engine) ? (billing() === 'api' ? 'api' : chatSub(id, 'claude') ?? 'login') : null
   if (now && now !== c.account) {
     const old = c.proc!; c.proc = null; old.kill(); old.stop()
     resume = true
@@ -601,7 +611,7 @@ function sendCodex(c: Chat, opts: SendOpts, model?: string, saved?: RunRecord) {
     conversationId: c.id, cwd: c.cwd, mode: c.mode, model, prompt, images: saved ? [] : imageFiles(opts.images), mcpScript: MCP_SCRIPT, node: process.execPath,
     saved, recovery: { turnId, opts, queue: c.codexQueue ?? [], chat: { cwd: c.cwd, mode: c.mode, context: c.context, turbo: c.turbo, engine: c.engine, tier: c.tier } },
     system: `${CODEX_NOTE(c.id)}\n\n${systemPrompt(c.context, c.id)}`,
-    env: childEnv(undefined, { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: 'Mothership chat (codex)' }),
+    env: childEnv(undefined, { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: 'Mothership chat (codex)', ...codexEnvForChat(c.id) }),
     message: r => { indexTranscript(recordCodexMessage({ id: c.id, cwd: c.cwd, turnId, ...r })); return codexMessageUuid(turnId, r.itemId) },
     before: r => indexTranscript(recordCodexTurn({ id: c.id, turnId, messageId: opts.messageId, cwd: c.cwd, prompt: opts.prompt, reply: r.text, tools: r.tools })),
   }, ev => { turnEvent(c.id, ev, turnId); emit(c, ev) })

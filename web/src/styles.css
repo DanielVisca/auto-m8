@@ -1249,6 +1249,13 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .usage-chip.warm { background: color-mix(in srgb, #e0a800 22%, transparent); color: #a67c00; }
 .usage-chip.hot { background: color-mix(in srgb, #d6453d 22%, transparent); color: #d6453d; font-weight: 600; }
 .engine-overage { font-size: 10.5px; padding: 0 8px 3px; color: var(--muted); }
+.engine-sub { display: flex; align-items: center; gap: 6px; padding: 0 8px 3px; font-size: 10.5px; overflow: hidden; }
+.engine-sub .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.engine-sub.off .grow { color: #a67c00; }
+.engine-connect { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--line); margin-top: 4px; }
+.engine-connect input { min-width: 0; font-size: 12px; }
+.sub-list .sub-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sub-list .sub-row:last-child { border-bottom: 0; }
 .engine-overage.warm { color: #a67c00; }
 .engine-overage.hot { color: #d6453d; font-weight: 600; }
 .usage-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 5px; vertical-align: middle; }

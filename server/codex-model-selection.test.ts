@@ -21,7 +21,7 @@ test('background cap fallback passes the peer model to Codex and reports the act
     const events: any[] = []
     let argv: string[] = []
     const context: any = {
-      claudePeer, codexPeer, modelTier, join, HOME: '/fixture', Date,
+      claudePeer, codexPeer, modelTier, join, HOME: '/fixture', codexHome: () => '/fixture/.codex', Date,
       readFileSync: (path: string) => path.endsWith('config.toml') ? 'model = "gpt-6-astra"' : JSON.stringify({ models: [
         { slug: 'gpt-6-sol', priority: 4, visibility: 'list' },
         { slug: 'gpt-6.1-sol', priority: 1, visibility: 'list' },

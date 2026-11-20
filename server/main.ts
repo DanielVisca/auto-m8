@@ -4,6 +4,7 @@
 import './single.ts' // first: one server per data folder, before anything opens the db or reattaches chats
 import './path.ts' // then: find claude/gh even when started without ~/.zshrc's PATH
 import { cancelLogin, login as claudeLogin, startLogin, submitCode } from './claudelogin.ts'
+import { addSubscription, chatSub, defaultClaudeId, defaultOpenaiId, refreshAll, removeSubscription, renameSubscription, setChatSub, setCodexBin, startSubLogin, submitSubCode, subscriptionsView } from './subscriptions.ts'
 import { carrySkill, importSkill } from './skillcarry.ts'
 import { allCapped, capsNow } from './router.ts'
 import { carryText, carryTo, importCarry } from './carry.ts'
@@ -16,7 +17,7 @@ import { overageNow } from './overage.ts'
 import { billingStatus, clearCaps } from './account.ts'
 import { mcpAccess } from './mcpaccess.ts'
 import { cloudBlockers, describe as describeRuntimes, needsFrom } from './runtimes.ts'
-import { codexDefaultModel, codexModels, codexReady } from './codex.ts'
+import { codexBin, codexDefaultModel, codexModels, codexReady } from './codex.ts'
 import { syncAgents } from './agentsync.ts'
 import { chatUsage, engineFor, setEngine, usageSummary } from './turns.ts'
 import { createHash } from 'node:crypto'
@@ -441,7 +442,7 @@ async function startChat(b: Row) {
   const inFolder = b.folderId ? get<Row>('select * from folders where id = ?', b.folderId) : null
   // You writing in a thread an agent started makes it yours: it joins your lists.
   if (b.id) run(`update perch_started set by = 'you' where id = ? and coalesce(by, '') != 'you'`, b.id)
-  const id = send({ by: 'you', id: b.id, cwd: b.cwd ?? inFolder?.cwd ?? undefined, prompt, selectionText: String(b.prompt ?? ''), images: att.images, mode: b.mode, context: b.context !== false, turbo: typeof b.turbo === 'boolean' ? b.turbo : undefined, engine: typeof b.engine === 'string' ? b.engine : undefined })
+  const id = send({ by: 'you', id: b.id, cwd: b.cwd ?? inFolder?.cwd ?? undefined, prompt, selectionText: String(b.prompt ?? ''), images: att.images, mode: b.mode, context: b.context !== false, turbo: typeof b.turbo === 'boolean' ? b.turbo : undefined, engine: typeof b.engine === 'string' ? b.engine : undefined, subs: b.subs && typeof b.subs === 'object' ? b.subs : undefined })
   if (inFolder && !b.id) editLabels([id], [inFolder.label])
   for (const other of b.contextIds ?? []) link(id, other, 'context')
   // A new chat started while focused belongs to the focus: give it the area's label.
@@ -480,9 +481,17 @@ route('POST', '/api/canvas/make', async (_m, req) => {
 route('GET', '/api/conversations/:id/carry', (m, _r, _s, q) => carryText(decodeURIComponent(m[1]), q.get('mode') === 'full' ? 'full' : 'brief'))
 route('POST', '/api/conversations/:id/carry', async (m, req) => { const b = await body(req); return carryTo(decodeURIComponent(m[1]), String(b.to ?? ''), b.mode === 'full' ? 'full' : 'brief') })
 route('POST', '/api/import', async (_m, req) => { const r = importCarry((await body(req)) as any); broadcast('conversations'); return r })
-route('GET', '/api/profile', () => ({ current: profile.id, profiles: profiles().map(p => ({ id: p.id, label: p.label, color: p.color, port: p.port, enabled: p.enabled })) }))
+route('GET', '/api/profile', () => ({ current: profile.id, profiles: profiles().map(p => ({ id: p.id, label: p.label, color: p.color, port: p.port, enabled: p.enabled, borrows: p.borrows ?? [] })) }))
 route('GET', '/api/profile/:id/status', async m => { const p = profiles().find(x => x.id === m[1]); if (!p) throw new Error('No such profile.'); return { ...await readiness(p), claudeDir: p.claudeDir, ghDir: p.ghDir } })
 route('POST', '/api/profile/:id/enable', async (m, req) => { const on = (await body(req)).on !== false; saveProfiles(ps => ps.map(p => p.id === m[1] ? { ...p, enabled: on } : p)); return { ok: true } })
+// Which other profiles' Claude and OpenAI logins this profile also offers as subscriptions
+// (subscriptions.ts), one-directional: borrowing Personal from Work doesn't let Personal see Work.
+route('POST', '/api/profile/:id/borrows', async (m, req) => {
+  const { other, on } = await body(req)
+  if (typeof other !== 'string') return { error: 'other required' }
+  saveProfiles(ps => ps.map(p => p.id === m[1] ? { ...p, borrows: on ? [...new Set([...(p.borrows ?? []), other])] : (p.borrows ?? []).filter(x => x !== other) } : p))
+  return { ok: true }
+})
 route('POST', '/api/skills/:name/carry', async (m, req) => carrySkill(decodeURIComponent(m[1]), String((await body(req)).to ?? '')))
 route('POST', '/api/skills/import', async (_m, req) => importSkill((await body(req)) as any))
 route('GET', '/api/runtimes', async (_m, _req, _res, q) => ({ text: await describeRuntimes(q?.get('task') ?? undefined, { repoOwner: q?.get('owner') ?? undefined }) }))
@@ -549,6 +558,25 @@ route('GET', '/api/local', async () => ({ ...await localStatus(), codex: { ...aw
 route('POST', '/api/local/pull', async (_m, req) => pullModel(String((await body(req)).model ?? '')))
 route('GET', '/api/chat/:id/engine', m => ({ engine: engineFor(decodeURIComponent(m[1])) }))
 route('POST', '/api/chat/:id/engine', async (m, req) => { setEngine(decodeURIComponent(m[1]), String((await body(req)).engine ?? '')); return { ok: true } })
+// Subscriptions (subscriptions.ts): every Claude and OpenAI login, and which one each chat uses.
+const subsChanged = () => broadcast('subscriptions')
+setCodexBin(codexBin)
+refreshAll().then(subsChanged).catch(() => {})
+route('GET', '/api/subscriptions', async (_m, req) => { await refreshAll(new URL(req.url ?? '', 'http://x').searchParams.has('refresh')); return subscriptionsView() })
+route('POST', '/api/subscriptions', async (_m, req) => {
+  const b = await body(req)
+  if (b.provider !== 'claude' && b.provider !== 'openai') return { error: 'provider must be claude or openai' }
+  const sub = addSubscription(b.provider, String(b.label ?? ''))
+  const login = startSubLogin(sub.id, subsChanged)
+  subsChanged()
+  return { sub, login }
+})
+route('POST', '/api/subscriptions/:id/login', m => startSubLogin(decodeURIComponent(m[1]), subsChanged))
+route('POST', '/api/subscriptions/:id/code', async (m, req) => submitSubCode(decodeURIComponent(m[1]), String((await body(req)).code ?? '')))
+route('POST', '/api/subscriptions/:id', async (m, req) => { const l = String((await body(req)).label ?? '').trim(); if (!l) return { error: 'label required' }; renameSubscription(decodeURIComponent(m[1]), l); subsChanged(); return { ok: true } })
+route('DELETE', '/api/subscriptions/:id', async m => { const r = await removeSubscription(decodeURIComponent(m[1])); subsChanged(); return r })
+route('GET', '/api/chat/:id/subs', m => { const id = decodeURIComponent(m[1]); return { claude: chatSub(id, 'claude') ?? defaultClaudeId(), openai: chatSub(id, 'openai') ?? defaultOpenaiId() } })
+route('POST', '/api/chat/:id/subs', async (m, req) => { const id = decodeURIComponent(m[1]), b = await body(req); for (const p of ['claude', 'openai'] as const) if (typeof b[p] === 'string') setChatSub(id, p, b[p]); return { ok: true } })
 route('GET', '/api/chat/:id/turbo', m => ({ turbo: turboFor(decodeURIComponent(m[1])) }))
 route('POST', '/api/chat/:id/turbo', async (m, req) => { setTurbo(decodeURIComponent(m[1]), !!(await body(req)).on); return { ok: true } })
 route('POST', '/api/chat/:id/rate', async (m, req) => rateLast(decodeURIComponent(m[1]), (await body(req)).rating))

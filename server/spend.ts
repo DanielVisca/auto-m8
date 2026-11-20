@@ -5,6 +5,7 @@
 //
 // Transcripts are read incrementally (byte offset per file) into usage_msgs, one row per API
 // response, so history stays even after Claude Code prunes old transcripts.
+import { defaultClaudeId, subLabelOf } from './subscriptions.ts'
 import { open, readdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -185,7 +186,7 @@ const SOURCE_LABEL: Record<string, string> = { perch: 'Perch', terminal: 'Termin
 // How a message was billed: the chat's process (chat_account_span, from when it started) for perch
 // chats (your Claude Code login, your API key, or a local model); otherwise the Claude Code login.
 const SUB = `coalesce((select s.account from chat_account_span s where s.id = m.session and s.from_ts <= m.ts order by s.from_ts desc limit 1), 'login')`
-const subLabel = (id: string) => id === 'login' ? 'Claude Code login' : id === 'api' ? 'API key' : id === 'local' ? 'Local models' : 'Other'
+const subLabel = (id: string) => id === 'login' ? `Claude · ${subLabelOf(defaultClaudeId())?.slice(9) ?? 'Claude Code login'}` : id === 'api' ? 'API key' : id === 'local' ? 'Local models' : subLabelOf(id) ?? 'Other'
 
 export async function spendSummary(days = 30, subscription?: string) {
   const since = Date.now() - days * 86400_000

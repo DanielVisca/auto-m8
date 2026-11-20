@@ -11,12 +11,17 @@ const HOME = homedir()
 export const BASE_DIR = join(HOME, 'Library/Application Support/perch')
 const FILE = join(BASE_DIR, 'profiles.json')
 
-export type Profile = { id: string; label: string; color: string; port: number; dataDir: string; claudeDir: string; ghDir: string | null; enabled: boolean }
+// borrows: other profile ids whose Claude and OpenAI logins this profile also offers as
+// subscriptions (subscriptions.ts), on top of its own. One-directional: Work borrowing Personal
+// does not mean Personal can see Work's.
+export type Profile = { id: string; label: string; color: string; port: number; dataDir: string; claudeDir: string; codexDir: string; ghDir: string | null; enabled: boolean; borrows: string[] }
 
-// Work is what perch has always been: the default data folder, ~/.claude, your default gh login.
+// Work is what perch has always been: the default data folder, ~/.claude, ~/.codex, your default
+// gh login. It also borrows Personal's logins by default, since the reverse (company access from
+// a personal profile) is the one you don't want.
 const DEFAULTS: Profile[] = [
-  { id: 'work', label: 'Work', color: '#d97706', port: 4777, dataDir: BASE_DIR, claudeDir: join(HOME, '.claude'), ghDir: null, enabled: true },
-  { id: 'personal', label: 'Personal', color: '#2a9d6f', port: 4778, dataDir: join(BASE_DIR, 'profiles/personal'), claudeDir: join(HOME, '.claude-personal'), ghDir: join(HOME, '.config/gh-personal'), enabled: false },
+  { id: 'work', label: 'Work', color: '#d97706', port: 4777, dataDir: BASE_DIR, claudeDir: join(HOME, '.claude'), codexDir: join(HOME, '.codex'), ghDir: null, enabled: true, borrows: ['personal'] },
+  { id: 'personal', label: 'Personal', color: '#2a9d6f', port: 4778, dataDir: join(BASE_DIR, 'profiles/personal'), claudeDir: join(HOME, '.claude-personal'), codexDir: join(HOME, '.codex-personal'), ghDir: join(HOME, '.config/gh-personal'), enabled: false, borrows: [] },
 ]
 
 export function profiles(): Profile[] {
@@ -41,6 +46,7 @@ export const profile: Profile = profiles().find(p => p.id === PROFILE_ID) ?? DEF
 // own accounts.
 export function applyProfileEnv() {
   if (profile.claudeDir !== join(HOME, '.claude')) { mkdirSync(profile.claudeDir, { recursive: true }); process.env.CLAUDE_CONFIG_DIR = profile.claudeDir }
+  if (profile.codexDir !== join(HOME, '.codex')) { mkdirSync(profile.codexDir, { recursive: true }); process.env.CODEX_HOME = profile.codexDir }
   if (profile.ghDir) { mkdirSync(profile.ghDir, { recursive: true }); process.env.GH_CONFIG_DIR = profile.ghDir }
 }
 
