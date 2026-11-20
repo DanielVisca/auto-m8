@@ -23,6 +23,20 @@ Agents can write code in parallel. You can't review it, unblock it, merge it and
 
 Mothership sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), `gh`, your own MCP servers and skills). It builds no connectors of its own and Mothership itself sends nothing anywhere: every chat is an ordinary `claude` session, so `claude --resume` works on all of them.
 
+## Why I built it: one bottleneck at a time
+
+I started Mothership on 5 Nov 2026. In the ten weeks before that I merged 4 to 18 PRs a week on GitHub, usually about 14. In the two weeks after, I merged 109 and then 156. Models also got better over the same stretch, so not all of that is Mothership. Most of what I got back came from removing these blocks, roughly in the order I hit them:
+
+|  | **The block** | **What removed it** |
+| --- | --- | --- |
+| 🧠 | **I was the only thing carrying context between agents.** Every new chat started from zero. | Every chat can search, read and message every other chat. Agents hand work to each other (`delegate`) instead of through me. |
+| 🚧 | **I was the PR babysitter.** Every PR waited on me to answer reviewers, fix red CI, remember merge order and check production. | The **PR shepherd** answers review threads and red CI, merges when the PR's plan allows, then checks production against the plan and opens a revert PR on a regression. |
+| ⏳ | **Hitting my plan's limit stopped work.** | **Smart use of the subscription:** Auto picks the model per ask (Haiku for quick asks, Sonnet for normal work, Opus for heavy thinking) and paces each plan's allowance to its reset date. When a model hits its cap, the chat moves down a tier, to Codex, to a cloud task or to a **local model** (Ollama) and keeps its context. **Shadow replays** re-run shipped PRs on cheaper models to show where the expensive one wasn't needed. |
+| 🧊 | **Agents died quietly and I found out hours later.** | Stalled chats get nudged to carry on, and `follow_up` timers wake an agent when a PR merges or a deploy lands. |
+| 🔔 | **I checked six windows to find out who was waiting on me.** | **Needs me**: only real signals (a question, red CI, changes requested, a failed task). |
+| 🔁 | **I kept asking for the same things.** | **Evolve** writes a skill from my own conversations and corrections, and rewrites it if agents don't load it. **Autopilot** turns repeated asks into routines and owns them: it pauses one after 3 failures in a row and graduates it after 5 clean runs. |
+| 🏁 | **I didn't know which model to trust with what.** | **Model races**: several models do the same task in their own worktrees, review each other's work with evidence, and the answers are merged. |
+
 ## Where you're the bottleneck, and how Mothership takes you out
 
 |  | **Where you're the bottleneck** | **How Mothership takes you out** |
