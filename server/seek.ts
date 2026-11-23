@@ -54,7 +54,7 @@ export function playbookRules() {
 function systemPrompt(mode: Mode, cwd: string, conversationId: string) {
   const repos = localRepos().slice(0, 40).map(r => `- ${r.name}: ${r.path}${r.remote ? ` (${r.remote.replace(/^git@github.com:|^https:\/\/github.com\//, '').replace(/\.git$/, '')})` : ''}`).join('\n')
   const rules = playbookRules().map(r => `[${r.id}] ${r.text}`).join('\n')
-  return `You are Mothership's search agent. Find what the user means, reliably, wherever it is, and answer briefly with citations. You are read-only: never edit, commit, post or send anything.
+  return `You are auto-m8's search agent. Find what the user means, reliably, wherever it is, and answer briefly with citations. You are read-only: never edit, commit, post or send anything.
 
 Mode: ${MODES[mode].guide}
 The user is working in: ${cwd}

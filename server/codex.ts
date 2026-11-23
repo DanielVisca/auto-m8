@@ -75,7 +75,7 @@ function argsFor(o: { model?: string; conversationId?: string; mcpScript?: strin
   else if (o.mcpScript && o.node) {
     // perch's own tools are pre-approved: in a read-only (plan/default) chat Codex otherwise refuses every MCP call.
     a.push('-c', `mcp_servers.perch.command=${toml(o.node)}`, '-c', `mcp_servers.perch.args=[${toml(o.mcpScript)}]`, '-c', 'mcp_servers.perch.default_tools_approval_mode="approve"')
-    if (o.conversationId) a.push('-c', `mcp_servers.perch.env={PERCH_CONVERSATION_ID=${toml(o.conversationId)},PERCH_AGENT="Mothership chat (codex)"}`)
+    if (o.conversationId) a.push('-c', `mcp_servers.perch.env={PERCH_CONVERSATION_ID=${toml(o.conversationId)},PERCH_AGENT="auto-m8 chat (codex)"}`)
   }
   if (o.model) a.push('-m', o.model)
   if (o.system) a.push('-c', `developer_instructions=${toml(o.system)}`)

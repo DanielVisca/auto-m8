@@ -75,7 +75,7 @@ export function ContextMenu({ target, onClose, onOpenTerminal }: { target: MenuT
       <button onClick={() => state('done')}><span className="dot s-done" />Done</button>
       <button onClick={() => state('archived')} title="Out of the lists, still found by search"><span className="dot s-archived" />Archive</button>
       <button onClick={() => state('hidden')} title="Gone from lists, search and suggestions. Find it again with state:hidden"><span className="dot" />Hide for good</button>
-      <button onClick={() => state(null)} title="Let Mothership decide from activity and PRs">↺ Automatic</button>
+      <button onClick={() => state(null)} title="Let auto-m8 decide from activity and PRs">↺ Automatic</button>
       <hr />
       {SHOW_LABELS && <button onClick={() => setSub(sub === 'labels' ? null : 'labels')}>🏷 Labels…<span className="grow" />›</button>}
       {sub === 'labels' && (

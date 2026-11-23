@@ -1,7 +1,7 @@
 // Kits (docs/kits.md): package someone's skills, routines and CLAUDE.md snippet so another person can
 // import them. Export swaps the exporter's personal values for {{placeholders}}, then refuses to write
 // anything if a personal value is still left (the scrub gate). Kept free of db.ts: it reads the source
-// database read-only, so exporting never touches the exporter's live Mothership.
+// database read-only, so exporting never touches the exporter's live auto-m8.
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -130,7 +130,7 @@ export function exportKit(o: ExportOpts): { manifest: KitManifest; files: number
 }
 
 function readme(m: KitManifest) {
-  return `# ${m.name}\n\n${m.description}\n\nA Mothership kit. Import it from Settings → Kits, or:\n\n    node server/kitcli.ts import <this repo's git URL>\n\n` +
+  return `# ${m.name}\n\n${m.description}\n\nA auto-m8 kit. Import it from Settings → Kits, or:\n\n    node server/kitcli.ts import <this repo's git URL>\n\n` +
     `Routines arrive switched off. Placeholders such as {{owner.name}} are filled in from your own settings.\n\n` +
     (m.skills.length ? `## Skills\n\n${m.skills.map(s => `- ${s}`).join('\n')}\n\n` : '') +
     (m.routines.length ? `## Routines\n\n${m.routines.map(s => `- ${s}`).join('\n')}\n` : '')

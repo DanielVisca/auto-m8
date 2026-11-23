@@ -35,7 +35,7 @@ export function Deadline({ d }: { d: Decision }) {
   useEffect(() => { const t = setInterval(() => tick(x => x + 1), 60_000); return () => clearInterval(t) }, [])
   if (!d.auto_at) return <span className="muted small">waits for you</span>
   const pick = recOption(d) ?? d.recommendation
-  return <span className="muted small" title={new Date(d.auto_at).toLocaleString()}>Mothership picks {pick ? <b>{pick.length > 40 ? `${pick.slice(0, 40)}…` : pick}</b> : 'for you'} {left(d.auto_at)}</span>
+  return <span className="muted small" title={new Date(d.auto_at).toLocaleString()}>auto-m8 picks {pick ? <b>{pick.length > 40 ? `${pick.slice(0, 40)}…` : pick}</b> : 'for you'} {left(d.auto_at)}</span>
 }
 
 function DecisionCard({ d, onOpen, showOwner }: { d: Decision; onOpen?: (id: string) => void; showOwner?: boolean }) {
@@ -54,7 +54,7 @@ function DecisionCard({ d, onOpen, showOwner }: { d: Decision; onOpen?: (id: str
         {d.context && <> · <button className="link small" onClick={() => setOpen(!open)}>{open ? 'less' : 'why'}</button></>}
       </div>
       {open && d.context && <pre className="decision-context small">{d.context}</pre>}
-      {d.recommendation && <div className="small">Mothership recommends: <b>{d.recommendation}</b></div>}
+      {d.recommendation && <div className="small">auto-m8 recommends: <b>{d.recommendation}</b></div>}
       <div className="decision-options">
         {d.options.map(o => <button key={o} disabled={busy} className={rec(o) ? 'primary' : ''} onClick={() => answer(o)}>{o}</button>)}
         <input disabled={busy} placeholder={d.options.length ? 'or answer in your words…' : 'your answer…'} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') answer(text) }} />
@@ -131,7 +131,7 @@ function StripRow({ d, compact = false, onOpen }: { d: Decision; compact?: boole
       </div>
       {open && <>
         {d.context && <pre className="decision-context small">{d.context}</pre>}
-        {d.recommendation && <div className="small">Mothership recommends: <b>{d.recommendation}</b></div>}
+        {d.recommendation && <div className="small">auto-m8 recommends: <b>{d.recommendation}</b></div>}
       </>}
       {picking && <div className="decision-options">
         {d.options.map(o => <button key={o} disabled={busy} className={`small ${o === rec ? 'primary' : ''}`} onClick={() => answer(o)}>{o}</button>)}
@@ -153,17 +153,17 @@ export function DecisionFlag({ onOpen }: { onOpen?: (id: string) => void }) {
   const soonest = ds.filter(d => d.auto_at).sort((a, b) => a.auto_at! - b.auto_at!)[0]
   return <>
     <button ref={ref} className={`icon no-drag decision-flag ${ds.length ? 'on-flag' : ''}`} onClick={() => setOpen(!open)}
-      title={ds.length ? `${ds.length} decision${ds.length > 1 ? 's' : ''} for you${soonest ? `; Mothership picks the first ${left(soonest.auto_at!)}` : ''}` : `Nothing for you to decide. Mothership decided ${log.length} lately.`}>
+      title={ds.length ? `${ds.length} decision${ds.length > 1 ? 's' : ''} for you${soonest ? `; auto-m8 picks the first ${left(soonest.auto_at!)}` : ''}` : `Nothing for you to decide. auto-m8 decided ${log.length} lately.`}>
       ⚑{ds.length ? <span className="flag-n">{ds.length}</span> : null}
     </button>
     <Popover anchor={ref} open={open} onClose={() => setOpen(false)} width={460}>
       <div className="decision-pop">
         {ds.length ? <div className="decision-strip in-pop">
-          <div className="muted small">For you to decide · Mothership picks its recommendation if you don't answer in time</div>
+          <div className="muted small">For you to decide · auto-m8 picks its recommendation if you don't answer in time</div>
           {ds.map(d => <StripRow key={d.id} d={d} compact onOpen={onOpen ? id => { setOpen(false); onOpen(id) } : undefined} />)}
         </div> : <div className="muted small pad">Nothing for you to decide.</div>}
         {log.length > 0 && <details className="decided-log">
-          <summary className="muted small">Mothership decided {log.length} for you in the last 3 days</summary>
+          <summary className="muted small">auto-m8 decided {log.length} for you in the last 3 days</summary>
           {log.map(d => <DecidedRow key={d.id} d={d} onOpen={onOpen ? id => { setOpen(false); onOpen(id) } : undefined} />)}
         </details>}
       </div>

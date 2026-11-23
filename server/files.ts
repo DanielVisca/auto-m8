@@ -93,7 +93,7 @@ function referencedRecently(p: string) {
   }
   return false
 }
-const ok = (p: string) => { const f = check(p); if (!f) throw new Error('Mothership only opens files a conversation made or mentioned.'); return f }
+const ok = (p: string) => { const f = check(p); if (!f) throw new Error('auto-m8 only opens files a conversation made or mentioned.'); return f }
 
 export async function fileAction(path: string, action: 'reveal' | 'open' | 'copy-file') {
   const f = ok(path)

@@ -40,7 +40,7 @@ if (!process.env.NODE_TEST_CONTEXT && !process.env.PERCH_DB?.startsWith(':memory
   const file = join(dir, 'server.pid')
   const got = claimServerLock(file)
   if (!got.ok) {
-    console.error(`Mothership: server ${got.owner} already serves ${dir}; not starting a second one`)
+    console.error(`auto-m8: server ${got.owner} already serves ${dir}; not starting a second one`)
     process.exit(3) // the shell reads 3 as "already served": no restart, no crash back-off
   }
   // main.ts's signal handlers record the stop and call process.exit, which runs this.

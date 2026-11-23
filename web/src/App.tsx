@@ -278,7 +278,7 @@ export function App() {
       <div className={`app compact ${shell.isElectron ? 'electron' : ''} ${zen ? 'zen' : ''}`}>
         <header className="topbar drag">
           <button className="icon no-drag" onClick={() => setListOpen(!listOpen)} title="Conversations  ⌘\">{listOpen ? '→' : '☰'}</button>
-          <div className="grow title">{listOpen ? 'Mothership' : ''}</div>
+          <div className="grow title">{listOpen ? 'auto-m8' : ''}</div>
           <ProdAlert />
           <BrowserFlag onOpen={openById} />
           {showDecisions && <DecisionFlag onOpen={openById} />}

@@ -18,7 +18,7 @@ const ratio = (r?: number | null) => r == null ? '–' : r < 1 ? `−${Math.roun
 const OUT: Record<string, string> = { same: 'var(--green, #3a3)', partial: 'var(--yellow, #c90)', different: 'var(--red, #c33)' }
 const VERDICT: Record<string, [string, string]> = { cheaper: ['could be cheaper', '#3a3'], 'right-cost': ['right cost', '#888'], inconclusive: ['inconclusive', '#c90'], 'matches-control': ['matches control', '#7a3'], running: ['replaying…', '#58f'], error: ['failed', '#c33'] }
 const SRC = ['perch', 'terminal', 'desktop', 'posthog-code']
-const NAME: Record<string, string> = { perch: 'Mothership', terminal: 'Terminal', desktop: 'Desktop', 'posthog-code': 'PostHog Code', scouts: 'Scouts' }
+const NAME: Record<string, string> = { perch: 'auto-m8', terminal: 'Terminal', desktop: 'Desktop', 'posthog-code': 'PostHog Code', scouts: 'Scouts' }
 
 function Row({ label, cost, extra, href }: { label: string; cost: number; extra?: string; href?: string }) {
   const body = <><span className="grow ellipsis" title={label}>{label}</span>{extra != null && <span className="muted">{extra}</span>}<b>{money(cost)}</b></>
@@ -38,7 +38,7 @@ export function SpendCard() {
           <option value="">All subscriptions</option>{(u?.subscriptions ?? []).map((x: any) => <option key={x.id} value={x.id}>{x.label}</option>)}
         </select>
         <select value={days} onChange={e => setDays(Number(e.target.value))}>{[1, 7, 30, 90, 365].map(d => <option key={d} value={d}>{d === 1 ? 'today' : `${d} days`}</option>)}</select></div>
-      <div className="muted small">What everything you run would cost at API prices, per Claude subscription (Team, Personal) and per account: Mothership, Claude Code in a terminal or Desktop, PostHog Code, and your PostHog scouts. Subscriptions aren't billed per token, so this is the value you get from them and where it goes.</div>
+      <div className="muted small">What everything you run would cost at API prices, per Claude subscription (Team, Personal) and per account: auto-m8, Claude Code in a terminal or Desktop, PostHog Code, and your PostHog scouts. Subscriptions aren't billed per token, so this is the value you get from them and where it goes.</div>
       {!u ? <div className="muted small">…</div> : (
         <>
           <div className="stats">
@@ -62,7 +62,7 @@ export function SpendCard() {
                   {a.sources.map((s: any) => <Row key={s.source} label={s.label} cost={s.cost} extra={s.source === 'scouts' ? `${s.msgs} runs` : `${s.msgs.toLocaleString()} calls`} />)}
                   {a.subagentCost > 0 && <div className="muted small">{money(a.subagentCost)} of it in subagents</div>}
                 </div>
-                {a.perchBy.length > 0 && <div><h4>Mothership: who started it</h4>{a.perchBy.map((b: any) => <Row key={b.by} label={b.by === 'you' ? 'You' : b.by} cost={b.cost} />)}</div>}
+                {a.perchBy.length > 0 && <div><h4>auto-m8: who started it</h4>{a.perchBy.map((b: any) => <Row key={b.by} label={b.by === 'you' ? 'You' : b.by} cost={b.cost} />)}</div>}
                 <div><h4>By model</h4>{a.models.filter((m: any) => m.cost > 0).map((m: any) => <Row key={m.model} label={model(m.model)} cost={m.cost} extra={tok(m.tokens)} />)}</div>
                 <div><h4>By project</h4>{a.projects.map((p: any) => <Row key={p.project} label={p.project} cost={p.cost} />)}</div>
                 <div><h4>Costliest sessions</h4>{a.sessions.map((s: any) => <Row key={s.id} label={s.title} cost={s.cost} extra={NAME[s.source] ?? s.source} href={`#chat/${encodeURIComponent(s.id)}`} />)}</div>

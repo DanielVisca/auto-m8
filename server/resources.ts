@@ -57,7 +57,7 @@ export function resourcePressure(s: Pick<ResourceSnapshot, 'cpuPercent' | 'memor
   if ((s.memory.swapBytesPerSecond ?? 0) >= 10 * MiB) add(s.memory.swapBytesPerSecond! >= 50 * MiB ? 'critical' : 'warning', 'Swapping', 'Memory is moving between RAM and disk, which can make apps pause.')
   if ((s.cpuPercent ?? 0) >= 85) add(s.cpuPercent! >= 95 ? 'critical' : 'warning', 'CPU busy', 'Most CPU capacity is in use; apps and builds are competing for time.')
   if (s.disk && (s.disk.availableBytes < 20 * GiB || s.disk.availableBytes / s.disk.totalBytes < 0.05)) add(s.disk.availableBytes < 5 * GiB || s.disk.availableBytes / s.disk.totalBytes < 0.02 ? 'critical' : 'warning', 'Disk nearly full', 'Low free space can slow builds and leave less room for swap.')
-  if (s.perch.eventLoopDelayMs >= 1000) add(s.perch.eventLoopDelayMs >= 3000 ? 'critical' : 'warning', 'Mothership delayed', 'Mothership’s server paused while handling work. Mac pressure can contribute too.')
+  if (s.perch.eventLoopDelayMs >= 1000) add(s.perch.eventLoopDelayMs >= 3000 ? 'critical' : 'warning', 'auto-m8 delayed', 'auto-m8’s server paused while handling work. Mac pressure can contribute too.')
   return { severity, reasons }
 }
 

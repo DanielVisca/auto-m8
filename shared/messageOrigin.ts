@@ -14,16 +14,16 @@ export function agentSender(raw: string): AgentSender | null {
   while (text.startsWith(QUEUED)) text = text.slice(QUEUED.length)
   let m = text.match(AGENT_MARK)
   if (m) return { id: m[1], label: m[2] || 'another chat', body: text.slice(m[0].length) }
-  if ((m = text.match(AUTOMATION_MARK))) return { label: `Mothership: ${m[1]}`, body: text.slice(m[0].length) }
+  if ((m = text.match(AUTOMATION_MARK))) return { label: `auto-m8: ${m[1]}`, body: text.slice(m[0].length) }
   if ((m = text.match(REPLY_MARK))) return { id: m[1], label: `reply from ${m[2] || 'another chat'}`, body: text }
-  if (/^EVENTS \(\d+\) from what you're watching/.test(text)) return { label: 'Mothership: events from watches', body: text }
+  if (/^EVENTS \(\d+\) from what you're watching/.test(text)) return { label: 'auto-m8: events from watches', body: text }
   if (/^HELPER REPORT /.test(text)) return { id: text.match(/perch:\/\/([\w:-]+)/)?.[1], label: 'helper report', body: text }
   if (/^You are a helper that conversation /.test(text)) return { id: text.match(/conversation ([\w:-]+) delegated/)?.[1], label: 'delegated by another chat', body: text }
-  if (/^⏰ (Follow-up from perch|perch check:)/.test(text)) return { label: 'Mothership: follow-up', body: text }
-  if (/^(You stopped here before the work was finished|\(perch: |perch restarted while you were working|\(a message sent before perch restarted\))/.test(text)) return { label: 'Mothership: resume', body: text }
-  if (/^(Decision on "|The user changed the decision on ")/.test(text)) return { label: 'Mothership: decision relay', body: text }
+  if (/^⏰ (Follow-up from perch|perch check:)/.test(text)) return { label: 'auto-m8: follow-up', body: text }
+  if (/^(You stopped here before the work was finished|\(perch: |perch restarted while you were working|\(a message sent before perch restarted\))/.test(text)) return { label: 'auto-m8: resume', body: text }
+  if (/^(Decision on "|The user changed the decision on ")/.test(text)) return { label: 'auto-m8: decision relay', body: text }
   // Even before sender markers existed, this exact wrapper was only added to automation.
-  if (text !== raw) return { label: 'Mothership: queued message', body: text }
+  if (text !== raw) return { label: 'auto-m8: queued message', body: text }
   return null
 }
 

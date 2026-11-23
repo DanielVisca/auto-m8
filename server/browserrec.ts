@@ -458,7 +458,7 @@ ${p ? `<script>${inlineScript(p.js)}</script>` : ''}
     if (events.length < 2) { box.innerHTML = '<p class="muted">The DOM recording is empty.</p>'; return }
     first = events[0].timestamp;
     var P = window.rrwebPlayer && (window.rrwebPlayer.default || window.rrwebPlayer);
-    if (!P) { box.innerHTML = '<p class="muted">rrweb-player is not installed on this Mothership.</p>'; return }
+    if (!P) { box.innerHTML = '<p class="muted">rrweb-player is not installed on this auto-m8.</p>'; return }
     box.innerHTML = '';
     inst = new P({ target: box, props: { events: events, width: Math.min(1100, box.clientWidth || 1000), height: 640, autoPlay: false, showController: true } });
   } catch (e) { box.innerHTML = '<p class="muted">Could not load the recording: ' + String(e && e.message || e).replace(/</g, '&lt;') + '</p>' }

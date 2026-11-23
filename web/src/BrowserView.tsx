@@ -145,7 +145,7 @@ export function BrowserView({ owner, compact, onCollapse, fill }: { owner: strin
         <button className={taken ? 'primary' : ''} title={taken ? 'Give the window back to the agent; it takes a fresh look first' : 'Pause the agent and use the page yourself (log in, solve a captcha)'} onClick={() => setPaused(!taken)}>{taken ? 'Hand back' : 'Take over'}</button>
         <button className={ov.on ? 'primary' : ''} title={ov.on ? `PostHog data on (project ${ov.project ?? '?'}, ${ov.elements ?? 0} click patterns). Click to turn off.` : 'Draw PostHog usage, rage/dead clicks, errors and latency on this page'} onClick={() => overlay(!ov.on)}>📊 PostHog data</button>
         {ov.on && <button className={ov.mode === 'inspect' ? 'primary' : ''} title="Inspect: hover an element to see its numbers, click it for usage, errors, live latency, replays and Investigate (Alt+I in the page)" onClick={() => overlay(true, ov.mode === 'inspect' ? 'ambient' : 'inspect')}>Inspect</button>}
-        <button className="open-chrome" title="Open this window in the real Agent Chrome. Its pages show a ← Mothership button that brings you back here." onClick={() => act(() => openInChrome(owner))}>Open in Chrome ↗</button>
+        <button className="open-chrome" title="Open this window in the real Agent Chrome. Its pages show a ← auto-m8 button that brings you back here." onClick={() => act(() => openInChrome(owner))}>Open in Chrome ↗</button>
         {onCollapse && <button className="icon" title="Collapse" onClick={onCollapse}>▾</button>}
         <button className="icon" title="Close the window (the agent is told)" onClick={() => act(() => api.send('DELETE', `/api/browser/${enc(owner)}`))}>×</button>
       </div>

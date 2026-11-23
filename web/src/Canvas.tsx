@@ -147,7 +147,7 @@ function TermTile({ t, save }: { t: Tile; save: (p: Partial<Tile>) => void }) {
   return (
     <div className="tile-empty">
       <button onClick={async () => { const r = await post<{ id: string }>('/api/terms', { cwd: t.config.cwd, cmd: t.config.cmd, title: t.config.title }); save({ config: { ...t.config, term_id: r.id } }) }}>Start terminal{t.config.cmd ? `: ${t.config.cmd}` : ''}</button>
-      <div className="muted small">Terminals end when Mothership restarts; this starts a fresh one here.</div>
+      <div className="muted small">Terminals end when auto-m8 restarts; this starts a fresh one here.</div>
     </div>
   )
 }

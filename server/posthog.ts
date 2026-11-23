@@ -126,7 +126,7 @@ export const skills = {
     let r: any
     try { r = await posthogFetch(`${p()}/llm_skills/marketplace/install-command/`, { method: 'POST', body: JSON.stringify({ rotate: false }) }) }
     catch (e: any) {
-      if (/personal API key|403/.test(String(e.message))) return { ok: false, message: 'PostHog only gives out the store token in its web app.', action: 'In PostHog → Skills, choose “Install in Claude Code”, copy the command, and paste it here. Mothership runs it for you.', needsPaste: true }
+      if (/personal API key|403/.test(String(e.message))) return { ok: false, message: 'PostHog only gives out the store token in its web app.', action: 'In PostHog → Skills, choose “Install in Claude Code”, copy the command, and paste it here. auto-m8 runs it for you.', needsPaste: true }
       throw e
     }
     if (!r.command) return { ok: false, message: 'PostHog didn’t return an install command.', action: 'Try again in a minute, or paste the command from PostHog → Skills.', needsPaste: true }

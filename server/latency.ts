@@ -123,7 +123,7 @@ export function report(o: { seconds: number; machine?: Machine; stalls?: Stall[]
 export function diagnose(x: { requests: number; eventLoop: { p50: number; p99: number; max: number } | null; inFlight: { route: string; runningMs: number; dbMs: number }[]; routes: { route: string; n: number; p95: number; dbShare: number }[]; slowest: { route: string; ms: number; where: { name: string; ms: number }[] }[]; background: { name: string; ms: number; calls: number }[]; stalls: Stall[]; machine: Machine }) {
   const out: string[] = []
   const m = x.machine
-  if (m && m.severity && m.severity !== 'ok') out.push(`Mac under pressure (${m.severity}): ${(m.reasons ?? []).map(r => `${r.label}: ${r.detail.replace(/\.+$/, '')}`).join('; ')}. Everything in Mothership slows when the machine swaps or is CPU-starved; fix that first (top processes are in machine.processes).`)
+  if (m && m.severity && m.severity !== 'ok') out.push(`Mac under pressure (${m.severity}): ${(m.reasons ?? []).map(r => `${r.label}: ${r.detail.replace(/\.+$/, '')}`).join('; ')}. Everything in auto-m8 slows when the machine swaps or is CPU-starved; fix that first (top processes are in machine.processes).`)
   const stalls = x.stalls.filter(s => !/asleep|suspended/.test(s.cause))
   if (stalls.length) {
     const ms = stalls.reduce((a, s) => a + s.ms, 0)
@@ -142,7 +142,7 @@ export function diagnose(x: { requests: number; eventLoop: { p50: number; p99: n
   }
   const bg = x.background[0]
   if (bg && bg.ms > 2000) out.push(`Background work outside requests: ${bg.name} took ${(bg.ms / 1000).toFixed(1)}s over ${bg.calls} calls in this window.`)
-  if (!out.length) out.push(x.requests ? 'No slowness: requests, event loop and machine look healthy in this window.' : 'No requests in this window yet; widen seconds or open Mothership.')
+  if (!out.length) out.push(x.requests ? 'No slowness: requests, event loop and machine look healthy in this window.' : 'No requests in this window yet; widen seconds or open auto-m8.')
   return out
 }
 

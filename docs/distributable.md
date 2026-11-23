@@ -1,15 +1,15 @@
-# Making Mothership shareable
+# Making auto-m8 shareable
 
-Goal: anyone on a Mac with Claude Code can install Mothership and have it just work, without changing how the maintainer's Mothership behaves.
+Goal: anyone on a Mac with Claude Code can install auto-m8 and have it just work, without changing how the maintainer's auto-m8 behaves.
 
-Rule: everything personal becomes a setting. the maintainer's existing `settings.json` gets today's values, so their Mothership behaves the same; a fresh install gets neutral defaults.
+Rule: everything personal becomes a setting. the maintainer's existing `settings.json` gets today's values, so their auto-m8 behaves the same; a fresh install gets neutral defaults.
 
 ## What a fresh user hits today (tested 2026-11-12: empty HOME, own data dir, port 4799)
 
 - First open: an empty "What are we working on?" page. Nothing says Claude isn't found or GitHub isn't logged in.
 - Setup state only lives in Settings → Connections (Claude, GitHub, PostHog key, Apple Notes).
 - Health shows 3 errors before the user does anything: the brief spawns `claude` (ENOENT), and the GitHub PR jobs fail because gh isn't logged in.
-- `npm run setup` is good: it checks Node, claude and gh, builds, and makes ~/Applications/Mothership.app. But the README clones a private repo over SSH and documents PostHog features.
+- `npm run setup` is good: it checks Node, claude and gh, builds, and makes ~/Applications/auto-m8.app. But the README clones a private repo over SSH and documents PostHog features.
 
 ## What's tied to the maintainer
 

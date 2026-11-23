@@ -56,7 +56,7 @@ createServer(async (req, res) => {
     await sleep(3000)
     assert.equal(boots().length, 2, 'one restart for both requests')
     const c = restart('--now', 'emergency') // inside the new server's window: --now still goes at once
-    assert.match(c.stdout, /Mothership restarted: pid \d+ -> \d+/, c.stdout + c.stderr)
+    assert.match(c.stdout, /auto-m8 restarted: pid \d+ -> \d+/, c.stdout + c.stderr)
     assert.equal((await until(() => boots()[2], 15_000)).why, 'emergency')
   } finally { shell.kill('SIGKILL'); for (const b of boots()) try { process.kill(b.pid, 'SIGKILL') } catch {} }
 })

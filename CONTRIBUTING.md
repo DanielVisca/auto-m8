@@ -1,13 +1,13 @@
 # Contributing
 
-Thanks for looking. Mothership is a small macOS app: an Electron shell, a Node server (TypeScript, no build step) and a React UI.
+Thanks for looking. auto-m8 is a small macOS app: an Electron shell, a Node server (TypeScript, no build step) and a React UI.
 
 ## Setup
 
 You need a Mac, Node 26+, [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) and the [GitHub CLI](https://cli.github.com).
 
 ```sh
-git clone https://github.com/DanielVisca/mothership.git && cd mothership
+git clone https://github.com/DanielVisca/auto-m8.git && cd auto-m8
 npm install
 npm run serve        # server only: http://127.0.0.1:4777
 npm run dev          # server with reload + Vite UI

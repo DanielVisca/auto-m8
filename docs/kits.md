@@ -1,6 +1,6 @@
 # Kits: start clean or import someone's setup
 
-Goal: a new Mothership user picks **Clean** (today's fresh install) or imports a **kit**, e.g. the maintainer's skills, routines, scouts and boards, and gets them working under their own name, paths and accounts.
+Goal: a new auto-m8 user picks **Clean** (today's fresh install) or imports a **kit**, e.g. the maintainer's skills, routines, scouts and boards, and gets them working under their own name, paths and accounts.
 
 ("Packs" already means feature toggles in distributable.md, so these are called kits.)
 
@@ -46,7 +46,7 @@ Nothing runs or spends tokens until the user turns it on; autonomy pack rules st
 # export (forbid list: one pattern per line, /regex/flags allowed; keep it outside the repo)
 node server/kitcli.ts export --name my-kit --out ../my-kit --author <github> --description "..." \
   --skills a,b --routines "Routine one,Routine two" --instructions snippet.md \
-  --forbid ~/.config/mothership/kit-forbid.txt --sub="--owner=[[Acme]]=github.org"
+  --forbid ~/.config/auto-m8/kit-forbid.txt --sub="--owner=[[Acme]]=github.org"
 # import / inspect / undo
 node server/kitcli.ts import <folder or git URL> [--dry-run] [--only skill:a,routine:B]
 node server/kitcli.ts list

@@ -76,5 +76,5 @@ export const listDevices = () => all('select id, name, created_at, last_seen, la
 export const revokeDevice = (id: string) => run('delete from devices where id = ?', id)
 
 export const UNPAIRED_PAGE = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mothership</title><body style="font:16px -apple-system,system-ui;padding:32px;max-width:420px;margin:auto;color:#444">
-<h2>Mothership</h2><p>This device isn't paired.</p><p>On your Mac, open Mothership → Settings → Phone access → <b>Pair a phone</b>, then scan the code with this phone's camera.</p></body>`
+<title>auto-m8</title><body style="font:16px -apple-system,system-ui;padding:32px;max-width:420px;margin:auto;color:#444">
+<h2>auto-m8</h2><p>This device isn't paired.</p><p>On your Mac, open auto-m8 → Settings → Phone access → <b>Pair a phone</b>, then scan the code with this phone's camera.</p></body>`

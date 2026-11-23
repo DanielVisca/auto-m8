@@ -44,7 +44,7 @@
 
 <div class="grid2">
   <div>
-    <h2>Marey chart <span class="sub">time → , stations ↑ · flat = waiting, steep = moving, dropping = sent back · dotted = before Mothership was watching</span>
+    <h2>Marey chart <span class="sub">time → , stations ↑ · flat = waiting, steep = moving, dropping = sent back · dotted = before auto-m8 was watching</span>
       <span class="seg" id="mareyRange"></span></h2>
     <svg id="marey"></svg>
   </div>
@@ -178,7 +178,7 @@ function drawCrossing() {
   $('cross').innerHTML = c.length ? '' : '<div class="m stat">Clear.</div>'
   c.forEach(x => {
     const d = document.createElement('div'); d.className = 'item'
-    d.innerHTML = `${x.kind === 'decision' ? '⚖︎ ' : '⛔ '}${esc(x.title)}<div class="m">${x.since ? 'waiting ' + ago(x.since).replace(' ago', '') : ''}${x.stakes ? ' · ' + x.stakes + ' stakes' : ''}${x.autoAt ? ' · Mothership decides ' + ago(x.autoAt) : ''}${x.detail ? ' · ' + esc(x.detail).slice(0, 120) : ''}</div>`
+    d.innerHTML = `${x.kind === 'decision' ? '⚖︎ ' : '⛔ '}${esc(x.title)}<div class="m">${x.since ? 'waiting ' + ago(x.since).replace(' ago', '') : ''}${x.stakes ? ' · ' + x.stakes + ' stakes' : ''}${x.autoAt ? ' · auto-m8 decides ' + ago(x.autoAt) : ''}${x.detail ? ' · ' + esc(x.detail).slice(0, 120) : ''}</div>`
     if (x.url) { d.title = x.url; d.onclick = () => open(x.url) }
     $('cross').appendChild(d)
   })

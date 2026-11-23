@@ -109,7 +109,7 @@ function report(id: string, text: string, failed: boolean) {
   const ours = chats.has(d.parent) || !!get('select 1 from perch_started where id = ?', d.parent)
   if (ours) send({ id: d.parent, prompt, resume: true })
   else run(`insert into user_state (id, state, state_auto, state_at, note) values (?, 'waiting', 2, ?, ?)
-            on conflict(id) do update set state = 'waiting', state_auto = 2, state_at = excluded.state_at, note = excluded.note`, d.child, Date.now(), `Helper ${status}; its parent isn't running in Mothership, so read the report here`)
+            on conflict(id) do update set state = 'waiting', state_auto = 2, state_at = excluded.state_at, note = excluded.note`, d.child, Date.now(), `Helper ${status}; its parent isn't running in auto-m8, so read the report here`)
   changed()
 }
 

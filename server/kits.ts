@@ -30,7 +30,7 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex').slice(0,
 export function openKit(src: string): Kit {
   let dir = src, cleanup = () => {}
   if (/^(https?:\/\/|git@|ssh:\/\/)/.test(src) || src.endsWith('.git')) {
-    dir = mkdtempSync(join(tmpdir(), 'mothership-kit-'))
+    dir = mkdtempSync(join(tmpdir(), 'auto-m8-kit-'))
     cleanup = () => rmSync(dir, { recursive: true, force: true })
     try { execFileSync('git', ['clone', '--depth', '1', '--quiet', src, dir], { timeout: 60_000, stdio: 'pipe' }) }
     catch (e: any) { cleanup(); throw new Error(`Couldn’t clone ${src}: ${String(e.stderr || e.message).trim().slice(0, 300)}`) }
@@ -39,7 +39,7 @@ export function openKit(src: string): Kit {
   const mf = join(dir, 'kit.json')
   if (!existsSync(mf)) { cleanup(); throw new Error('Not a kit: no kit.json') }
   const manifest = JSON.parse(readFileSync(mf, 'utf8')) as KitManifest
-  if (manifest.kit !== 1 || !SAFE_NAME.test(manifest.name ?? '')) { cleanup(); throw new Error('Not a kit this Mothership understands (kit.json)') }
+  if (manifest.kit !== 1 || !SAFE_NAME.test(manifest.name ?? '')) { cleanup(); throw new Error('Not a kit this auto-m8 understands (kit.json)') }
   for (const s of manifest.skills ?? []) if (!SAFE_NAME.test(s) || !existsSync(join(dir, 'skills', s, 'SKILL.md'))) { cleanup(); throw new Error(`Kit skill "${s}" is missing or badly named`) }
   const routines: KitRoutine[] = existsSync(join(dir, 'routines.json')) ? JSON.parse(readFileSync(join(dir, 'routines.json'), 'utf8')) : []
   const instructions = manifest.instructions && existsSync(join(dir, 'instructions.md')) ? readFileSync(join(dir, 'instructions.md'), 'utf8') : ''
@@ -73,8 +73,9 @@ function installedHash(dir: string) {
   return dirHash(out.sort((a, b) => a.path.localeCompare(b.path)))
 }
 
-const block = (kit: string, body: string) => `<!-- mothership-kit:${kit} -->\n${body.trim()}\n<!-- /mothership-kit:${kit} -->`
-const blockRe = (kit: string) => new RegExp(`\\n*<!-- mothership-kit:${kit.replace(/[.]/g, '\\.')} -->[\\s\\S]*?<!-- /mothership-kit:${kit.replace(/[.]/g, '\\.')} -->\\n?`)
+const block = (kit: string, body: string) => `<!-- auto-m8-kit:${kit} -->\n${body.trim()}\n<!-- /auto-m8-kit:${kit} -->`
+// Matches blocks written before the rename too (mothership-kit), so remove and re-import still find them.
+const blockRe = (kit: string) => new RegExp(`\\n*<!-- (?:auto-m8|mothership)-kit:${kit.replace(/[.]/g, '\\.')} -->[\\s\\S]*?<!-- /(?:auto-m8|mothership)-kit:${kit.replace(/[.]/g, '\\.')} -->\\n?`)
 
 type Ledger = { kit: string; kind: string; name: string; ref: string | null; hash: string | null; version: string | null }
 const ledger = (kit: string) => all<Ledger>('select * from kit_items where kit = ?', kit)
@@ -176,7 +177,7 @@ export function remove(kit: string, p: Pick<Paths, 'claudeMd'>) {
   return { removed, kept }
 }
 
-// The importer's own values, from Mothership's settings.
+// The importer's own values, from auto-m8's settings.
 export async function myValues(): Promise<{ values: Values; paths: Paths }> {
   const { settings } = await import('./settings.ts')
   const { ownerName } = await import('./owner.ts')

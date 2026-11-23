@@ -38,12 +38,12 @@ app.setPath('userData', join(DATA, 'electron')) // keep Chromium's caches out of
 // unbounded fetch left the shell waiting on it with no window (2026-11-10).
 const healthyAt = (p, ms = 3000) => fetch(`${urlOf(p)}/api/health`, { signal: AbortSignal.timeout(ms) }).then(r => r.ok).catch(() => false)
 const healthy = () => healthyAt(profileOf(activeId))
-const logTo = (p, msg) => { try { require('node:fs').appendFileSync(join(p.dataDir, 'server.log'), `[${new Date().toISOString()}] Mothership shell: ${msg}\n`) } catch {} }
+const logTo = (p, msg) => { try { require('node:fs').appendFileSync(join(p.dataDir, 'server.log'), `[${new Date().toISOString()}] auto-m8 shell: ${msg}\n`) } catch {} }
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 // Whatever holds a profile's port but doesn't answer is a hung perch: stop it so a fresh one can
 // listen. SIGTERM, then SIGKILL. A process stuck in the kernel ignores even SIGKILL; say so.
-const HANG = 'Mothership stopped answering health checks for 30s; the app restarted it'
+const HANG = 'auto-m8 stopped answering health checks for 30s; the app restarted it'
 async function freePort(p, reason = HANG) {
   const r = spawnSync('lsof', ['-ti', `tcp:${p.port}`, '-sTCP:LISTEN'], { encoding: 'utf8' })
   const pids = (r.stdout || '').split('\n').map(Number).filter(n => n > 0 && n !== process.pid)
@@ -439,7 +439,7 @@ ipcMain.on('occluded', (_e, hidden) => {
 // on top, so it stays visible); come back to perch and it returns to where and how big it was. It
 // shrinks at once (no vanish-then-reappear), and only an automatic shrink
 // expands itself: if you made it mini (⧉), it stays mini. Off in Settings → Window.
-const shellLog = msg => { try { require('node:fs').appendFileSync(join(profileOf(activeId).dataDir, 'server.log'), `[${new Date().toISOString()}] Mothership shell: ${msg}\n`) } catch {} }
+const shellLog = msg => { try { require('node:fs').appendFileSync(join(profileOf(activeId).dataDir, 'server.log'), `[${new Date().toISOString()}] auto-m8 shell: ${msg}\n`) } catch {} }
 let autoMinied = false, blurTimer = null, lastRestore = 0
 const autoMiniOn = () => read().window?.autoMini !== false
 function watchFocus() {
@@ -485,8 +485,8 @@ ipcMain.handle('theme', (_e, t) => { nativeTheme.themeSource = ['light', 'dark']
 if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance', () => { if (app.isReady()) showWindow() })
 
-// Show as Mothership (not Electron) in the Dock, menu bar and app switcher.
-app.setName('Mothership')
+// Show as auto-m8 (not Electron) in the Dock, menu bar and app switcher.
+app.setName('auto-m8')
 app.whenReady().then(async () => {
   try { if (app.dock) app.dock.setIcon(join(ROOT, 'web/public/icon-180.png')) } catch {}
   await ensureServer()
@@ -508,22 +508,22 @@ function restartPerch() {
   // Stop every profile's server, including ones an earlier shell started (will-quit only stops our
   // own children), so the relaunch really runs fresh server code. Chats are detached and reattach.
   quitting = true // the servers stopped below are not crashes: don't bring them back
-  Promise.all(enabledProfiles().map(p => freePort(p, 'you restarted Mothership from the menu'))).finally(() => {
+  Promise.all(enabledProfiles().map(p => freePort(p, 'you restarted auto-m8 from the menu'))).finally(() => {
     app.relaunch({ args: process.argv.slice(1) })
     app.quit() // the relaunched shell starts fresh servers
   })
 }
 app.whenReady().then(() => Menu.setApplicationMenu(Menu.buildFromTemplate([
-  { label: 'Mothership', submenu: [
+  { label: 'auto-m8', submenu: [
     { label: 'Show / hide', accelerator: settings.window?.hotkey || 'Control+Alt+Space', click: toggle, registerAccelerator: false },
     { type: 'separator' },
     { label: 'Collapse / expand', accelerator: COLLAPSE_KEY, click: toggleCollapse, registerAccelerator: false },
     { label: 'Tuck into the edge / bring back', accelerator: 'CmdOrCtrl+Shift+.', click: () => win && !win.isDestroyed() && setTuck(!beforeTuck) },
     { type: 'separator' },
     { label: 'Reload window', accelerator: 'CmdOrCtrl+R', click: () => win && !win.isDestroyed() && win.webContents.reload() },
-    { label: 'Restart Mothership (rebuild + restart servers)', accelerator: 'CmdOrCtrl+Shift+R', click: restartPerch },
+    { label: 'Restart auto-m8 (rebuild + restart servers)', accelerator: 'CmdOrCtrl+Shift+R', click: restartPerch },
     { type: 'separator' },
-    { role: 'hide' }, { role: 'quit', label: 'Quit Mothership' },
+    { role: 'hide' }, { role: 'quit', label: 'Quit auto-m8' },
   ] },
   { role: 'editMenu' },
   { label: 'View', submenu: [{ role: 'toggleDevTools' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
@@ -532,10 +532,10 @@ app.whenReady().then(() => Menu.setApplicationMenu(Menu.buildFromTemplate([
 // Right-click the Dock icon: always a way out, even when the window is blank or stuck.
 // Force quit skips every quit handler (app.exit), after stopping our own servers.
 app.whenReady().then(() => app.dock?.setMenu(Menu.buildFromTemplate([
-  { label: 'Show Mothership', click: showWindow },
+  { label: 'Show auto-m8', click: showWindow },
   { label: 'Reload window', click: () => win && !win.isDestroyed() && win.webContents.reload() },
-  { label: 'Restart Mothership', click: restartPerch },
+  { label: 'Restart auto-m8', click: restartPerch },
   { type: 'separator' },
-  { label: 'Force quit Mothership', click: () => { quitting = true; for (const s of servers.values()) { try { s.kill('SIGKILL') } catch {} } app.exit(0) } },
+  { label: 'Force quit auto-m8', click: () => { quitting = true; for (const s of servers.values()) { try { s.kill('SIGKILL') } catch {} } app.exit(0) } },
 ])))
 app.on('will-quit', () => { globalShortcut.unregisterAll(); for (const s of servers.values()) s.kill() })

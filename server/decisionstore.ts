@@ -90,7 +90,7 @@ export function raise(d: Raise): Decision {
   run(`insert into decisions (id, key, created_at, updated_at, source, conversation_id, url, title, context, options, recommendation, stakes, auto_at)
        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, d.key, Date.now(), Date.now(), d.source, owner, d.url ?? null, d.title, d.context ?? null, JSON.stringify(d.options ?? []), d.recommendation ?? null, d.stakes ?? 'high', autoAt(d))
   // A big one shows in the owning conversation's thread as perch's own note; small ones stay quiet.
-  if (owner && d.stakes !== 'low' && askMe()) run('insert into chat_notices (conversation_id, at, text) values (?, ?, ?)', owner, Date.now(), `Decision needed: ${d.title}${d.recommendation ? ` (Mothership recommends: ${d.recommendation})` : ''}`)
+  if (owner && d.stakes !== 'low' && askMe()) run('insert into chat_notices (conversation_id, at, text) values (?, ?, ?)', owner, Date.now(), `Decision needed: ${d.title}${d.recommendation ? ` (auto-m8 recommends: ${d.recommendation})` : ''}`)
   changed()
   return parse(get('select * from decisions where id = ?', id))
 }

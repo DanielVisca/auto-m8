@@ -4,7 +4,7 @@
 //   node server/kitcli.ts import <dir or git URL> [--dry-run] [--only skill:a,routine:B]
 //   node server/kitcli.ts list
 //   node server/kitcli.ts remove <kit>
-// Export always substitutes your Mothership name, home folder and code folder; --sub adds more.
+// Export always substitutes your auto-m8 name, home folder and code folder; --sub adds more.
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'

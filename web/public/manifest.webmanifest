@@ -1,6 +1,6 @@
 {
-  "name": "Mothership",
-  "short_name": "Mothership",
+  "name": "auto-m8",
+  "short_name": "auto-m8",
   "start_url": "/#home",
   "display": "standalone",
   "background_color": "#16171a",

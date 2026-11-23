@@ -63,7 +63,7 @@ function AgentBrowser({ settings, save }: { settings: any; save: (p: any) => any
 }
 
 // Settings is split into tabs, listed in a side panel. The tab rides in the hash (#settings/spend), so links can open one.
-const TABS: [string, string, string][] = [['general', 'General', 'Your name, autonomy, decisions, look and window'], ['connections', 'Connections', 'Claude, GitHub, PostHog, MCP servers, phone'], ['chats', 'Chats & browser', 'Defaults for new chats and the agent browser'], ['accounts', 'Accounts', 'Claude profiles Mothership runs as'], ['models', 'Models', 'Routing and local models'], ['spend', 'Spend', 'AI spend, per PR, and subscription usage'], ['health', 'Health', 'Availability, search learning, missing capabilities']]
+const TABS: [string, string, string][] = [['general', 'General', 'Your name, autonomy, decisions, look and window'], ['connections', 'Connections', 'Claude, GitHub, PostHog, MCP servers, phone'], ['chats', 'Chats & browser', 'Defaults for new chats and the agent browser'], ['accounts', 'Accounts', 'Claude profiles auto-m8 runs as'], ['models', 'Models', 'Routing and local models'], ['spend', 'Spend', 'AI spend, per PR, and subscription usage'], ['health', 'Health', 'Availability, search learning, missing capabilities']]
 const tabFromHash = () => { const t = location.hash.split('/')[1]; return TABS.some(x => x[0] === t) ? t : null }
 
 type Mcp = { name: string; target: string; status: string; kind: string }
@@ -109,8 +109,8 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
       <section className="card">
         <h3>Organising</h3>
         <label className="field">Archive done conversations after <input type="number" min={0} style={{ width: 60 }} defaultValue={settings.organize.archiveDoneAfterDays} onBlur={e => save({ organize: { archiveDoneAfterDays: Number(e.target.value) } })} /> days <span className="muted small">0 = never</span></label>
-        <label className="field"><input type="checkbox" checked={!!settings.decisions?.askMe} onChange={e => save({ decisions: { ...(settings.decisions ?? { autoAfterHours: 4, autoFixesPerDay: 3 }), askMe: e.target.checked } })} /> Ask me about big decisions <span className="muted small">Off: agents decide and Mothership takes their recommendation at once.</span></label>
-        {settings.decisions?.askMe && <label className="field">If you don't answer a big decision, Mothership takes its recommendation after <input type="number" min={0} step={0.5} style={{ width: 60 }} defaultValue={settings.decisions?.autoAfterHours ?? 4} onBlur={e => save({ decisions: { ...settings.decisions, autoAfterHours: Number(e.target.value) } })} /> hours <span className="muted small">0 = always wait for you. Small decisions Mothership makes itself and logs under ⚑.</span></label>}
+        <label className="field"><input type="checkbox" checked={!!settings.decisions?.askMe} onChange={e => save({ decisions: { ...(settings.decisions ?? { autoAfterHours: 4, autoFixesPerDay: 3 }), askMe: e.target.checked } })} /> Ask me about big decisions <span className="muted small">Off: agents decide and auto-m8 takes their recommendation at once.</span></label>
+        {settings.decisions?.askMe && <label className="field">If you don't answer a big decision, auto-m8 takes its recommendation after <input type="number" min={0} step={0.5} style={{ width: 60 }} defaultValue={settings.decisions?.autoAfterHours ?? 4} onBlur={e => save({ decisions: { ...settings.decisions, autoAfterHours: Number(e.target.value) } })} /> hours <span className="muted small">0 = always wait for you. Small decisions auto-m8 makes itself and logs under ⚑.</span></label>}
         <label className="field"><input type="checkbox" checked={settings.needs?.enabled !== false} onChange={e => save({ needs: { enabled: e.target.checked } })} /> Agents recheck Needs me and move safe work forward</label>
         <label className="field"><input type="checkbox" checked={settings.ai.dailyBrief} onChange={e => save({ ai: { dailyBrief: e.target.checked } })} /> Write a brief every morning</label>
         <label className="field">Model for briefs, Ask and skill search <input defaultValue={settings.ai.model} onBlur={e => save({ ai: { model: e.target.value } })} /> <span className="muted small">sonnet is quick and cheap; opus is more thorough</span></label>
@@ -128,7 +128,7 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
           <>
             <label className="field"><input type="checkbox" checked={settings.window.alwaysOnTop} onChange={e => { save({ window: { alwaysOnTop: e.target.checked } }); shell.pin?.(e.target.checked) }} /> Stay above other windows</label>
             <label className="field"><input type="checkbox" checked={settings.window.autoMini !== false} onChange={e => save({ window: { autoMini: e.target.checked } })} /> Picture in picture when you click away <span className="muted small">shrinks to a small window that stays visible, and comes back when you return</span></label>
-            <label className="field"><input type="checkbox" checked={settings.window.autoTuck !== false} onChange={e => save({ window: { autoTuck: e.target.checked } })} /> Tuck into the edge when covered <span className="muted small">if other windows hide Mothership completely, it slides into a tab on the side of the screen that stays on top; click it to bring Mothership back</span></label>
+            <label className="field"><input type="checkbox" checked={settings.window.autoTuck !== false} onChange={e => save({ window: { autoTuck: e.target.checked } })} /> Tuck into the edge when covered <span className="muted small">if other windows hide auto-m8 completely, it slides into a tab on the side of the screen that stays on top; click it to bring auto-m8 back</span></label>
             <label className="field">Show / hide shortcut <input value={settings.window.hotkey} onChange={e => save({ window: { hotkey: e.target.value } })} /> <span className="muted small">applies on restart</span></label>
             <label className="field">Collapse / expand shortcut <input value={settings.window.collapseHotkey ?? 'Control+Alt+M'} onChange={e => save({ window: { collapseHotkey: e.target.value } })} /> <span className="muted small">works from any app; applies on restart</span></label>
             <div className="field">Size
@@ -153,7 +153,7 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
         <PosthogKey status={st.posthog} settings={settings} save={save} />
         <Line ok={st.appleNotes?.access === 'granted'} label="Apple Notes"
           value={st.appleNotes?.access === 'granted' ? `${st.appleNotes.count} notes, searchable` : st.appleNotes?.access === 'missing' ? 'Notes isn’t set up on this Mac' : 'Needs Full Disk Access to read your notes (read-only)'}
-          action={st.appleNotes?.access === 'needs-access' && <button onClick={() => post('/api/applenotes/grant')} title="Opens Privacy → Full Disk Access. Add node (/opt/homebrew/Cellar/node/…/bin/node), then restart Mothership.">Grant access</button>} />
+          action={st.appleNotes?.access === 'needs-access' && <button onClick={() => post('/api/applenotes/grant')} title="Opens Privacy → Full Disk Access. Add node (/opt/homebrew/Cellar/node/…/bin/node), then restart auto-m8.">Grant access</button>} />
       </section>
       <section className="card">
         <div className="card-head">
@@ -245,7 +245,7 @@ function PhoneAccess() {
         <label className="toggle"><input type="checkbox" checked={anywhere} disabled={tsBusy} onChange={e => setAnywhere(e.target.checked)} /> anywhere (Tailscale)</label>
         <label className="toggle"><input type="checkbox" checked={data.enabled} onChange={e => toggle(e.target.checked)} /> on this wifi</label>
       </div>
-      <div className="muted small">On a phone, Mothership opens in Simple mode: what needs you, what's running, and one box to continue or start work. The same conversations as here, so you can step away and pick up on either. Advanced is the full app.</div>
+      <div className="muted small">On a phone, auto-m8 opens in Simple mode: what needs you, what's running, and one box to continue or start work. The same conversations as here, so you can step away and pick up on either. Advanced is the full app.</div>
       {anywhere && <div className="small">{ts?.url ? <>Reachable on your tailnet at <code>{ts.url}</code> (https, any network). The phone needs the Tailscale app, signed in.</> : <span className="bad">{ts?.error ?? 'tailscale serve is not set up yet.'}</span>}</div>}
       {mob && <div className="row-flex small">
         <label className="toggle"><input type="checkbox" checked={mob.settings?.push !== false} onChange={e => setMobile({ push: e.target.checked })} /> Notify my phone when something needs me and I'm away from the Mac</label>
@@ -256,7 +256,7 @@ function PhoneAccess() {
         <label className="toggle"><input type="checkbox" checked={mob.settings?.stayAwake !== false} onChange={e => setMobile({ stayAwake: e.target.checked })} /> Keep the Mac awake while agents are running</label>
         <span className="muted">{mob.awake ? 'awake now' : 'not holding'} · on battery a closed lid still sleeps</span>
       </div>}
-      <div className="muted small">Lets a paired phone on the same network use Mothership: browse, search, chat, terminals. Nothing on the network gets in without pairing. Traffic is plain HTTP, so only turn this on for networks you trust (home, not a café). For anywhere, Tailscale works too: pair over its address the same way.</div>
+      <div className="muted small">Lets a paired phone on the same network use auto-m8: browse, search, chat, terminals. Nothing on the network gets in without pairing. Traffic is plain HTTP, so only turn this on for networks you trust (home, not a café). For anywhere, Tailscale works too: pair over its address the same way.</div>
       {(data.enabled || anywhere) && (
         <>
           {data.enabled && <div className="small">Listening on {data.listening.length ? data.listening.map(ip => <code key={ip}>{ip}</code>) : <span className="bad">no network address yet</span>}. macOS may ask once whether node can accept incoming connections: allow it.</div>}
@@ -279,7 +279,7 @@ function PhoneAccess() {
               <button className="bad" onClick={async () => { await api.send('DELETE', `/api/remote/devices/${d.id}`); reload() }}>Revoke</button>
             </div>
           ))}
-          <div className="muted small">On the phone, use Share → Add to Home Screen to get Mothership as an app.</div>
+          <div className="muted small">On the phone, use Share → Add to Home Screen to get auto-m8 as an app.</div>
         </>
       )}
     </section>
@@ -365,7 +365,7 @@ function Health() {
     <section className="card">
       <div className="card-head"><h3>Health</h3><span className={`small ${open.length ? 'bad' : 'ok-text'}`}>{open.length ? `${open.length} open` : 'all good'}</span></div>
       <Availability />
-      {!list.length && <div className="muted small">Nothing has gone wrong this week. When something does, it shows here in plain words with what Mothership did about it.</div>}
+      {!list.length && <div className="muted small">Nothing has gone wrong this week. When something does, it shows here in plain words with what auto-m8 did about it.</div>}
       {list.slice(0, 12).map(e => (
         <div key={e.key} className="health-row">
           <span className={`dot ${e.status === 'resolved' ? 'ok' : e.status === 'retrying' ? 'pending' : 'bad'}`} />
@@ -520,7 +520,7 @@ function LocalModels({ settings, save }: { settings: any; save: (p: any) => any 
   return (
     <section className="card">
       <h3>Models</h3>
-      <div className="muted small">Claude (your plan) and Codex (your ChatGPT plan) are peers: Auto uses either, each covers for the other when it hits a limit or is signed out, and they share the conversation, Mothership tools, MCP servers, instructions, memory and skills. Either can hand a job to the other with <code>delegate</code> (engine: codex or claude).</div>
+      <div className="muted small">Claude (your plan) and Codex (your ChatGPT plan) are peers: Auto uses either, each covers for the other when it hits a limit or is signed out, and they share the conversation, auto-m8 tools, MCP servers, instructions, memory and skills. Either can hand a job to the other with <code>delegate</code> (engine: codex or claude).</div>
       <div className="small">Codex: {data.codex?.ok ? <span>signed in{data.codex.default ? ` · default ${data.codex.default}` : ''}{data.codex.models?.length ? ` · ${data.codex.models.length} models in the model menu` : ''}</span> : <span className="bad">{data.codex?.why ?? 'unknown'}</span>}</div>
       <h3>Local models</h3>
       {!data.running ? (
@@ -585,7 +585,7 @@ function UsageCard() {
     <section className="card">
       <div className="row-flex"><h3 className="grow">Usage</h3>
         <select value={days} onChange={e => setDays(Number(e.target.value))}>{[1, 7, 30, 90].map(d => <option key={d} value={d}>{d === 1 ? 'today' : `${d} days`}</option>)}</select></div>
-      {!u ? <div className="muted small">…</div> : !u.turns ? <div className="muted small">No measured turns yet in this window. Chats run in Mothership report their usage from now on.</div> : (
+      {!u ? <div className="muted small">…</div> : !u.turns ? <div className="muted small">No measured turns yet in this window. Chats run in auto-m8 report their usage from now on.</div> : (
         <>
           <div className="stats">
             <div className="stat"><b>{money(u.cost)}</b><span>API-equivalent, {u.turns} turns</span></div>

@@ -19,7 +19,7 @@ export type Item =
   | { kind: 'assistant'; blocks: Block[]; ts?: number; mid?: string; uuid?: string; model?: string; activity?: { tools: string[]; omitted?: number } }
   | { kind: 'result'; ok: boolean; text: string; cost?: number; ms?: number; denials?: number; switched?: { tokens: number; cost: number } }
   | { kind: 'error'; text: string }
-  | { kind: 'notice'; text: string } // Mothership's own note in the thread: a model change, a usage cap
+  | { kind: 'notice'; text: string } // auto-m8's own note in the thread: a model change, a usage cap
 
 // perch restarts take a few seconds (an agent loading new server code, a crash, the menu). Requests
 // in that gap wait for it to come back instead of failing; only a gap longer than OUTAGE_TOAST_MS
@@ -61,7 +61,7 @@ if (typeof window !== 'undefined') {
   setInterval(() => { if (Date.now() - tick > 5000 && downSince) slept = true; tick = Date.now() }, 1000)
 }
 
-const unreachable = () => toast('Mothership isn’t reachable right now.', { action: 'It comes back on its own (the app restarts it); if it doesn’t within a minute, use Mothership → Restart.' })
+const unreachable = () => toast('auto-m8 isn’t reachable right now.', { action: 'It comes back on its own (the app restarts it); if it doesn’t within a minute, use auto-m8 → Restart.' })
 export const api = {
   get: <T = any>(path: string) => fetch(path).then(r => r.json() as Promise<T>),
   send: async <T = any>(method: string, path: string, body?: unknown): Promise<T> => {
@@ -73,10 +73,10 @@ export const api = {
       // that dropped mid-request may have been done already: don't repeat it, say so.
       const neverSent = Date.now() - t0 < 1500
       if (!await waitForPerch()) { unreachable(); throw e }
-      if (!neverSent) { toast('Mothership restarted while that was being sent.', { action: 'Check it went through; try again if not.' }); throw e }
+      if (!neverSent) { toast('auto-m8 restarted while that was being sent.', { action: 'Check it went through; try again if not.' }); throw e }
       try { r = await attempt() } catch (e2) { unreachable(); throw e2 }
     }
-    const data = await r.json().catch(() => ({ error: `Mothership answered ${r.status}` }))
+    const data = await r.json().catch(() => ({ error: `auto-m8 answered ${r.status}` }))
     if (!r.ok && (data as any)?.error) toast((data as any).error, { action: (data as any).action })
     return data as T
   },
@@ -104,14 +104,14 @@ function deliver(q: Queued): Promise<any> {
       try {
         const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...q.body, clientKey: q.key }) })
         if (r.status < 502) { // answered (even with an error): it is no longer ours to retry
-          const data = await r.json().catch(() => ({ error: `Mothership answered ${r.status}` }))
+          const data = await r.json().catch(() => ({ error: `auto-m8 answered ${r.status}` }))
           writeOutbox(readOutbox().filter(x => x.key !== q.key))
           if (!r.ok && data?.error) toast(data.error, { action: data.action })
           else if (told) toast('Queued message sent.', { kind: 'ok', ms: 3000 })
           return data
         }
       } catch { noteDown() }
-      if (!told) { told = true; toast('Mothership is reconnecting: your message is queued and sends when it’s back.', { kind: 'info', ms: 5000 }) }
+      if (!told) { told = true; toast('auto-m8 is reconnecting: your message is queued and sends when it’s back.', { kind: 'info', ms: 5000 }) }
       await outboxPause(wait)
       wait = Math.min(wait * 2, 5000)
     }
@@ -261,7 +261,7 @@ export function useLive<T>(url: string | null, topics: Topic[] = [], initial?: T
         if (urlRef.current === u) { setData(memCache.get(u)); setDataUrl(u); setError(null) }
         return
       }
-      const d = await r.json().catch(() => ({ error: `Mothership answered ${r.status}` }))
+      const d = await r.json().catch(() => ({ error: `auto-m8 answered ${r.status}` }))
       const etag = r.ok ? r.headers.get('ETag') : null
       etags.delete(u)
       if (etag && !(d && typeof d === 'object' && 'error' in d)) {
@@ -270,12 +270,12 @@ export function useLive<T>(url: string | null, topics: Topic[] = [], initial?: T
         for (const old of etags.keys()) { if (etags.size <= CACHE_MAX_ENTRIES) break; etags.delete(old); memCache.delete(old) }
       }
       if (urlRef.current !== u) return
-      if (!r.ok || (d && typeof d === 'object' && 'error' in d && Object.keys(d).length <= 3)) setError((d as any).error ?? `Mothership answered ${r.status}`) // keep the last good data
+      if (!r.ok || (d && typeof d === 'object' && 'error' in d && Object.keys(d).length <= 3)) setError((d as any).error ?? `auto-m8 answered ${r.status}`) // keep the last good data
       else { setData(d); setDataUrl(u); setError(null); cachePut(u, d) }
     }).catch(() => {
       // Ride out a restart quietly (keep the last data); only a long gap is worth showing.
       noteDown()
-      if (perchDownFor() > OUTAGE_TOAST_MS) setError('Mothership isn’t reachable right now; reconnecting.')
+      if (perchDownFor() > OUTAGE_TOAST_MS) setError('auto-m8 isn’t reachable right now; reconnecting.')
       waitForPerch().then(ok => { if (ok && urlRef.current === u) load() })
     }).finally(() => setInFlight(n => n - 1))
   }, [])

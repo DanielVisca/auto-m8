@@ -14,7 +14,7 @@ type Row = { wait: Wait; live: boolean; status: string; detail?: string; bad?: b
 
 const norm = (t: string) => t.replace(/\s+/g, ' ').trim().slice(0, 400)
 const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-const WHAT = { agent: 'Background agent', command: 'Background command', workflow: 'Workflow', 'follow-up': 'Mothership follow-up', wakeup: 'Wakeup timer' } as const
+const WHAT = { agent: 'Background agent', command: 'Background command', workflow: 'Workflow', 'follow-up': 'auto-m8 follow-up', wakeup: 'Wakeup timer' } as const
 const ICON = { agent: '🤖', command: '⌘', workflow: '⚙', 'follow-up': '⏰', wakeup: '⏰' } as const
 
 function rowOf(w: Wait, now: number, promises: PromiseRow[]): Row {

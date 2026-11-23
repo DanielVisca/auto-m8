@@ -587,7 +587,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
       <div className="scroll" ref={scroller}>
         {id && <ConversationDecisions id={id} />}
         {!id && <NewChatHint />}
-        {id && !items.length && (loading !== null || conv?.source === 'posthog-code') && <div className="msg note">{loading ? `Loading… Mothership is busy, retrying (try ${loading + 1})` : 'Loading…'}</div>}
+        {id && !items.length && (loading !== null || conv?.source === 'posthog-code') && <div className="msg note">{loading ? `Loading… auto-m8 is busy, retrying (try ${loading + 1})` : 'Loading…'}</div>}
         <Messages items={items} running={running} onBranch={id ? branch : undefined} onRewind={id ? setRewinding : undefined} convId={id} />
       </div>
       {id && rewinding && <RewindDialog id={id} uuid={rewinding} onDone={nid => { setRewinding(null); if (nid) onOpen(nid) }} />}
@@ -815,7 +815,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
       )}
       {queued.length > 0 && (
         <div className="chips">
-          {queued.map(q => <span key={q.key} className="chip" title={q.body.prompt}>⏳ Queued, sends when Mothership reconnects: “{String(q.body.prompt ?? '').slice(0, 60)}”</span>)}
+          {queued.map(q => <span key={q.key} className="chip" title={q.body.prompt}>⏳ Queued, sends when auto-m8 reconnects: “{String(q.body.prompt ?? '').slice(0, 60)}”</span>)}
         </div>
       )}
       {dragOver && <div className="drop-hint">Drop images, files, links, PRs or text to share them with the agent</div>}
@@ -885,7 +885,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
         {id && conv?.cwd && <span className="muted small" title={conv.cwd}>{baseName(conv.cwd)}{conv.branch ? ` · ${conv.branch}` : ''}</span>}
         {/* Which model: Auto picks per message from what you already pay for; or pin one. */}
         <EnginePicker value={engine || 'auto'} onChange={pickEngine} local={local} className={isLocalEngine(engine) ? 'local' : ''}
-          title={engine === 'auto' || !engine ? 'Auto: Haiku for quick asks, Sonnet for everyday work, Opus for heavy thinking; Claude and Codex cover for each other: when one hits its cap or is signed out, the other takes over with the same context, tools and memory' : engine.startsWith('codex') ? 'Codex on your ChatGPT plan: same conversation, Mothership tools, MCP servers, instructions, memory and skills. Switch back to Claude any time.' : isLocalEngine(engine) ? (engine.endsWith(':cloud') ? `Runs on ${engine} through Ollama's cloud (your Ollama account), with all of Claude Code's tools` : `Runs on ${engine} on this Mac: private and free, slower and less capable than Claude`) : 'A fixed Claude model on your plan'} />
+          title={engine === 'auto' || !engine ? 'Auto: Haiku for quick asks, Sonnet for everyday work, Opus for heavy thinking; Claude and Codex cover for each other: when one hits its cap or is signed out, the other takes over with the same context, tools and memory' : engine.startsWith('codex') ? 'Codex on your ChatGPT plan: same conversation, auto-m8 tools, MCP servers, instructions, memory and skills. Switch back to Claude any time.' : isLocalEngine(engine) ? (engine.endsWith(':cloud') ? `Runs on ${engine} through Ollama's cloud (your Ollama account), with all of Claude Code's tools` : `Runs on ${engine} on this Mac: private and free, slower and less capable than Claude`) : 'A fixed Claude model on your plan'} />
         <ClaudePressure />
         <select value={mode} onChange={e => setMode(e.target.value)} title="Permission mode (fixed per process; changing it restarts the session)">
           {['auto', 'acceptEdits', 'plan', 'manual', 'dontAsk', 'bypassPermissions'].map(m => <option key={m}>{m}</option>)}
@@ -1046,7 +1046,7 @@ function SlashList({ items, index, onPick }: { items: Cmd[]; index: number; onPi
         <button key={c.kind + c.name} className={`slash-row ${i === index ? 'on' : ''}`} onMouseDown={e => { e.preventDefault(); onPick(c) }}>
           <span className="slash-name">/{c.name}</span>
           <span className="muted small ellipsis grow">{c.description}</span>
-          <span className="chip">{c.kind === 'perch' ? 'Mothership' : c.kind === 'skill' ? (c.where ?? 'installed') : 'store'}</span>
+          <span className="chip">{c.kind === 'perch' ? 'auto-m8' : c.kind === 'skill' ? (c.where ?? 'installed') : 'store'}</span>
         </button>
       ))}
       <div className="muted small slash-hint">↑↓ choose · Tab complete · Esc close</div>

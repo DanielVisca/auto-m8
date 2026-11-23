@@ -1,6 +1,6 @@
 {
-  "name": "mothership",
-  "productName": "Mothership",
+  "name": "auto-m8",
+  "productName": "auto-m8",
   "version": "0.1.0",
   "private": true,
   "description": "An always-on home for your agent conversations, PRs and terminals, on macOS",
@@ -58,11 +58,11 @@
   "author": "Daniel Visca",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DanielVisca/mothership.git"
+    "url": "git+https://github.com/DanielVisca/auto-m8.git"
   },
-  "homepage": "https://github.com/DanielVisca/mothership",
+  "homepage": "https://github.com/DanielVisca/auto-m8",
   "bugs": {
-    "url": "https://github.com/DanielVisca/mothership/issues"
+    "url": "https://github.com/DanielVisca/auto-m8/issues"
   },
   "keywords": [
     "claude-code",

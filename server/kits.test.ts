@@ -68,7 +68,7 @@ test('export, import with your values, update, keep your edits, remove', () => {
   assert.equal(rt.cron, '15 9 * * 1-5')
   assert.match(rt.prompt, new RegExp(`for Ana\\. Save to ${home}/notes`))
   const claude = readFileSync(paths.claudeMd, 'utf8')
-  assert.match(claude, /^# Mine\nKeep this\.\n\n<!-- mothership-kit:zed -->\n# Working with Ana/)
+  assert.match(claude, /^# Mine\nKeep this\.\n\n<!-- auto-m8-kit:zed -->\n# Working with Ana/)
   assert.deepEqual(kits.plan(k, values, paths).map(i => i.action), ['unchanged', 'unchanged', 'unchanged'])
 
   // You edit the skill; a new kit version must not overwrite it, but untouched items update.

@@ -114,8 +114,8 @@ export function SimpleHome({ onOpen, onAdvanced }: { onOpen: (id: string) => voi
       </header>
       <div className="s-scroll">
         {push.state === 'off' && <button className="s-banner" onClick={push.enable}>🔔 Tell me when something needs me</button>}
-        {push.state === 'denied' && <div className="s-banner muted">Notifications are blocked for Mothership in the phone's settings.</div>}
-        {push.state === 'unsupported' && !window.isSecureContext && <div className="s-banner muted small">Notifications need the https (Tailscale) address. Turn it on in Mothership Settings → Phone access on the Mac.</div>}
+        {push.state === 'denied' && <div className="s-banner muted">Notifications are blocked for auto-m8 in the phone's settings.</div>}
+        {push.state === 'unsupported' && !window.isSecureContext && <div className="s-banner muted small">Notifications need the https (Tailscale) address. Turn it on in auto-m8 Settings → Phone access on the Mac.</div>}
         <NeedsMe onOpen={onOpen} />
         {running.length > 0 && <section><h3>Running <span className="muted small">{running.length}</span></h3>{running.map(c => <Row key={c.id} c={c} onOpen={onOpen} />)}</section>}
         {recent.length > 0 && <section><h3>Pick up</h3>{recent.map(c => <Row key={c.id} c={c} onOpen={onOpen} />)}</section>}

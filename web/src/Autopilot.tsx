@@ -119,7 +119,7 @@ export function AskCard() {
   return (
     <div className="ask-card">
       <div className="row-flex"><b className="grow">🤖 {p.ask || s.title}</b><button className="icon" onClick={hide} title="Close">×</button></div>
-      <div className="small">{p.what || `A routine, “${p.name ?? s.title}”, that runs ${p.cron ? humanCron(p.cron) : 'when you trigger it'}. Each run is a new conversation in Mothership, listed under Automations.`}</div>
+      <div className="small">{p.what || `A routine, “${p.name ?? s.title}”, that runs ${p.cron ? humanCron(p.cron) : 'when you trigger it'}. Each run is a new conversation in auto-m8, listed under Automations.`}</div>
       <div className="muted small">{p.cron ? `Runs ${humanCron(p.cron)}` : ''}{p.blast ? ` · ${p.blast}` : ''}</div>
       <details className="small"><summary className="muted">Exact instructions</summary><pre className="small">{p.prompt}</pre></details>
       {dry && <DryRun id={s.id} />}
