@@ -37,6 +37,7 @@ import { posthogKey } from './keychain.ts'
 import { runCorrectionFor } from './replycheck.ts'
 import { agentSender, QUEUED, stampPrompt } from '../shared/messageOrigin.ts'
 import { raceInstruction, selectRace } from './autorace.ts'
+import { attentionFor } from './needsattention.ts'
 
 export type ChatEvent = Record<string, any>
 type Listener = (ev: ChatEvent) => void
@@ -413,6 +414,11 @@ export function send(opts: SendOpts): string {
   if (race) {
     opts = { ...opts, prompt: opts.prompt + raceInstruction(race) }
     emit(c, { type: 'perch_notice', text: `Automatic race candidate: ${race.reason}. Scoping before launch.` })
+  }
+  // At most one short note about something waiting on the user, for the agent they are talking to.
+  if (opts.by === 'you' && !opts.retry && !opts.resent && !c.profile) {
+    const note = (() => { try { return attentionFor(id) } catch (e) { console.error('attention', e); return '' } })()
+    if (note) opts = { ...opts, prompt: opts.prompt + note }
   }
   if (c.handoffQueue) {
     c.handoffQueue.push({ ...opts, retry: true })

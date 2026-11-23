@@ -29,6 +29,7 @@ export function agentSender(raw: string): AgentSender | null {
 
 export const userBody = (text: string) => (text.startsWith(USER_MARK) ? text.slice(USER_MARK.length) : text)
   .replace(/\n\n<perch-auto-race>[\s\S]*?<\/perch-auto-race>/g, '')
+  .replace(/\n\n<perch-attention>[\s\S]*?<\/perch-attention>/g, '')
 
 // Called once at the send boundary, before queueing or provider selection. Retries reuse it.
 export function stampPrompt(text: string, by?: string): string {

@@ -35,6 +35,7 @@ const tools = [
       key: { type: 'string', description: 'Stable source key, reused for repeated reports of the same ask' }, source: { type: 'string' },
       conversation_id: { type: 'string' }, title: { type: 'string' }, context: { type: 'string' }, url: { type: 'string' },
       status: { type: 'string', enum: ['checking', 'needs_you', 'agent', 'resolved', 'dismissed'] }, evidence: { type: 'string' }, human_action: { type: 'string' }, reviewer_id: { type: 'string' }, revision: { type: 'string' },
+      attention: { type: 'string', enum: ['used', 'wasted'], description: 'With update, for an item the user was told about: used = they acted on it; wasted = it did not need them (not needed, low value, or an agent could have handled it). Sources that waste attention stop reaching the user.' },
     }, required: ['action'] },
   },
   {

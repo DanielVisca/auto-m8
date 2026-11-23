@@ -7,6 +7,7 @@ import { posthogFetch } from './indexer.ts'
 import { codexReady } from './codex.ts'
 import { captureLocalNeeds, syncScoutNeeds } from './needssources.ts'
 import { precheckPrNeeds } from './needsprcheck.ts'
+import { attentionContext, sweepAttention } from './needsattention.ts'
 import { busyChatIds, claimNeeds, finishReview, HOUR, needsList, saveSync, syncValue, type Need } from './needsstore.ts'
 
 // A capped/rate-limited engine fails in seconds. Without a pause each sweep burns one of the
@@ -25,14 +26,15 @@ For each item:
 2. If resolved or superseded, record resolved with precise evidence and links. A duplicate may be dismissed only with the surviving Needs me item id. Don't lose genuine human blockers just because they are old.
 3. If an agent can decide or act within the user's existing authorization, choose the reversible path and actually move it forward. Prefer send_to_conversation to its idle owner, with a short concrete instruction and report_back=false. Do not send while the owner is running, resume external terminal sessions, or race a PR shepherd. If a shepherd/another person explicitly owns the next step, track that work. For cloud/terminal work without a resumable owner, do a bounded investigation here and start a linked Perch delegate only if needed. Do not start paid cloud tasks. Record agent status with who owns the next step and evidence of the handoff; handoff is NOT resolution. Child work must inherit the relevant item's work_origin below, never a different item's origin.
 4. Only keep needs_you for an action that truly requires the user: physical sign-in/secret, authority only the user has, a real personal preference, a destructive production change, or new monetary commitment. Approving and finalizing Visual Review snapshot runs on the user's PRs is agent work (perch browser), not a the user action, unless a snapshot shows a real regression. A PR waiting for someone else's already-requested approval is tracked work (agent status), not a reason to ask the user to chase that reviewer. Keep it attached to its shepherd and recheck. Describe the smallest concrete action and WHY agents cannot do it. Check alternate tools before claiming access is broken. Silence/time passing is NEVER approval. Do not send Slack/email, bypass permissions, change agent permissions, spend money, or perform irreversible production actions. Drafts are fine.
-5. If uncertain, tools fail, or more evidence is needed, leave checking with the exact missing evidence. No false resolution. Do not ask the user to investigate it for you.
+5. The user's attention is the budget. They never open a list; an agent they talk to may mention one item in a sentence. Each item shows its source_credit (0-1: how often that source's past asks were worth it) and mentioned_to_user. Raise the bar for low-credit sources: decide and act yourself whenever it is reversible and within existing authorization. An item the user already ignored, or that waited days without earning a mention, should not go back to needs_you unless it is a blocking sign-in/secret, destructive production change or new spending: take the safe reversible default, or park it (dismissed, evidence starting "Parked:"); a parked item reopens when its source changes. When you close an item the user was told about, pass attention=used if they acted on it, or attention=wasted if it turned out not to need them.
+6. If uncertain, tools fail, or more evidence is needed, leave checking with the exact missing evidence. No false resolution. Do not ask the user to investigate it for you.
 
 REQUIRED: For EACH item call the perch needs_me tool with action=update, id, status (resolved|dismissed|agent|needs_you|checking), evidence, human_action for needs_you, reviewer_id="${reviewer}", and the item's EXACT revision. Write human_action as one short sentence (under 200 characters); put the rationale and links in evidence. If the source changed, read again before deciding. Never edit the ledger database directly. Updates, errors and rechecks stay in history. Your final reply is a short audit of what you actually did.
 
 Already on the user's list (status needs_you). If an item below asks for the same action (same PR or decision), dismiss it as a duplicate of that id instead of adding another:
 ${JSON.stringify(all<{ id: string; human_action: string | null }>(`select id, human_action from needs where status = 'needs_you' order by updated_at desc limit 60`).filter(n => !items.some(i => i.id === n.id)).map(n => ({ id: n.id, action: (n.human_action ?? '').slice(0, 160) })))}
 
-${JSON.stringify(items.map(n => ({ id: n.id, revision: n.revision, source: n.source, title: n.title, context: n.context, conversation_id: n.conversation_id, url: n.url, status: n.status, human_action: n.human_action, previous_evidence: n.evidence, work_origin: n.conversation_id ? originPrompt(n.conversation_id) : '' })), null, 2)}`
+${JSON.stringify(items.map(n => ({ id: n.id, revision: n.revision, source: n.source, title: n.title, context: n.context, conversation_id: n.conversation_id, url: n.url, status: n.status, human_action: n.human_action, previous_evidence: n.evidence, ...attentionContext(n), work_origin: n.conversation_id ? originPrompt(n.conversation_id) : '' })), null, 2)}`
 }
 
 const following = new Set<string>()
@@ -63,6 +65,7 @@ export async function sweepNeeds() {
   try {
     const now = Date.now(), busy = busyChatIds(runningChats())
     captureLocalNeeds(busy, now)
+    try { sweepAttention(now) } catch (e) { console.error('needs attention', e) }
     // Free: close finished-PR items before spending review runs on them.
     await precheckPrNeeds(now).catch(e => console.error('needs pr precheck', e))
     // Recovery survives server restarts. A timed-out reviewer cannot launch a second copy.

@@ -36,6 +36,7 @@ import { answerDecision, autoDecided, decideDue, decisionsFor, onDecision, openD
 import { sweepNeeds } from './needs.ts'
 import { need, needHistory, needsList, recheckNeed, reportNeed, updateNeed } from './needsstore.ts'
 import { captureApproval } from './needssources.ts'
+import { credits, recordAttention } from './needsattention.ts'
 import { cleanListingLinks } from './db.ts'
 import { projectStatus, projects } from './projects.ts'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -315,9 +316,10 @@ route('POST', '/api/resume', async (_m, req) => { const b = await body(req); con
 route('GET', '/api/home', () => home())
 route('GET', '/api/prod-alerts', () => ({ alerts: openProdAlerts() }))
 route('GET', '/api/needs', () => needsList())
+route('GET', '/api/needs-credit', () => ({ credits: credits() }))
 route('GET', '/api/needs/:id', m => ({ item: need(m[1]), history: needHistory(m[1]) }))
 route('POST', '/api/needs', async (_m, req) => { const b = await body(req); const r = reportNeed(b as Parameters<typeof reportNeed>[0]); broadcast('home'); return r })
-route('POST', '/api/needs/:id/update', async (m, req) => { const b = await body(req); const r = updateNeed(m[1], b as Parameters<typeof updateNeed>[1], b.reviewer_id ?? 'agent'); broadcast('home'); broadcast('conversations'); return r })
+route('POST', '/api/needs/:id/update', async (m, req) => { const b = await body(req); const r = updateNeed(m[1], b as Parameters<typeof updateNeed>[1], b.reviewer_id ?? 'agent'); if (b.attention === 'used' || b.attention === 'wasted') recordAttention(m[1], b.attention); broadcast('home'); broadcast('conversations'); return r })
 route('POST', '/api/needs/:id/recheck', async (m, req) => {
   const b = await body(req)
   if (b.evidence !== undefined && typeof b.evidence !== 'string') throw new Error('Evidence must be text')
@@ -325,7 +327,7 @@ route('POST', '/api/needs/:id/recheck', async (m, req) => {
   broadcast('home')
   return { ok: true }
 })
-route('POST', '/api/needs/:id/dismiss', async m => { const r = updateNeed(m[1], { status: 'dismissed', evidence: 'Marked not needed by you.' }, 'user'); broadcast('home'); return r })
+route('POST', '/api/needs/:id/dismiss', async m => { const r = updateNeed(m[1], { status: 'dismissed', evidence: 'Marked not needed by you.' }, 'user'); recordAttention(m[1], 'wasted'); broadcast('home'); return r })
 route('POST', '/api/needs/:id/resolve', async m => { recheckNeed(m[1], Date.now(), 'The user says they resolved their part. Verify it and resume the owning work if safe.'); broadcast('home'); return { ok: true } })
 route('GET', '/api/decisions', (_m, _r, _s, q) => ({ decisions: q.get('conversation') ? decisionsFor(q.get('conversation')!) : openDecisions(), ...(q.get('log') ? { decided: autoDecided() } : {}) }))
 route('POST', '/api/decisions/:id/answer', async (m, req) => { const r = answerDecision(m[1], String((await body(req)).answer ?? '')); broadcast('home'); broadcast('conversations'); return r })
