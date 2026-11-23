@@ -9,6 +9,7 @@ import { all } from './db.ts'
 import { originatedPrs, originFor, prSubject } from './origin.ts'
 import { prBatch, ghExec } from './gh.ts'
 import { DATA_DIR } from './settings.ts'
+import { recordError } from './errors.ts'
 
 const exec = promisify(execFile)
 export const onPrFlow = new Set<() => void>()
@@ -24,15 +25,26 @@ const Q = `query($q:String!,$after:String){search(query:$q,type:ISSUE,first:25,a
   commits(last:1){nodes{commit{committedDate statusCheckRollup{state}}}}
   reviews(last:1){nodes{submittedAt}}}}}}`
 
-async function search(q: string) {
+// A 502/504 from GitHub, or gh killed by our timeout (killed, empty stderr: the message is only
+// "Command failed: <the whole query>", which used to slip past the retry and get reported raw).
+export const retryableSearchError = (e: any) => !!e?.killed || /HTTP 5\d\d|timed out|timeout/i.test(`${e?.stderr ?? ''} ${e?.message ?? ''}`)
+
+// What gh said about which search page, not the 600-character query it was given.
+export function searchError(e: any, q: string, page: number): Error {
+  if (e?.rateLimited) return e
+  const said = String(e?.stderr ?? '').trim() || String(e?.message ?? e).split('\n').slice(1).join(' ').trim()
+  return new Error(`GitHub PR search "${q}" (page ${page}): ${e?.killed ? 'timed out' : said.slice(0, 300) || 'failed'}`)
+}
+
+async function search(q: string, files = true) {
   const out: any[] = []
   for (let after: string | null = null, i = 0; i < 12; i++) {
-    const args: string[] = ['api', 'graphql', '-f', `query=${Q}`, '-F', `q=${q}`, ...(after ? ['-F', `after=${after}`] : [])]
+    const args: string[] = ['api', 'graphql', '-f', `query=${files ? Q : Q.replace(/\n\s*files\(first:30\)\{nodes\{path additions deletions\}\}/, '')}`, '-F', `q=${q}`, ...(after ? ['-F', `after=${after}`] : [])]
     // GitHub's search sometimes answers a heavy page with a 502/504: retry those a couple of times.
     let stdout = ''
     for (let t = 0; ; t++) {
       try { stdout = (await ghExec(args, { maxBuffer: 50e6, timeout: 60_000 })).stdout; break }
-      catch (e: any) { if (t >= 2 || !/HTTP 5\d\d|timed out/i.test(String(e.stderr ?? e.message))) throw e; await new Promise(r => setTimeout(r, 1500 * (t + 1))) }
+      catch (e: any) { if (t >= 2 || !retryableSearchError(e)) throw searchError(e, q, i + 1); await new Promise(r => setTimeout(r, 1500 * (t + 1))) }
     }
     const s: any = JSON.parse(stdout).data.search
     out.push(...s.nodes.filter((n: any) => n.url))
@@ -84,18 +96,24 @@ function classify(p: any, now: number) {
   return { review, outcome, why, last, checks }
 }
 
-// Fetching takes ~40s (every PR's files), so the last result is kept on disk and served at once;
-// a refresh runs in the background when it's older than 3 minutes (the page polls every minute).
-const cache = new Map<number, { at: number; data: any }>()
-const refreshing = new Map<number, Promise<any>>()
-const file = (days: number) => join(DATA_DIR, `prflow-${days}.json`)
-export async function prFlow(days = 90, wait = false, force = false) {
-  let hit = cache.get(days)
-  if (!hit && existsSync(file(days))) { try { const data = JSON.parse(readFileSync(file(days), 'utf8')); hit = { at: data.fetchedAt, data }; cache.set(days, hit) } catch {} }
-  const fresh = hit && Date.now() - hit.at < 3 * 60_000
-  if ((!fresh || force) && !refreshing.has(days)) refreshing.set(days, fetchFlow(days).finally(() => refreshing.delete(days)))
-  if (hit && !wait) return { ...hit.data, refreshing: refreshing.has(days) }
-  return refreshing.get(days) ?? hit!.data
+// A materialized view of your PRs. One store of raw PRs (kept on disk) is synced in the background
+// every SYNC_MS: an incremental sync asks GitHub only for PRs updated since the last one, plus a
+// light pass (no file lists) over open PRs, whose CI state changes without bumping updatedAt.
+// A full rebuild runs every FULL_MS to catch anything the incremental passes missed. Every window
+// (today, 7, 30, 90, 180 days) is derived from the store on read, so it's instant and its
+// stalled/stale ages are current even between syncs. A full fetch used to take ~1 minute per window.
+const SYNC_MS = 2 * 60_000, FULL_MS = 6 * 3600_000, KEEP_DAYS = 180
+const FIELDS = (files: boolean) => `url number title state isDraft createdAt updatedAt mergedAt closedAt reviewDecision repository{nameWithOwner} ${files ? 'files(first:30){nodes{path additions deletions}}' : ''} commits(last:1){nodes{commit{committedDate statusCheckRollup{state}}}} reviews(last:1){nodes{submittedAt}}`
+// skipped: originated PRs too old for any window, so incremental syncs don't fetch them again.
+type Store = { prs: Record<string, any>; syncedAt: number; fullAt: number; skipped?: string[] }
+const storeFile = join(DATA_DIR, 'prflow-store.json')
+let store: Store | null = null
+let syncing: Promise<Store> | null = null
+let timer: ReturnType<typeof setInterval> | null = null
+
+function loadStore() {
+  if (!store && existsSync(storeFile)) { try { store = JSON.parse(readFileSync(storeFile, 'utf8')) } catch {} }
+  return store
 }
 
 // Local midnight as an ISO time with offset, which GitHub search takes: 2026-11-11T00:00:00-08:00.
@@ -105,36 +123,79 @@ function localMidnight() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00:00${off >= 0 ? '+' : '-'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`
 }
 
-async function fetchFlow(days: number) {
-  // days=0 is "today": since local midnight, and it also takes in PRs merged or closed today
-  // (opened earlier), so "shipped" means shipped today.
-  const since = days === 0 ? localMidnight() : new Date(Date.now() - days * DAY).toISOString().slice(0, 10)
-  const queries = [`author:@me is:pr created:>=${since}`, 'author:@me is:pr is:open',
-    ...(days === 0 ? [`author:@me is:pr merged:>=${since}`, `author:@me is:pr closed:>=${since}`] : [])]
-  const byUrl = new Map((await Promise.all(queries.map(search))).flat().map(p => [p.url, p]))
-  const extra = originatedPrs().filter(url => !byUrl.has(url))
-  if (extra.length) {
-    const batch = await prBatch(extra, `url number title state isDraft createdAt updatedAt mergedAt closedAt reviewDecision repository{nameWithOwner} files(first:30){nodes{path additions deletions}} commits(last:1){nodes{commit{committedDate statusCheckRollup{state}}}} reviews(last:1){nodes{submittedAt}}`)
-    for (const [url, p] of batch.prs) if (p.state === 'OPEN' || Date.parse(p.createdAt) >= Date.parse(since) || days === 0 && Date.parse(p.mergedAt ?? p.closedAt) >= Date.parse(since)) byUrl.set(url, p)
+const keepSince = () => Date.now() - KEEP_DAYS * DAY
+const kept = (p: any) => p.state === 'OPEN' || Date.parse(p.createdAt) >= keepSince() || Date.parse(p.mergedAt ?? p.closedAt ?? 0) >= keepSince()
+
+async function sync(full: boolean): Promise<Store> {
+  const old = loadStore()
+  full ||= !old || Date.now() - old.fullAt > FULL_MS
+  const started = Date.now()
+  const prs: Record<string, any> = full ? {} : { ...old!.prs }
+  const put = (p: any) => { const was = prs[p.url] ?? old?.prs[p.url]; prs[p.url] = p.files ? p : { ...p, files: was?.files ?? { nodes: [] } } }
+  if (full) {
+    const since = new Date(keepSince()).toISOString().slice(0, 10), today = localMidnight()
+    const found = await Promise.all([`author:@me is:pr created:>=${since}`, 'author:@me is:pr is:open', `author:@me is:pr merged:>=${today}`, `author:@me is:pr closed:>=${today}`].map(q => search(q)))
+    found.flat().forEach(put)
+  } else {
+    // Overlap the window a little: GitHub's search index lags writes by a few seconds.
+    const since = new Date(old!.syncedAt - 10 * 60_000).toISOString().replace(/\.\d+Z$/, 'Z')
+    const [changed, open] = await Promise.all([search(`author:@me is:pr updated:>=${since}`), search('author:@me is:pr is:open', false)])
+    changed.forEach(put)
+    open.forEach(put)
   }
+  // PRs started from your work under someone else's name: new ones need their files, open ones their CI.
+  const origin = originatedPrs()
+  const skipped = new Set(full ? [] : old!.skipped ?? [])
+  const missing = origin.filter(u => !prs[u] && !skipped.has(u))
+  const open = full ? [] : origin.filter(u => prs[u]?.state === 'OPEN' && !missing.includes(u))
+  if (missing.length) for (const [u, p] of (await prBatch(missing, FIELDS(true))).prs) if (kept(p)) put(p); else skipped.add(u)
+  if (open.length) for (const [, p] of (await prBatch(open, FIELDS(false))).prs) put(p)
+  for (const [u, p] of Object.entries(prs)) if (!kept(p)) delete prs[u]
+  store = { prs, syncedAt: started, fullAt: full ? started : old!.fullAt, skipped: [...skipped] }
+  writeFileSync(storeFile, JSON.stringify(store))
+  onPrFlow.forEach(f => f())
+  return store
+}
+
+function kick(full = false) {
+  if (!syncing) {
+    syncing = sync(full).finally(() => { syncing = null })
+    // Nobody awaits a background sync: note a failure and keep serving the store; the next tick retries.
+    syncing.catch(e => recordError('PR insights', e, 'Refreshing PR insights'))
+  }
+  return syncing
+}
+
+function view(s: Store, days: number) {
   const now = Date.now()
+  const since = days === 0 ? Date.parse(localMidnight()) : now - days * DAY
   const convs = new Map<string, string>()
   for (const r of all<any>(`select cp.url, c.id from conversation_prs cp join conversations c on c.id = cp.conversation_id order by c.updated_at desc`)) if (!convs.has(r.url)) convs.set(r.url, r.id)
-  const prs = [...byUrl.values()].map(p => {
+  // days=0 is "today": since local midnight, and it also takes in PRs merged or closed today
+  // (opened earlier), so "shipped" means shipped today.
+  const prs = Object.values(s.prs).filter(p => p.state === 'OPEN' || Date.parse(p.createdAt) >= since || days === 0 && Date.parse(p.mergedAt ?? p.closedAt ?? 0) >= since).map(p => {
     const c = classify(p, now)
     return {
-      url: p.url, number: p.number, title: p.title, repo: p.repository.nameWithOwner, area: areaOf(p.repository.nameWithOwner, p.files.nodes),
+      url: p.url, number: p.number, title: p.title, repo: p.repository.nameWithOwner, area: areaOf(p.repository.nameWithOwner, p.files?.nodes ?? []),
       created: Date.parse(p.createdAt), merged: p.mergedAt ? Date.parse(p.mergedAt) : null, closed: p.closedAt ? Date.parse(p.closedAt) : null,
       origin: originFor(prSubject(p.url))?.owner ?? null, draft: p.isDraft, conversation: convs.get(p.url) ?? null, ...c,
     }
   })
-  const merged = prs.filter(p => p.merged)
-  const hours = merged.map(p => (p.merged! - p.created) / 3600_000).sort((a, b) => a - b)
-  const data = { days, prs, medianMergeHours: hours.length ? hours[Math.floor(hours.length / 2)] : null, fetchedAt: now }
-  cache.set(days, { at: now, data })
-  writeFileSync(file(days), JSON.stringify(data))
-  onPrFlow.forEach(f => f())
-  return data
+  const hours = prs.filter(p => p.merged).map(p => (p.merged! - p.created) / 3600_000).sort((a, b) => a - b)
+  return { days, prs, medianMergeHours: hours.length ? hours[Math.floor(hours.length / 2)] : null, fetchedAt: s.syncedAt }
+}
+
+export async function prFlow(days = 90, wait = false, force = false) {
+  if (!timer) { timer = setInterval(() => { kick() }, SYNC_MS); timer.unref?.() }
+  const s = loadStore()
+  if (force || !s || Date.now() - s.syncedAt > SYNC_MS) kick()
+  if (s && !wait) return { ...view(s, days), refreshing: !!syncing }
+  if (!s && !wait) {
+    // First run after the upgrade: show the old per-window snapshot while the store builds.
+    const legacy = join(DATA_DIR, `prflow-${days}.json`)
+    if (existsSync(legacy)) { try { return { ...JSON.parse(readFileSync(legacy, 'utf8')), refreshing: true } } catch {} }
+  }
+  return view(await (syncing ?? kick()), days)
 }
 
 // The "why" behind a set of PRs, fetched in one query for the summary agent: size, the start of
