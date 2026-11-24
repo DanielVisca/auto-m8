@@ -1014,3 +1014,15 @@ test('optional GitHub pollers back off once 70% of the hour\'s GraphQL budget is
   assert.equal(ghPressure(resetAt + 1), false) // window rolled over
   setGhBudgetForTest(null)
 })
+
+test('PR insights search: a gh call killed by its timeout is retried, and the error names the page, not the query', async () => {
+  const { retryableSearchError, searchError } = await import('./prflow.ts')
+  const killed = Object.assign(new Error('Command failed: gh api graphql -f query=query($q:String!,$after:String){search(...)}\n'), { killed: true, stderr: '' })
+  assert.equal(retryableSearchError(killed), true)
+  assert.equal(retryableSearchError({ stderr: 'gh: HTTP 502: Bad Gateway' }), true)
+  assert.equal(retryableSearchError({ stderr: 'gh: Could not resolve to a User' }), false)
+  const e = searchError(killed, 'author:@me is:pr created:>=2026-08-24', 6)
+  assert.equal(e.message, 'GitHub PR search "author:@me is:pr created:>=2026-08-24" (page 6): timed out')
+  assert.ok(!e.message.includes('query='))
+  assert.match(searchError({ stderr: 'gh: Something broke' }, 'q', 1).message, /\(page 1\): gh: Something broke$/)
+})
