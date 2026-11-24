@@ -65,3 +65,8 @@ test('healthy window says so', () => {
   const t = startTrace('GET /api/health'); endTrace(t, 200)
   assert.deepEqual(report({ seconds: 60 }).diagnosis, ['No slowness: requests, event loop and machine look healthy in this window.'])
 })
+
+test('a normal machine is not reported as under pressure', () => {
+  const d = diagnose({ requests: 3, eventLoop: null, inFlight: [], routes: [], slowest: [], background: [], stalls: [], machine: { severity: 'normal', reasons: [] } })
+  assert.deepEqual(d, ['No slowness: requests, event loop and machine look healthy in this window.'])
+})

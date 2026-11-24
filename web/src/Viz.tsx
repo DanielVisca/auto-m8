@@ -118,14 +118,16 @@ export function vizFromTool(name: string, input: any, result: string | undefined
 // Splits Markdown into text, ```chart / ```vega-lite blocks, and ```tile blocks (HTML that runs inline).
 export type MessagePart = { kind: 'md'; text: string } | { kind: 'chart'; spec: VizSpec | null; raw: string } | { kind: 'tile'; info: string; body: string }
 export function splitCharts(text: string): MessagePart[] {
-  if (!/```(chart|vega-lite|vegalite|tile|artifact)/.test(text)) return [{ kind: 'md', text }]
+  if (!/(```|~~~)[ \t]*(chart|vega-lite|vegalite|tile|artifact)/.test(text)) return [{ kind: 'md', text }]
   const out: MessagePart[] = []
-  const re = /^```(chart|vega-lite|vegalite|tile|artifact)([^\n]*)\n([\s\S]*?)^```[ \t]*$/gm
+  // The fence may be longer than three (agents write ````tile when the HTML holds ``` itself), use ~~~,
+  // or be indented up to three spaces; it closes on a fence of the same kind at least as long.
+  const re = /^ {0,3}(`{3,}|~{3,})[ \t]*(chart|vega-lite|vegalite|tile|artifact)\b([^\n]*)\n([\s\S]*?)^ {0,3}\1[`~]*[ \t]*$/gm
   let last = 0, m: RegExpExecArray | null
   while ((m = re.exec(text))) {
     if (m.index > last) out.push({ kind: 'md', text: text.slice(last, m.index) })
-    if (m[1] === 'tile' || m[1] === 'artifact') out.push({ kind: 'tile', info: m[2].trim(), body: m[3] })
-    else out.push({ kind: 'chart', spec: parseSpec(m[3], m[1] !== 'chart'), raw: m[3] })
+    if (m[2] === 'tile' || m[2] === 'artifact') out.push({ kind: 'tile', info: m[3].trim(), body: m[4] })
+    else out.push({ kind: 'chart', spec: parseSpec(m[4], m[2] !== 'chart'), raw: m[4] })
     last = m.index + m[0].length
   }
   if (last < text.length) out.push({ kind: 'md', text: text.slice(last) })
