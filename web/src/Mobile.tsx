@@ -109,7 +109,7 @@ export function SimpleHome({ onOpen, onAdvanced }: { onOpen: (id: string) => voi
   return (
     <div className="simple">
       <header className="s-head">
-        <div className="grow s-brand">perch</div>
+        <div className="grow s-brand">auto-m8</div>
         <button className="s-mode" onClick={onAdvanced}>Advanced</button>
       </header>
       <div className="s-scroll">

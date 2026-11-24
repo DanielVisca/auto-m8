@@ -295,7 +295,7 @@ function MoreRecent({ open, onToggle, refresh, row }: { open: boolean; onToggle:
 function PromiseMark({ p }: { p: any }) {
   const overdue = p.status === 'waiting'
   const when = p.due_at ? (p.due_at > Date.now() ? `due in ${ago(Date.now() - (p.due_at - Date.now()))}` : `due ${ago(p.due_at)} ago`) : ''
-  const tip = `Promised: “${p.text}”\n${p.pr_url ? `Waits for ${p.until ?? 'checks'} on #${p.pr_url.split('/').pop()}, ` : ''}${when}${p.nudged_at ? '\nperch already followed up' : ''}${overdue ? `\n${p.note ?? ''} It hasn’t followed up: nudge it from Home.` : ''}`
+  const tip = `Promised: “${p.text}”\n${p.pr_url ? `Waits for ${p.until ?? 'checks'} on #${p.pr_url.split('/').pop()}, ` : ''}${when}${p.nudged_at ? '\nauto-m8 already followed up' : ''}${overdue ? `\n${p.note ?? ''} It hasn’t followed up: nudge it from Home.` : ''}`
   return <span className={`promise${overdue ? ' overdue' : ''}`} title={tip} onClick={e => e.stopPropagation()}>⏰{overdue ? ' overdue' : ''}</span>
 }
 

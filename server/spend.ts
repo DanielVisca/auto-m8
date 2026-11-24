@@ -180,7 +180,7 @@ async function allScoutSpend(days: number) {
 }
 
 // ---------- the summary ----------
-const SOURCE_LABEL: Record<string, string> = { perch: 'Perch', terminal: 'Terminal (Claude Code)', desktop: 'Claude Desktop', 'posthog-code': 'PostHog Code', scouts: 'PostHog scouts (cloud)' }
+const SOURCE_LABEL: Record<string, string> = { perch: 'auto-m8', terminal: 'Terminal (Claude Code)', desktop: 'Claude Desktop', 'posthog-code': 'PostHog Code', scouts: 'PostHog scouts (cloud)' }
 
 // How a message was billed: the chat's process (chat_account_span, from when it started) for perch
 // chats (your Claude Code login, your API key, or a local model); otherwise the Claude Code login.

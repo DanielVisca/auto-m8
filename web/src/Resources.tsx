@@ -71,7 +71,7 @@ export function Resources() {
           <div className="resource-perch"><b>auto-m8 server</b><span>{memorySize(data.perch.memoryBytes)} · {data.perch.eventLoopDelayMs} ms delay</span></div>
           <div className="resource-heading"><b>Busiest processes</b><span className="grow" /><button className={sort === 'cpu' ? 'on' : ''} onClick={() => setSort('cpu')}>CPU</button><button className={sort === 'memory' ? 'on' : ''} onClick={() => setSort('memory')}>Memory</button></div>
           <table className="resource-processes"><thead><tr><th>Process</th><th>CPU</th><th>Memory</th></tr></thead><tbody>
-            {processes.map(p => <tr key={p.pid}><td title={`${p.name} · PID ${p.pid}${p.perch ? ' · auto-m8 or its agents' : ''}`}><span>{p.name}</span>{p.perch && <small>perch</small>}</td><td>{pct(p.cpuPercent)}</td><td>{memorySize(p.memoryBytes)}</td></tr>)}
+            {processes.map(p => <tr key={p.pid}><td title={`${p.name} · PID ${p.pid}${p.perch ? ' · auto-m8 or its agents' : ''}`}><span>{p.name}</span>{p.perch && <small>auto-m8</small>}</td><td>{pct(p.cpuPercent)}</td><td>{memorySize(p.memoryBytes)}</td></tr>)}
           </tbody></table>
           {!processes.length && <p className="muted small">Gathering process usage…</p>}
           <p className="muted small">Processes refresh every 15s. CPU is the OS average; 100% is one core. Memory shows resident RAM; local models can also use wired GPU memory.</p>

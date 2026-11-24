@@ -43,7 +43,7 @@ export function PrPage({ url, onOpen, sideConversations }: { url: string; onOpen
         <section className="card">
           <h4>Conversations about it <span className="muted">{p.conversations.length}</span></h4>
           <div className="pr-convs">{p.conversations.map((c: any) => (
-            <div key={c.id} className="pr-conv big" onClick={() => open(c)} title="Open in perch">
+            <div key={c.id} className="pr-conv big" onClick={() => open(c)} title="Open in auto-m8">
               <Brand id={sourceBrand(c)} size={14} />
               <div className="grow" style={{ minWidth: 0 }}>
                 <div className="ellipsis small"><b>{String(c.title ?? '').replace(/^\[[^\]]*\]\s*/, '')}</b></div>

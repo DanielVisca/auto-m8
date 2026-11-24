@@ -63,7 +63,7 @@ export function PrPreviewCard({ url, inPage, brief }: { url: string; inPage?: bo
         <div className="pr-section"><h4>Conversations about it</h4>
           {/* Conversations look like perch: a tile with the app it lives in. */}
           <div className="pr-convs">{p.conversations.map((c: any) => (
-            <a key={c.id} className="small pr-conv" href={`#${c.source === "posthog-task" ? "task" : "chat"}/${encodeURIComponent(c.id)}`} title="Open in perch">
+            <a key={c.id} className="small pr-conv" href={`#${c.source === "posthog-task" ? "task" : "chat"}/${encodeURIComponent(c.id)}`} title="Open in auto-m8">
               <Brand id={sourceBrand(c)} size={14} /><span className="ellipsis grow">{String(c.title ?? '').replace(/^\[[^\]]*\]\s*/, '')}</span>
               {c.status === 'in_progress' && <span className="dot s-running" />}<span className="muted">{ago(c.updated_at)}</span>
             </a>))}</div>

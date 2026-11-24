@@ -429,9 +429,9 @@ ipcMain.on('occluded', (_e, hidden) => {
     // and when PiP is on, a covered full-size perch shrinks to the mini window instead of the edge tab.
     if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || win.isFocused() || beforeTuck || beforeMini) return
     if (Date.now() - lastRestore < 1500) return
-    if (autoMiniOn()) { setMini(true); autoMinied = true; shellLog('picture in picture: on (other windows covered perch)'); return }
+    if (autoMiniOn()) { setMini(true); autoMinied = true; shellLog('picture in picture: on (other windows covered auto-m8)'); return }
     if (!autoTuckOn()) return
-    setTuck(true); autoTucked = true; shellLog('tucked: other windows covered perch')
+    setTuck(true); autoTucked = true; shellLog('tucked: other windows covered auto-m8')
   }, 400)
 })
 
