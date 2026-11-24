@@ -1,4 +1,4 @@
-// A stdio MCP server that chats started from perch get, so Claude can look up your other
+// A stdio MCP server that chats started from auto-m8 get, so Claude can look up your other
 // conversations itself. Read-only over the perch database and transcript files.
 // Newline-delimited JSON-RPC: initialize, tools/list, tools/call.
 import { readFileSync } from 'node:fs'
@@ -23,6 +23,7 @@ import { toItems, type Item } from './transcript.ts'
 import { chatSubject, originChain, searchOrigins } from './origin.ts'
 import { originSyncStatus } from './originsync.ts'
 import { BROWSER_TOOL_DESCRIPTION } from './browsertool.ts'
+import { convIdOf, convLink, MCP_SERVER } from '../shared/brand.ts'
 
 // Tools that only read: marked so read-only chats (plan mode, review helpers) can still use them.
 const READ_ONLY = new Set(['latency', 'work_origin', 'mcp_access', 'runtimes', 'search_conversations', 'get_conversation', 'recent_activity', 'search_notes', 'search_skills', 'open_prs', 'delegate_status', 'get_evidence', 'discover_mcp', 'board'])
@@ -78,7 +79,7 @@ const tools = [
   },
   {
     name: 'canvas',
-    description: "The user's boards (canvases): live tiles they keep and adapt, e.g. the Railyard (every PR as a train). Boards are not tied to folders. Tiles are code (small sandboxed apps Claude builds from an ask, fed by perch.data: PostHog HogQL, GitHub, http, perch's own API), web (a live page with the user's logins), note (markdown), chat (a conversation), browser (the live view of a chat's agent browser window: kind=browser + conversation_id). Actions: list (q searches board names and tile titles/asks; returns boards with their tiles), get (board_id: every tile with its config, html included), create (name, about, temporary=true for a one-off visualization, ttl_seconds defaults to 86400 / 24 hours idle; omit temporary for a lasting board), lifetime (board_id, temporary or ttl_seconds; temporary=false keeps it), add_tile (board_id + ask to have Claude build a code tile (~30s), or url / text / html / conversation_id), update_tile (tile_id + ask to change it with Claude, or html / text / url / title / refresh to set directly), copy_tile (tile_id onto board_id: pull a tile from another board), remove_tile (tile_id), show (conversation_id + board_id: display the board in that chat, layout side = beside the conversation, full = instead of it; board_id empty to hide), pin (board_id, pinned: true/false; Home shows at most 3), rename (board_id, name, about), delete (board_id). For one-off explanations and visualizations, create a temporary board; opening or interacting renews its idle TTL, background refreshes do not. Pinning to Home keeps it permanently. For lasting boards, list first and reuse an existing one where possible.",
+    description: "The user's boards (canvases): live tiles they keep and adapt, e.g. the Railyard (every PR as a train). Boards are not tied to folders. Tiles are code (small sandboxed apps Claude builds from an ask, fed by perch.data: PostHog HogQL, GitHub, http, auto-m8's own API via source 'perch'), web (a live page with the user's logins), note (markdown), chat (a conversation), browser (the live view of a chat's agent browser window: kind=browser + conversation_id). Actions: list (q searches board names and tile titles/asks; returns boards with their tiles), get (board_id: every tile with its config, html included), create (name, about, temporary=true for a one-off visualization, ttl_seconds defaults to 86400 / 24 hours idle; omit temporary for a lasting board), lifetime (board_id, temporary or ttl_seconds; temporary=false keeps it), add_tile (board_id + ask to have Claude build a code tile (~30s), or url / text / html / conversation_id), update_tile (tile_id + ask to change it with Claude, or html / text / url / title / refresh to set directly), copy_tile (tile_id onto board_id: pull a tile from another board), remove_tile (tile_id), show (conversation_id + board_id: display the board in that chat, layout side = beside the conversation, full = instead of it; board_id empty to hide), pin (board_id, pinned: true/false; Home shows at most 3), rename (board_id, name, about), delete (board_id). For one-off explanations and visualizations, create a temporary board; opening or interacting renews its idle TTL, background refreshes do not. Pinning to Home keeps it permanently. For lasting boards, list first and reuse an existing one where possible.",
     inputSchema: { type: 'object', properties: {
       action: { type: 'string', enum: ['list', 'get', 'create', 'add_tile', 'update_tile', 'copy_tile', 'remove_tile', 'show', 'pin', 'rename', 'lifetime', 'delete'] },
       q: { type: 'string' }, board_id: { type: 'string' }, tile_id: { type: 'string' }, name: { type: 'string' }, about: { type: 'string' },
@@ -93,7 +94,7 @@ const tools = [
   },
   {
     name: 'search_conversations',
-    description: "Full-text search over the user's past agent conversations (Claude Code, PostHog Code, PostHog tasks from Slack). Use when the user refers to earlier work, or when prior context would clearly help. Returns ids, titles, dates, where each ran and matching snippets. The query takes filters: where:slack (agents started from Slack), where:cloud (all PostHog tasks), where:claude, where:code (PostHog Code), where:mac (anything running on this Mac), where:perch (started in perch), where:ollama (local models), where:<task origin>; also origin:me (work you initiated, including automation), #label, state:waiting, repo:, pr:, project:, older:7d, newer:2d. Combine with words, and add no words to just list.",
+    description: "Full-text search over the user's past agent conversations (Claude Code, PostHog Code, PostHog tasks from Slack). Use when the user refers to earlier work, or when prior context would clearly help. Returns ids, titles, dates, where each ran and matching snippets. The query takes filters: where:slack (agents started from Slack), where:cloud (all PostHog tasks), where:claude, where:code (PostHog Code), where:mac (anything running on this Mac), where:auto-m8 (started in auto-m8; where:perch also works), where:ollama (local models), where:<task origin>; also origin:me (work you initiated, including automation), #label, state:waiting, repo:, pr:, project:, older:7d, newer:2d. Combine with words, and add no words to just list.",
     inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] },
   },
   {
@@ -103,13 +104,13 @@ const tools = [
   },
   {
     name: 'draft_slack_message',
-    description: "Hand the user a Slack message to send. You cannot send to Slack yourself; the user reviews, edits and sends it from perch. Before drafting: find the channel or thread, read its recent messages to see how people there ask, and write it in the user's voice (use_skill text-humanizer). Pass the messages you read as context so the user sees what they're replying to.",
+    description: "Hand the user a Slack message to send. You cannot send to Slack yourself; the user reviews, edits and sends it from auto-m8. Before drafting: find the channel or thread, read its recent messages to see how people there ask, and write it in the user's voice (use_skill text-humanizer). Pass the messages you read as context so the user sees what they're replying to.",
     inputSchema: { type: 'object', properties: {
       conversation_id: { type: 'string' }, channel_id: { type: 'string', description: 'Slack channel id (C…), or a user id for a DM' }, channel_name: { type: 'string' },
       thread_ts: { type: 'string', description: 'Reply in this thread (parent message ts)' }, message: { type: 'string', description: 'The draft, in Slack markdown' },
       why: { type: 'string', description: 'One line: why this message, for the user' }, permalink: { type: 'string', description: 'Link to the thread or channel' },
-      file: { type: 'string', description: 'Optional absolute path of a file (video, image, PDF) to attach: when the user sends, perch uploads it with the message so it plays/previews inline in Slack' },
-      reply_to_draft: { type: 'string', description: 'Optional draft id (draft:…) this replies to: perch posts it in that message\'s thread once the user has sent that one' },
+      file: { type: 'string', description: 'Optional absolute path of a file (video, image, PDF) to attach: when the user sends, auto-m8 uploads it with the message so it plays/previews inline in Slack' },
+      reply_to_draft: { type: 'string', description: 'Optional draft id (draft:…) this replies to: auto-m8 posts it in that message\'s thread once the user has sent that one' },
       context: { type: 'array', description: 'The recent messages you read there, oldest first', items: { type: 'object', properties: { author: { type: 'string' }, text: { type: 'string' }, ts: { type: 'string' } } } },
     }, required: ['conversation_id', 'channel_id', 'message'] },
   },
@@ -120,17 +121,17 @@ const tools = [
   },
   {
     name: 'shepherd',
-    description: "perch's PR shepherd: it drives a PR from review to verified in production. It starts a run the moment a review comment lands, CI goes red, or a green head is ready for stamphog; merges it when the PR's <!-- perch-plan --> says merge: auto and it is approved, green and its dependencies are verified; then checks the plan's verify list in production after deploy and two hours later, opening a revert PR on a regression. Every PR an agent opens for the user is watched automatically. Use watch to add any other PR, stop to take one off (it stays off, production checks included, until you watch it again), status to list what is watched. A verify run that finds a check unmet with no regression ends on 'NOT MET: <check> — no regression; follow-up <PR url>': perch stops verifying and watches the follow-up. Drafts are watched but never acted on until they are ready.",
+    description: "auto-m8's PR shepherd: it drives a PR from review to verified in production. It starts a run the moment a review comment lands, CI goes red, or a green head is ready for stamphog; merges it when the PR's <!-- perch-plan --> says merge: auto and it is approved, green and its dependencies are verified; then checks the plan's verify list in production after deploy and two hours later, opening a revert PR on a regression. Every PR an agent opens for the user is watched automatically. Use watch to add any other PR, stop to take one off (it stays off, production checks included, until you watch it again), status to list what is watched. A verify run that finds a check unmet with no regression ends on 'NOT MET: <check> — no regression; follow-up <PR url>': auto-m8 stops verifying and watches the follow-up. Drafts are watched but never acted on until they are ready.",
     inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['watch', 'stop', 'status'] }, pr_url: { type: 'string' } }, required: ['action'] },
   },
   {
     name: 'follow_up',
-    description: "Use instead of promising to come back later. When you'd tell the user \"I'll let you know when CI finishes\" or \"I'll check back in 20 minutes\", call this: perch wakes this conversation when the time is up or the PR condition is met, with your note, so you actually follow through. Give minutes, or a pr_url with until (checks | reviewed | merged), or both (minutes is then the longest it waits).",
+    description: "Use instead of promising to come back later. When you'd tell the user \"I'll let you know when CI finishes\" or \"I'll check back in 20 minutes\", call this: auto-m8 wakes this conversation when the time is up or the PR condition is met, with your note, so you actually follow through. Give minutes, or a pr_url with until (checks | reviewed | merged), or both (minutes is then the longest it waits).",
     inputSchema: { type: 'object', properties: { conversation_id: { type: 'string' }, note: { type: 'string', description: 'What you promised, in your words to the user' }, minutes: { type: 'number' }, pr_url: { type: 'string' }, until: { type: 'string', enum: ['checks', 'reviewed', 'merged'] } }, required: ['conversation_id', 'note'] },
   },
   {
     name: 'recent_activity',
-    description: "What ran in the last N days across Claude Code, PostHog Code and PostHog tasks (Slack asks, scouts, workflows, your own), plus perch routines: counts by source, origin and outcome, per day and per project, and repeated runs that failed or finished with no output. Read-only, from perch's index. Use for weekly reports and usage questions instead of querying PostHog.",
+    description: "What ran in the last N days across Claude Code, PostHog Code and PostHog tasks (Slack asks, scouts, workflows, your own), plus auto-m8 routines: counts by source, origin and outcome, per day and per project, and repeated runs that failed or finished with no output. Read-only, from auto-m8's index. Use for weekly reports and usage questions instead of querying PostHog.",
     inputSchema: { type: 'object', properties: { days: { type: 'number', description: 'Window, default 7' } } },
   },
   {
@@ -140,7 +141,7 @@ const tools = [
   },
   {
     name: 'search_notes',
-    description: "Searches the user's own notes by words: the perch daily notepad (jumbled thoughts, ideas, todos) and Apple Notes. Returns excerpts.",
+    description: "Searches the user's own notes by words: the auto-m8 daily notepad (jumbled thoughts, ideas, todos) and Apple Notes. Returns excerpts.",
     inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
   },
   {
@@ -155,7 +156,7 @@ const tools = [
   },
   {
     name: 'report_missing_capability',
-    description: 'Call this once when you could not do the job well because something was missing. kind=data: a data source or MCP (no issue tracker, no CI logs, no CRM); the user can connect it later. kind=skill: you had to work out a procedure the user clearly repeats, or they corrected you on how they want it done; perch writes a skill for it. kind=tool: a script or command that would have saved many steps. Do not call it for things you simply did not try.',
+    description: 'Call this once when you could not do the job well because something was missing. kind=data: a data source or MCP (no issue tracker, no CI logs, no CRM); the user can connect it later. kind=skill: you had to work out a procedure the user clearly repeats, or they corrected you on how they want it done; auto-m8 writes a skill for it. kind=tool: a script or command that would have saved many steps. Do not call it for things you simply did not try.',
     inputSchema: { type: 'object', properties: {
       kind: { type: 'string', enum: ['data', 'skill', 'tool'], description: 'What was missing (default data)' },
       need: { type: 'string', description: 'What data or action you lacked, in a few words' },
@@ -166,7 +167,7 @@ const tools = [
   },
   {
     name: 'posthog_task',
-    description: "PostHog's own cloud agents: the ones behind @PostHog in Slack and PostHog Code's cloud runs. They run in a sandbox, keep going while this Mac sleeps, and can open PRs. action=models lists the models you can pick; start creates a task and starts its run (description = the agent's instructions, repository = org/repo for code work); status shows a task and its latest run; logs reads what the run said and did; message steers a run that is going. Every task (including ones started from Slack or PostHog Code) is also a normal perch conversation with id task:<uuid>, so search_conversations finds it.",
+    description: "PostHog's own cloud agents: the ones behind @PostHog in Slack and PostHog Code's cloud runs. They run in a sandbox, keep going while this Mac sleeps, and can open PRs. action=models lists the models you can pick; start creates a task and starts its run (description = the agent's instructions, repository = org/repo for code work); status shows a task and its latest run; logs reads what the run said and did; message steers a run that is going. Every task (including ones started from Slack or PostHog Code) is also a normal auto-m8 conversation with id task:<uuid>, so search_conversations finds it.",
     inputSchema: { type: 'object', properties: {
       action: { type: 'string', enum: ['models', 'start', 'status', 'logs', 'message'] },
       task_id: { type: 'string', description: 'Task uuid (with or without the task: prefix), for status, logs, message' },
@@ -178,7 +179,7 @@ const tools = [
   },
   {
     name: 'latency',
-    description: "Live latency of perch itself, to diagnose 'perch is slow / chats won't load / it froze' in real time. Returns a diagnosis first (most likely cause in plain words), then: per-route p50/p95/p99 and share of time in SQLite, the slowest requests with where their time went (SQL and other spans), requests running right now, event-loop delay, background SQLite cost outside requests, event-loop freezes with their CPU-profile summary, and the Mac's memory/CPU/swap pressure with top processes. If the server doesn't answer within a few seconds it reports that, with the heartbeat age, recent freezes, slow-DB log and machine pressure read without it. seconds = window (default 300, 10-3600); route filters to routes containing that text; wait=N first waits N seconds (max 60) so you see what happens while you reproduce the slowness.",
+    description: "Live latency of auto-m8 itself, to diagnose 'auto-m8 is slow / chats won't load / it froze' in real time. Returns a diagnosis first (most likely cause in plain words), then: per-route p50/p95/p99 and share of time in SQLite, the slowest requests with where their time went (SQL and other spans), requests running right now, event-loop delay, background SQLite cost outside requests, event-loop freezes with their CPU-profile summary, and the Mac's memory/CPU/swap pressure with top processes. If the server doesn't answer within a few seconds it reports that, with the heartbeat age, recent freezes, slow-DB log and machine pressure read without it. seconds = window (default 300, 10-3600); route filters to routes containing that text; wait=N first waits N seconds (max 60) so you see what happens while you reproduce the slowness.",
     inputSchema: { type: 'object', properties: { seconds: { type: 'number' }, route: { type: 'string', description: 'e.g. /api/conversations' }, wait: { type: 'number', description: 'Seconds to wait before reading, to capture a reproduction' } } },
   },
   {
@@ -188,7 +189,7 @@ const tools = [
   },
   {
     name: 'runtimes',
-    description: "Live capability profile per runtime (Claude on the Mac, Codex on the Mac, the local model, a PostHog cloud task): where it runs, whether it is ready or capped, which MCP servers work, whether it has Tailscale, the signed-in Agent Chrome, local files and perch tools, and which GitHub owners it can push to. Pass the task text (and the repo owner if you know it) to see which runtimes can take it and what blocks the others. Use it before choosing delegate engine= or handing work to the cloud: a cloud task cannot reach Grafana over Tailscale, use the signed-in browser, see unpushed local work or push to a personal GitHub repo.",
+    description: "Live capability profile per runtime (Claude on the Mac, Codex on the Mac, the local model, a PostHog cloud task): where it runs, whether it is ready or capped, which MCP servers work, whether it has Tailscale, the signed-in Agent Chrome, local files and auto-m8 tools, and which GitHub owners it can push to. Pass the task text (and the repo owner if you know it) to see which runtimes can take it and what blocks the others. Use it before choosing delegate engine= or handing work to the cloud: a cloud task cannot reach Grafana over Tailscale, use the signed-in browser, see unpushed local work or push to a personal GitHub repo.",
     inputSchema: { type: 'object', properties: { task: { type: 'string', description: 'The job, in a sentence or two; needs are read from it' }, repo_owner: { type: 'string', description: 'GitHub owner of the repo it touches, e.g. my-org' } } },
   },
   {
@@ -201,7 +202,7 @@ const tools = [
     description: "Model race: runs one coding task on several models at once (default Opus, Fable and Codex GPT-6 Astra; pass models like claude-sonnet-5-5 or codex:gpt-6-luna), each in its own worktree off the same commit. Then each reviews the others' work adversarially (bugs, missing pieces, wrong behaviour, weaker engineering, overbuilding, with evidence), and the peer-rated best adjudicates every claim and merges the best parts into one solution on branch race/<id>/final. Records time, cost, tokens, tools used, check results and per-model strengths/weaknesses, and whether the model you'd have used was overkill, right or underkill. Use when the user asks to race models, compare models on a task, or wants the best of several attempts. action=start (20-60 min, runs on its own; give the full task with context, the repo cwd, and a verify command if there is one); action=status reads one race (id); action=report gives the cross-race scoreboard.",
     inputSchema: { type: 'object', properties: {
       action: { type: 'string', enum: ['start', 'status', 'report', 'skip'] },
-      auto_candidate: { type: 'string', description: 'Automatic candidate ID supplied by Perch. Pass on start after scoping, or skip with reason.' },
+      auto_candidate: { type: 'string', description: 'Automatic candidate ID supplied by auto-m8. Pass on start after scoping, or skip with reason.' },
       reason: { type: 'string', description: 'Why this automatic candidate should be skipped (skip)' },
       task: { type: 'string', description: 'The full task, self-contained (start)' }, cwd: { type: 'string', description: 'Repo to work in (start)' },
       models: { type: 'array', items: { type: 'string' } }, verify: { type: 'string', description: 'Shell command that checks a solution, e.g. a focused test (start)' },
@@ -233,19 +234,19 @@ const tools = [
   },
   {
     name: 'delegate',
-    description: "Hand a focused job to a helper (a code review, a test run, a piece of research, a side fix) and carry on with your own work. The helper is a normal perch conversation the user can open; you don't wait for it. When it finishes, its report arrives as your next input, marked HELPER REPORT. If it is blocked it says NEEDS HELP and you answer with delegate_send. Write the brief so the helper needs nothing else from you: the goal, the files or PRs, and exactly what to report back. Don't use it for work you can do in a few tool calls. Helpers can't delegate further; up to 25 at once.",
+    description: "Hand a focused job to a helper (a code review, a test run, a piece of research, a side fix) and carry on with your own work. The helper is a normal auto-m8 conversation the user can open; you don't wait for it. When it finishes, its report arrives as your next input, marked HELPER REPORT. If it is blocked it says NEEDS HELP and you answer with delegate_send. Write the brief so the helper needs nothing else from you: the goal, the files or PRs, and exactly what to report back. Don't use it for work you can do in a few tool calls. Helpers can't delegate further; up to 25 at once.",
     inputSchema: { type: 'object', properties: {
       conversation_id: { type: 'string', description: 'Your own conversation id' }, brief: { type: 'string' },
       name: { type: 'string', description: 'Short label, e.g. "review PR 1234"' }, cwd: { type: 'string', description: 'Directory to work in; defaults to yours' },
       mode: { type: 'string', enum: ['plan', 'acceptEdits'], description: 'plan = read-only, acceptEdits (default) = may edit files' },
-      engine: { type: 'string', description: "Which model runs the helper. Claude and Codex are peers with the same perch tools, MCP servers, instructions and memory, and each can delegate to the other: 'auto' (default, perch picks and falls back if one is capped), 'claude' (Sonnet), 'claude:opus', 'claude:haiku', 'codex', or 'codex:<model>'. Use the other one when you want an independent second opinion or when yours is slow or capped." },
+      engine: { type: 'string', description: "Which model runs the helper. Claude and Codex are peers with the same auto-m8 tools, MCP servers, instructions and memory, and each can delegate to the other: 'auto' (default, auto-m8 picks and falls back if one is capped), 'claude' (Sonnet), 'claude:opus', 'claude:haiku', 'codex', or 'codex:<model>'. Use the other one when you want an independent second opinion or when yours is slow or capped." },
       worktree: { type: 'boolean', description: "Give the helper its own git worktree and branch (perch/helper-<id>) made from your repo's HEAD, so parallel helpers editing code never collide with you or each other. Use it whenever two or more helpers, or you and a helper, change files in the same repo at once. Your uncommitted changes are not in it. Its report names the branch; you merge it. Up to 6 at once on this Mac." },
       workstream: { type: 'string', description: "A workstream key in your conversation's project: links the helper to it so the project view shows who works on what" },
     }, required: ['conversation_id', 'brief'] },
   },
   {
     name: 'worktrees',
-    description: "See and clean up the git worktrees perch and its agents made (<repo parent>/.perch-worktrees/: PR shepherds and audits, autoresearch runs, self-fixes, delegate helpers). list shows each one's kind, PR, branch, uncommitted changes, commits that exist only there, last use, any agent running in it, and whether it stays or the hourly sweep will remove it. sweep removes every one with no reason to stay (dry_run=true to preview). remove takes one path. Removal never loses work: dirty worktrees are kept unless force (then stashed first), branches stay, and detached commits get a perch-rescue/<name> branch. Use list before creating more worktrees or when disk is tight.",
+    description: "See and clean up the git worktrees auto-m8 and its agents made (<repo parent>/.perch-worktrees/: PR shepherds and audits, autoresearch runs, self-fixes, delegate helpers). list shows each one's kind, PR, branch, uncommitted changes, commits that exist only there, last use, any agent running in it, and whether it stays or the hourly sweep will remove it. sweep removes every one with no reason to stay (dry_run=true to preview). remove takes one path. Removal never loses work: dirty worktrees are kept unless force (then stashed first), branches stay, and detached commits get a perch-rescue/<name> branch. Use list before creating more worktrees or when disk is tight.",
     inputSchema: { type: 'object', properties: {
       action: { type: 'string', enum: ['list', 'sweep', 'remove'], description: 'Default list' },
       fresh: { type: 'boolean', description: 'list: re-read git state now instead of the up-to-10-minute-old snapshot (slow: seconds per PostHog checkout)' },
@@ -262,7 +263,7 @@ const tools = [
   },
   {
     name: 'send_to_conversation',
-    description: "Write a message into another of the user's perch conversations (Claude Code ones), as if continuing it: answer its question, tell it the next step, unblock it. Use it when the user asks you to keep their conversations going, monitor them, or drive them for them. The message is shown to the user as agent-sent and the other agent is told it came from you, not the user. Its reply (the end of its next turn) comes back to you in your next EVENTS message (perch watches it for you). Read the conversation first (get_conversation) so the message fits where it is. It refuses conversations open in a terminal right now.",
+    description: "Write a message into another of the user's auto-m8 conversations (Claude Code ones), as if continuing it: answer its question, tell it the next step, unblock it. Use it when the user asks you to keep their conversations going, monitor them, or drive them for them. The message is shown to the user as agent-sent and the other agent is told it came from you, not the user. Its reply (the end of its next turn) comes back to you in your next EVENTS message (auto-m8 watches it for you). Read the conversation first (get_conversation) so the message fits where it is. It refuses conversations open in a terminal right now.",
     inputSchema: { type: 'object', properties: {
       from: { type: 'string', description: 'Your own conversation id' }, to: { type: 'string', description: 'The conversation to write into' },
       message: { type: 'string' }, report_back: { type: 'boolean', description: 'Send its reply back to you (default true)' },
@@ -275,7 +276,7 @@ const tools = [
   },
   {
     name: 'watch',
-    description: "Have perch watch conversations and PRs for you and wake you with events instead of polling or follow_up timers. Conversation events: turn_end, asked (it ended on a question or NEEDS HELP), error, idle (quiet for idle_minutes, default 30), moved (new messages from a terminal). PR events (live from GitHub via gh, every ~90s): ci_red, ci_green, approved, changes_requested, new_threads, new_commit, ready, merged, closed, shepherd (stage change). Events are batched: you get ONE message, marked EVENTS, after a short quiet period and never mid-turn. Omit events to get all of them. No limit on how many targets. Pass stop (a list of targets, or 'all') to stop watching.",
+    description: "Have auto-m8 watch conversations and PRs for you and wake you with events instead of polling or follow_up timers. Conversation events: turn_end, asked (it ended on a question or NEEDS HELP), error, idle (quiet for idle_minutes, default 30), moved (new messages from a terminal). PR events (live from GitHub via gh, every ~90s): ci_red, ci_green, approved, changes_requested, new_threads, new_commit, ready, merged, closed, shepherd (stage change). Events are batched: you get ONE message, marked EVENTS, after a short quiet period and never mid-turn. Omit events to get all of them. No limit on how many targets. Pass stop (a list of targets, or 'all') to stop watching.",
     inputSchema: { type: 'object', properties: {
       owner: { type: 'string', description: 'Your own conversation id' }, targets: { type: 'array', items: { type: 'string' }, description: 'Conversation ids and/or GitHub PR urls' },
       events: { type: 'array', items: { type: 'string' } }, idle_minutes: { type: 'number' },
@@ -293,14 +294,14 @@ const tools = [
     inputSchema: { type: 'object', properties: {
       conversation_id: { type: 'string' }, question: { type: 'string', description: 'One line' },
       options: { type: 'array', items: { type: 'string' }, description: '2-4 short answers' }, recommendation: { type: 'string', description: 'The option you would pick (start with its exact text), and why in a few words' },
-      stakes: { type: 'string', enum: ['high', 'low'], description: 'high only for irreversible, costly, outward-facing or strategic choices; low for everything else (perch decides it with your recommendation)' },
+      stakes: { type: 'string', enum: ['high', 'low'], description: 'high only for irreversible, costly, outward-facing or strategic choices; low for everything else (auto-m8 decides it with your recommendation)' },
       auto_after_minutes: { type: 'number', description: 'high only: how long to wait for the user before going with your recommendation (default a few hours). 0 = wait for the user, only when acting without them would be destructive.' },
       context: { type: 'string', description: 'What you found that the user needs to decide, in a few lines' }, url: { type: 'string', description: 'The PR or page it is about, if any' },
     }, required: ['conversation_id', 'question', 'options', 'recommendation', 'stakes'] },
   },
   {
     name: 'project',
-    description: "Work bigger than one PR, kept by perch so it survives restarts and new conversations: the goal, what done means, every PR in it (the ones this conversation opened are included automatically; add others with prs), how they wait on each other (from each PR's perch-plan after: lines), where each one is (in review, merged, verified in production), and the open decisions. action=set when you start or reshape multi-PR work (goal, done_when, prs). action=status to get the whole picture back, e.g. after perch restarted mid-turn or when picking the work up from another conversation (pass that conversation's id). action=done when the done_when line holds in production. Plans with parallel parts: action=workstreams adds or updates workstreams (key, name, north_star, metric, unit, direction, baseline, target, measure = the command or query that produces the number, after = keys it waits on, status=done when finished; marking one done wakes you with the workstreams its gate opens). action=record logs a reading of a workstream's metric (workstream, value, source, note) every time you or a helper measure it. action=link attaches a helper conversation, autoresearch run conversation or PR to a workstream (workstream + ref); delegate and start_autoresearch also take workstream to link at start, and linked autoresearch runs record their improvements automatically. status shows each workstream's gate, latest/best vs target, agents and PRs; the user sees the same live at the top of this conversation, and the first action=workstreams opens the plan board beside it (a plan tile: goal, workstreams with progress bars, agents, metrics, PRs). action=show reopens it. A plan tile can also go on any board: canvas add_tile kind=plan with the project's conversation_id.",
+    description: "Work bigger than one PR, kept by auto-m8 so it survives restarts and new conversations: the goal, what done means, every PR in it (the ones this conversation opened are included automatically; add others with prs), how they wait on each other (from each PR's perch-plan after: lines), where each one is (in review, merged, verified in production), and the open decisions. action=set when you start or reshape multi-PR work (goal, done_when, prs). action=status to get the whole picture back, e.g. after auto-m8 restarted mid-turn or when picking the work up from another conversation (pass that conversation's id). action=done when the done_when line holds in production. Plans with parallel parts: action=workstreams adds or updates workstreams (key, name, north_star, metric, unit, direction, baseline, target, measure = the command or query that produces the number, after = keys it waits on, status=done when finished; marking one done wakes you with the workstreams its gate opens). action=record logs a reading of a workstream's metric (workstream, value, source, note) every time you or a helper measure it. action=link attaches a helper conversation, autoresearch run conversation or PR to a workstream (workstream + ref); delegate and start_autoresearch also take workstream to link at start, and linked autoresearch runs record their improvements automatically. status shows each workstream's gate, latest/best vs target, agents and PRs; the user sees the same live at the top of this conversation, and the first action=workstreams opens the plan board beside it (a plan tile: goal, workstreams with progress bars, agents, metrics, PRs). action=show reopens it. A plan tile can also go on any board: canvas add_tile kind=plan with the project's conversation_id.",
     inputSchema: { type: 'object', properties: {
       conversation_id: { type: 'string', description: 'The conversation that drives the project (yours, unless picking up another one)' }, action: { type: 'string', enum: ['set', 'status', 'done', 'workstreams', 'record', 'link', 'show'] },
       goal: { type: 'string' }, done_when: { type: 'string', description: 'A check that says it is finished, e.g. every service on the new database and reads served from it in production' },
@@ -315,12 +316,12 @@ const tools = [
       value: { type: 'number', description: 'action=record: the measured value' },
       source: { type: 'string', description: 'action=record: where the number came from (command, run, evidence link)' },
       note: { type: 'string', description: 'action=record: what changed since the last reading' },
-      ref: { type: 'string', description: 'action=link: a perch://<conversation id> (helper or autoresearch run) or a GitHub PR URL' },
+      ref: { type: 'string', description: 'action=link: an auto-m8://<conversation id> (helper or autoresearch run) or a GitHub PR URL' },
     }, required: ['conversation_id', 'action'] },
   },
   {
     name: 'terminal',
-    description: "A real terminal (a TTY) that you own, shown to the user under this chat. Run commands yourself with Bash first. Use this for commands that need a TTY or a person: interactive prompts, logins with a device code or a browser step, sudo, a hardware key. action=open with command: run=true runs it now in the TTY (you drive it, e.g. an interactive CLI); run=false types it in for the user to press Enter, ONLY after you have really tried to do it yourself and found workarounds (non-interactive flags, tokens already on disk, --with-token, gh auth token, env vars, a different tool) don't work. Then set needs_user to the one thing they must do. You own the terminal from then on: action=read with wait_seconds blocks until it finishes, waits for input or exits, and returns the state and output; action=send types into it (answer a y/n prompt, paste a code; never type secrets you invented); action=close when done. perch also wakes you with an EVENTS message (term_done, term_waiting, term_exited) if your turn ends first. When it finishes, verify the result yourself and carry on with the work.",
+    description: "A real terminal (a TTY) that you own, shown to the user under this chat. Run commands yourself with Bash first. Use this for commands that need a TTY or a person: interactive prompts, logins with a device code or a browser step, sudo, a hardware key. action=open with command: run=true runs it now in the TTY (you drive it, e.g. an interactive CLI); run=false types it in for the user to press Enter, ONLY after you have really tried to do it yourself and found workarounds (non-interactive flags, tokens already on disk, --with-token, gh auth token, env vars, a different tool) don't work. Then set needs_user to the one thing they must do. You own the terminal from then on: action=read with wait_seconds blocks until it finishes, waits for input or exits, and returns the state and output; action=send types into it (answer a y/n prompt, paste a code; never type secrets you invented); action=close when done. auto-m8 also wakes you with an EVENTS message (term_done, term_waiting, term_exited) if your turn ends first. When it finishes, verify the result yourself and carry on with the work.",
     inputSchema: { type: 'object', properties: {
       conversation_id: { type: 'string', description: 'Your own conversation id' }, action: { type: 'string', enum: ['open', 'read', 'send', 'close'] },
       command: { type: 'string', description: 'open: the command' }, run: { type: 'boolean', description: 'open: run it now (true) or type it in for the user to run (false, default)' },
@@ -356,6 +357,10 @@ export function condensed(items: Item[], max: number) {
 }
 
 async function call(name: string, args: any): Promise<string | { content: any[] }> {
+  // Agents copy conversation links into id arguments: accept auto-m8://<id> and the old perch://<id>.
+  if (args && typeof args === 'object') {
+    for (const k of ['conversation_id', 'from', 'to', 'owner', ...(name === 'get_conversation' ? ['id'] : [])]) if (typeof args[k] === 'string') args[k] = convIdOf(args[k])
+  }
   if (name === 'needs_me') {
     const port = process.env.PERCH_PORT ?? 4777, base = `http://127.0.0.1:${port}/api/needs`
     const headers = { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }
@@ -415,7 +420,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     const kind = ['skill', 'tool'].includes(args.kind) ? args.kind : 'data'
     dbRun('insert into capability_wishes (id, conversation_id, need, would_help, suggested, created_at, kind) values (?, ?, ?, ?, ?, ?, ?)',
       crypto.randomUUID(), args.conversation_id ?? null, String(args.need).slice(0, 300), String(args.would_have_helped ?? '').slice(0, 500), String(args.suggested ?? '').slice(0, 100), Date.now(), kind)
-    return kind === 'data' ? 'Logged. Carry on with what you have, and say plainly what you could not check.' : 'Logged. perch groups these with the user\'s repeated asks and writes a skill once the job recurs. Carry on.'
+    return kind === 'data' ? 'Logged. Carry on with what you have, and say plainly what you could not check.' : 'Logged. auto-m8 groups these with the user\'s repeated asks and writes a skill once the job recurs. Carry on.'
   }
   if (name === 'posthog_task') {
     const id = String(args.task_id ?? '').replace(/^task:/, '')
@@ -470,7 +475,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     }
     if (args.action === 'start') {
       const r: any = await (await fetch(base, { method: 'POST', headers, body: JSON.stringify({ ...args, requester: process.env.PERCH_CONVERSATION_ID || undefined }) })).json()
-      return r.error ? `Couldn't start: ${r.error}` : `Race ${r.runId} started: ${r.models.join(', ')} from ${r.base}${r.picked ? ` (your usual pick: ${r.picked})` : ''}. It races, cross-reviews, then merges (20-60 min) on its own; results in Insights → Models, or action=status id=${r.runId}.${args.auto_candidate ? ' Perch will resume this conversation with the combined solution or failure; do not duplicate the implementation while waiting.' : ''}`
+      return r.error ? `Couldn't start: ${r.error}` : `Race ${r.runId} started: ${r.models.join(', ')} from ${r.base}${r.picked ? ` (your usual pick: ${r.picked})` : ''}. It races, cross-reviews, then merges (20-60 min) on its own; results in Insights → Models, or action=status id=${r.runId}.${args.auto_candidate ? ' auto-m8 will resume this conversation with the combined solution or failure; do not duplicate the implementation while waiting.' : ''}`
     }
     if (args.action === 'status') {
       const d: any = await (await fetch(`${base}/run?id=${encodeURIComponent(String(args.id ?? ''))}`, { headers })).json()
@@ -499,15 +504,15 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     if (!r.error && args.workstream) {
       try { linkWorkstream(String(args.conversation_id || process.env.PERCH_CONVERSATION_ID), String(args.workstream), 'autoresearch', String(r.conversationId)); linked = ` Linked to workstream ${args.workstream}: each improvement is recorded as a reading.` } catch (e: any) { linked = ` (Not linked to the workstream: ${e.message})` }
     }
-    if (!r.error) return `Started autoresearch run ${r.runId} in conversation perch://${r.conversationId} (worktree ${r.worktree ?? 'none'}). It runs on its own; the user sees progress in perch.${linked}`
-    return r.error ? `Couldn't start: ${r.error}` : `Started autoresearch run ${r.runId} in conversation perch://${r.conversationId} (worktree ${r.worktree ?? 'none'}). It runs on its own; the user sees progress in perch.`
+    if (!r.error) return `Started autoresearch run ${r.runId} in conversation ${convLink(r.conversationId)} (worktree ${r.worktree ?? 'none'}). It runs on its own; the user sees progress in auto-m8.${linked}`
+    return r.error ? `Couldn't start: ${r.error}` : `Started autoresearch run ${r.runId} in conversation ${convLink(r.conversationId)} (worktree ${r.worktree ?? 'none'}). It runs on its own; the user sees progress in auto-m8.`
   }
   if (name === 'delegate' || name === 'delegate_send' || name === 'delegate_status') {
     const port = process.env.PERCH_PORT ?? 4777, headers = { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }
     const url = `http://127.0.0.1:${port}/api/delegate`
     if (name === 'delegate_status') {
       const r: any = await (await fetch(`${url}/for/${encodeURIComponent(String(args.conversation_id))}`, { headers })).json()
-      return (r.helpers ?? []).map((h: any) => `- ${h.id} | ${h.name} | ${h.status} | perch://${h.child}${h.result ? `\n  ${String(h.result).slice(0, 400)}` : ''}`).join('\n') || 'No helpers.'
+      return (r.helpers ?? []).map((h: any) => `- ${h.id} | ${h.name} | ${h.status} | ${convLink(h.child)}${h.result ? `\n  ${String(h.result).slice(0, 400)}` : ''}`).join('\n') || 'No helpers.'
     }
     if (name === 'delegate_send') {
       const r: any = await (await fetch(`${url}/${encodeURIComponent(String(args.helper_id))}/send`, { method: 'POST', headers, body: JSON.stringify({ message: args.message }) })).json()
@@ -515,7 +520,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     }
     const r: any = await (await fetch(url, { method: 'POST', headers, body: JSON.stringify({ parent: args.conversation_id || process.env.PERCH_CONVERSATION_ID, brief: args.brief, name: args.name, cwd: args.cwd, mode: args.mode, worktree: !!args.worktree, engine: args.engine }) })).json()
     if (!r.error && args.workstream) { try { linkWorkstream(String(args.conversation_id || process.env.PERCH_CONVERSATION_ID), String(args.workstream), 'conversation', String(r.child)) } catch (e: any) { r.linkError = e.message } }
-    return r.error ? `Couldn't delegate: ${r.error}` : `Helper ${r.id} started in perch://${r.child}${r.worktree ? ` in its own worktree ${r.worktree} on branch ${r.branch} (from ${r.repo}); merge that branch when it reports` : ''}. Carry on; its report arrives as your next input (HELPER REPORT). Tell the user in one line what you handed off.${args.workstream ? (r.linkError ? ` (Not linked to the workstream: ${r.linkError})` : ` Linked to workstream ${args.workstream}.`) : ''}`
+    return r.error ? `Couldn't delegate: ${r.error}` : `Helper ${r.id} started in ${convLink(r.child)}${r.worktree ? ` in its own worktree ${r.worktree} on branch ${r.branch} (from ${r.repo}); merge that branch when it reports` : ''}. Carry on; its report arrives as your next input (HELPER REPORT). Tell the user in one line what you handed off.${args.workstream ? (r.linkError ? ` (Not linked to the workstream: ${r.linkError})` : ` Linked to workstream ${args.workstream}.`) : ''}`
   }
   if (name === 'worktrees') {
     const port = process.env.PERCH_PORT ?? 4777, headers = { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }
@@ -534,7 +539,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     const qs = new URLSearchParams({ ...(args.fresh ? { fresh: '1' } : {}), ...(args.filter ? { filter: String(args.filter) } : {}) })
     const r: any = await (await fetch(`${base}?${qs}`, { headers })).json()
     if (r.error) return `Couldn't list: ${r.error}`
-    const sweepLine = r.lastSweep ? `Last sweep ${new Date(r.lastSweep.at).toISOString()}: removed ${r.lastSweep.removed.length}, ${r.lastSweep.freeGb ?? '?'} GB free.` : 'No sweep yet since perch started (it runs hourly).'
+    const sweepLine = r.lastSweep ? `Last sweep ${new Date(r.lastSweep.at).toISOString()}: removed ${r.lastSweep.removed.length}, ${r.lastSweep.freeGb ?? '?'} GB free.` : 'No sweep yet since auto-m8 started (it runs hourly).'
     const age = r.snapshotAgeMs != null ? ` Git state read ${Math.round(r.snapshotAgeMs / 60_000)} min ago (fresh=true to re-read, slow).` : ''
     return `${r.text}\n${sweepLine}${age} Helpers in their own worktrees now: ${r.helpersInWorktrees}/${r.limits.maxHelperWorktrees}.`
   }
@@ -576,7 +581,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
       if (r.error || !r.id) return `Couldn't open: ${r.error ?? 'no id'}`
       return args.run
         ? `Opened terminal ${r.id} and ran it. Read it with action=read term_id=${r.id} wait_seconds=30; answer prompts with action=send.`
-        : `Opened terminal ${r.id} under the chat with the command typed in for the user. Tell them in one line what to do there${args.needs_user ? ` (${args.needs_user})` : ''}. Then wait on it: action=read term_id=${r.id} wait_seconds=110 (repeat while it's still at the prompt untouched), or end your turn and perch wakes you when it finishes.`
+        : `Opened terminal ${r.id} under the chat with the command typed in for the user. Tell them in one line what to do there${args.needs_user ? ` (${args.needs_user})` : ''}. Then wait on it: action=read term_id=${r.id} wait_seconds=110 (repeat while it's still at the prompt untouched), or end your turn and auto-m8 wakes you when it finishes.`
     }
     if (!args.term_id) return 'Give term_id.'
     const tid = encodeURIComponent(String(args.term_id))
@@ -605,7 +610,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     const rows = ws.length ? dbAll<any>(`select day, body from notes where ${ws.map(() => 'lower(body) like ?').join(' or ')} order by day desc limit 10`, ...ws.map(w => `%${w}%`)) : []
     // Apple Notes too, when perch has Full Disk Access.
     const apple = searchAppleNotes(String(args.query), 6).map(n => `## Apple Note: ${n.title} (${n.folder ?? 'Notes'}, ${new Date(n.modified).toISOString().slice(0, 10)})\n${n.text.slice(0, 2000)}`)
-    return [...rows.map(n => `## perch notepad ${n.day}\n${n.body.slice(0, 1500)}`), ...apple].join('\n\n') || 'No notes match.'
+    return [...rows.map(n => `## auto-m8 notepad ${n.day}\n${n.body.slice(0, 1500)}`), ...apple].join('\n\n') || 'No notes match.'
   }
   if (name === 'search_skills') {
     const ws = String(args.query).toLowerCase().split(/\s+/).filter(w => w.length > 2)
@@ -640,14 +645,14 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
       title: String(args.question), context: args.context ? String(args.context) : undefined, options, recommendation: args.recommendation ? String(args.recommendation) : undefined,
       stakes: args.stakes === 'low' ? 'low' : 'high', autoAfterMinutes: args.auto_after_minutes === undefined ? undefined : Number(args.auto_after_minutes) })
     if (d.status === 'answered') return `The user already answered this: "${d.answer}". Act on that.`
-    if (d.status === 'auto') return `Perch already decided this: "${d.answer}". Act on that.`
+    if (d.status === 'auto') return `auto-m8 already decided this: "${d.answer}". Act on that.`
     // Low stakes: decided now, by you, with your recommendation. Perch logs it so the user can see and override it.
     if (d.stakes === 'low' || !askMe()) {
       const a = recommendedOption(d) ?? ''
       markAuto(d.id, a)
-      return `${askMe() ? 'Low stakes' : "The user has asked not to be asked"}, so it's your call: go with ${a ? `"${a}"` : 'your best judgement'} now and mention it in one line. Perch logged it; if the user overrides it, that comes back here as a message.`
+      return `${askMe() ? 'Low stakes' : "The user has asked not to be asked"}, so it's your call: go with ${a ? `"${a}"` : 'your best judgement'} now and mention it in one line. auto-m8 logged it; if the user overrides it, that comes back here as a message.`
     }
-    const wait = d.auto_at ? `If they don't answer by ${new Date(d.auto_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}, perch goes with your recommendation and tells you here.` : 'It waits for them.'
+    const wait = d.auto_at ? `If they don't answer by ${new Date(d.auto_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}, auto-m8 goes with your recommendation and tells you here.` : 'It waits for them.'
     return `Queued for the user. Their answer comes back to this conversation as a message. ${wait} Carry on with everything that doesn't depend on it, and tell the user in one line what you're waiting on.`
   }
   if (name === 'project') {
@@ -666,7 +671,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
       if (args.action === 'link') {
         const ref = String(args.ref ?? '')
         const pr = /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(ref)
-        const kind = pr ? 'pr' : get<any>('select 1 from autoresearch_runs where conversation_id = ?', ref.replace(/^perch:\/\//, '').replace(/\/$/, '')) ? 'autoresearch' : 'conversation'
+        const kind = pr ? 'pr' : get<any>('select 1 from autoresearch_runs where conversation_id = ?', convIdOf(ref)) ? 'autoresearch' : 'conversation'
         linkWorkstream(id, String(args.workstream ?? ''), kind, ref); return projectText(id)
       }
     } catch (e: any) { return `Couldn't ${args.action}: ${e.message}` }
@@ -683,7 +688,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
   if (name === 'follow_up') {
     const minutes = Number(args.minutes) || (args.pr_url ? 120 : 20)
     addPromise({ conversation_id: String(args.conversation_id), text: String(args.note), source: 'tool', due_at: Date.now() + minutes * 60_000, pr_url: args.pr_url ?? null, until: args.pr_url ? (args.until ?? 'checks') : null })
-    return `Scheduled. perch will bring this conversation back ${args.pr_url ? `when ${args.until ?? 'checks'} on ${args.pr_url} ${args.until === 'merged' ? 'happens' : 'finish'}, or in ${minutes} min at the latest` : `in ${minutes} min`}. Tell the user that, in one line.`
+    return `Scheduled. auto-m8 will bring this conversation back ${args.pr_url ? `when ${args.until ?? 'checks'} on ${args.pr_url} ${args.until === 'merged' ? 'happens' : 'finish'}, or in ${minutes} min at the latest` : `in ${minutes} min`}. Tell the user that, in one line.`
   }
   if (name === 'recent_activity') {
     const days = Math.min(90, Number(args.days) || 7), since = Date.now() - days * 86400_000
@@ -698,12 +703,12 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     const routines = dbAll<any>(`select r.name, count(x.id) n, sum(x.outcome = 'ok') ok, sum(x.outcome != 'ok') bad from routine_runs x join routines r on r.id = x.routine_id where x.started_at > ? group by 1`, since)
     const fails = dbAll<any>(`select id, coalesce(title, first_prompt) t, ${kind} k, started_at from conversations where started_at > ? and status = 'failed' order by started_at desc limit 8`, since)
     const day = (t: number) => new Date(t).toISOString().slice(0, 10)
-    return [`# Activity, last ${days} days (from perch's index)`,
+    return [`# Activity, last ${days} days (from auto-m8's index)`,
       '## By source and outcome', ...bySource.map(r => `- ${r.k}: ${r.n} ${r.status ?? 'unknown'}${r.cost ? ` ($${r.cost})` : ''}`),
       '## Per day', ...Object.entries(Object.groupBy(byDay, (r: any) => r.d)).map(([d, rs]) => `- ${d}: ${(rs as any[]).map(r => `${r.k} ${r.n}`).join(', ')}`),
       '## Top projects', ...byProject.map(r => `- ${r.p.replace(/^\/Users\/[^/]+/, '~')}: ${r.n}`),
       '## Repeated runs (3+ with the same title)', ...(repeats.length ? repeats.map(r => `- ${r.n}× "${String(r.t).slice(0, 80)}" (${r.k}): ${r.failed} failed, ${r.no_output} with no summary, last ${day(r.last)}`) : ['- none']),
-      '## perch routines', ...(routines.length ? routines.map(r => `- ${r.name}: ${r.n} runs, ${r.ok} ok, ${r.bad} not ok`) : ['- none ran']),
+      '## auto-m8 routines', ...(routines.length ? routines.map(r => `- ${r.name}: ${r.n} runs, ${r.ok} ok, ${r.bad} not ok`) : ['- none ran']),
       '## Recent failures', ...(fails.length ? fails.map(r => `- ${day(r.started_at)} ${r.k}: ${String(r.t).slice(0, 90)} (${r.id})`) : ['- none']),
     ].join('\n')
   }
@@ -742,7 +747,7 @@ async function unresponsive(seconds: number, error: string) {
   const serverPid = (await sh('lsof', ['-ti', `tcp:${process.env.PERCH_PORT ?? 4777}`, '-sTCP:LISTEN'])).trim().split('\n')[0]
   const serverState = serverPid ? (await sh('ps', ['-o', 'pid,stat,%cpu,rss,etime', '-p', serverPid])).trim().split('\n')[1] : null
   const diagnosis = [
-    `perch's server didn't answer in 8s (${error}).`,
+    `auto-m8's server didn't answer in 8s (${error}).`,
     heartbeatAgeSec == null ? 'No heartbeat file.' : heartbeatAgeSec > 10 ? `Its event loop is frozen: heartbeat ${heartbeatAgeSec}s old (rewritten every 2s). The app restarts it once that passes ~30s.` : `Its event loop is still running (heartbeat ${heartbeatAgeSec}s old): it's overloaded or a request is stuck on I/O, not frozen.`,
     serverState ? `Server process: ${serverState} (stat U = stuck in the kernel, e.g. a FIFO close; R = busy on CPU).` : 'Nothing is listening on the port: the server is down or restarting.',
   ]
@@ -777,7 +782,7 @@ if (import.meta.main) {
     try { m = JSON.parse(line) } catch { return }
     if (m.id === undefined) return // notifications
     try {
-      if (m.method === 'initialize') out({ id: m.id, result: { protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'perch', version: '0.1.0' } } })
+      if (m.method === 'initialize') out({ id: m.id, result: { protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: MCP_SERVER, version: '0.1.0' } } })
       else if (m.method === 'tools/list') out({ id: m.id, result: { tools: tools.map(t => READ_ONLY.has(t.name) ? { ...t, annotations: { readOnlyHint: true } } : t) } })
       else if (m.method === 'tools/call') { pending++; call(m.params.name, m.params.arguments ?? {})
         .then(r => out({ id: m.id, result: typeof r === 'string' ? { content: [{ type: 'text', text: r }] } : r }))

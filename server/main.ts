@@ -164,7 +164,7 @@ for (const r of all<any>('select id from user_state where title is not null')) r
 {
   const n = reattachChats(id => {
     if (!get('select 1 from perch_started where id = ?', id)) return
-    setTimeout(() => send({ id, prompt: 'perch restarted while you were working, and your last turn was cut off. Check where things stand (files, git, running jobs) and continue where you left off.', resume: true }), 3000)
+    setTimeout(() => send({ id, prompt: 'auto-m8 restarted while you were working, and your last turn was cut off. Check where things stand (files, git, running jobs) and continue where you left off.', resume: true }), 3000)
   })
   if (n) console.log(`reattached ${n} running chat${n > 1 ? 's' : ''}`)
 }
@@ -207,9 +207,11 @@ function analytics(days: number) {
   const since = Date.now() - days * DAY
   return {
     days,
-    servers: all(`select coalesce(server, 'built-in') server, count(*) calls, sum(is_error) errors, count(distinct conversation_id) conversations
-                  from tool_calls where ts > ? group by server order by calls desc`, since),
-    tools: all(`select name, server, count(*) calls, sum(is_error) errors from tool_calls where ts > ? group by name order by calls desc limit 40`, since),
+    // Our own MCP server was called perch before the rename: old and new calls count as one (auto-m8).
+    servers: all(`select coalesce(case when server in ('perch', 'auto_m8') then 'auto-m8' else server end, 'built-in') server, count(*) calls, sum(is_error) errors, count(distinct conversation_id) conversations
+                  from tool_calls where ts > ? group by 1 order by calls desc`, since),
+    tools: all(`select replace(replace(name, 'mcp__perch__', 'mcp__auto-m8__'), 'mcp__auto_m8__', 'mcp__auto-m8__') name, case when server in ('perch', 'auto_m8') then 'auto-m8' else server end server, count(*) calls, sum(is_error) errors
+                from tool_calls where ts > ? group by 1 order by calls desc limit 40`, since),
     daily: all(`select date(ts / 1000, 'unixepoch', 'localtime') day, count(*) calls, sum(server is not null) mcp_calls
                 from tool_calls where ts > ? group by day order by day`, since),
     sources: all(`select date(started_at / 1000, 'unixepoch', 'localtime') day, source, count(*) n from conversations where started_at > ? group by day, source order by day`, since),

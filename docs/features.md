@@ -215,7 +215,7 @@ Every failure becomes one plain sentence: what happened and what auto-m8 is doin
 - **Context between conversations.**
   - When you start a chat, conversations that look related appear as you type. *Pull in* adds a short brief of one (where it started, where it ended) to your message and links the two. *Continue there* opens it instead.
   - Turn **context** off for a clean session: no suggestions, and no access to your history.
-  - Chats also get a small `perch` MCP server (`search_conversations`, `get_conversation`, `link_conversations`), so Claude can look things up itself.
+  - Chats also get a small `auto-m8` MCP server (`search_conversations`, `get_conversation`, `link_conversations`; tools appear as `mcp__auto-m8__<tool>`), so Claude can look things up itself. Replies link conversations as `auto-m8://<id>`; older `perch://<id>` links still open.
   - Links are stored and shown in the details column. Conversations that share a PR are connected implicitly too (`/api/graph`).
 - **/btw.** A side question about a conversation that sees everything in it but is never saved into it. It runs as a throwaway fork (`--fork-session --no-session-persistence`), so it also works while the agent is mid-turn.
 - **Terminals.** Real PTYs that keep running when you close the tab. *+ claude* opens Claude Code's own UI; ⌘_ on a conversation resumes it there (`claude --resume`).
@@ -249,14 +249,14 @@ server/main.ts      Node 26, no build step. HTTP + SSE + WebSocket on 127.0.0.1:
   chat.ts           one long-lived `claude -p --input-format stream-json` per open chat; /btw
   term.ts           node-pty terminals with scrollback
   context.ts        related-conversation search, context briefs, links
-  mcp.ts            the `perch` MCP server chats get
+  mcp.ts            the `auto-m8` MCP server chats get
   routines.ts       cron + webhooks
   posthog.ts        skills and scouts over the PostHog API
   status.ts         claude / gh / MCP health for Settings
 web/src             React UI (Vite). Also works in a normal browser tab.
 ```
 
-- Data lives in `~/Library/Application Support/perch/`: `perch.db` and `settings.json`. Delete `perch.db` to rebuild everything derived; links, states, notes and routines are lost with it.
+- Data lives in `~/Library/Application Support/perch/` (the folder keeps its pre-rename name): `perch.db` and `settings.json`. Delete `perch.db` to rebuild everything derived; links, states, notes and routines are lost with it.
 - Transcripts are never copied. A chat started here is an ordinary Claude Code session: `claude --resume <id>` works on it, and it appears in Claude Code's `/resume`.
 - The server binds to 127.0.0.1 and rejects any request whose Host or Origin isn't auto-m8 itself, so a web page can't drive it through your browser. Webhooks are the one exception, and they need the routine's secret.
 

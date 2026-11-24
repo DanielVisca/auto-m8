@@ -2,7 +2,7 @@
 // instead of living only in one long conversation. A project is owned by the conversation that
 // drives it: its goal, what "done" means, the PRs it opened (and any it adopted), how they wait on
 // each other (the perch-plan `after:` lines), where each one is (review, merged, verified), and
-// the decisions waiting on you. When perch restarts mid-turn, or a new conversation picks the work
+// the decisions waiting on you. When auto-m8 restarts mid-turn, or a new conversation picks the work
 // up, `project status` gives the whole picture back in one call, without rereading the transcript.
 // No chat imports: the MCP process uses this too.
 import { randomUUID } from 'node:crypto'
@@ -10,6 +10,7 @@ import { all, db, get, run } from './db.ts'
 import { decisionsFor } from './decisionstore.ts'
 import { proofOf } from './proof.ts'
 import './shepherdstore.ts' // creates shepherd_watch, which the graph reads
+import { convIdOf, convLink } from '../shared/brand.ts'
 
 db.exec(`create table if not exists projects (
   id text primary key, conversation_id text unique, goal text not null, done_when text,
@@ -86,7 +87,7 @@ export function linkWorkstream(conversationId: string, workstream: string, kind:
   if (!pid) throw new Error('This conversation has no project.')
   const key = slug(workstream)
   if (!get<any>('select 1 from project_workstreams where project_id = ? and key = ?', pid, key)) throw new Error(`No workstream "${workstream}".`)
-  const r = kind === 'pr' ? ref : ref.replace(/^perch:\/\//, '').replace(/\/$/, '')
+  const r = kind === 'pr' ? ref : convIdOf(ref)
   run('insert or ignore into project_links (project_id, workstream, kind, ref, created_at) values (?, ?, ?, ?, ?)', pid, key, kind, r, Date.now())
   if (kind === 'pr') run('insert or ignore into project_prs (project_id, url) values (?, ?)', pid, r)
 }
@@ -95,7 +96,7 @@ export function linkWorkstream(conversationId: string, workstream: string, kind:
 export function autoresearchReading(runConversationId: string, value: number, note?: string) {
   for (const l of all<any>(`select l.project_id, l.workstream, p.conversation_id from project_links l join projects p on p.id = l.project_id
     where l.kind = 'autoresearch' and l.ref = ?`, runConversationId)) {
-    run('insert into project_readings (project_id, workstream, value, source, note, at) values (?, ?, ?, ?, ?, ?)', l.project_id, l.workstream, value, `autoresearch perch://${runConversationId}`, note ?? null, Date.now())
+    run('insert into project_readings (project_id, workstream, value, source, note, at) values (?, ?, ?, ?, ?, ?)', l.project_id, l.workstream, value, `autoresearch ${convLink(runConversationId)}`, note ?? null, Date.now())
     const w = get<any>('select * from project_workstreams where project_id = ? and key = ?', l.project_id, l.workstream)
     if (w && w.baseline == null) run('update project_workstreams set baseline = ? where project_id = ? and key = ?', value, l.project_id, l.workstream)
   }
@@ -251,7 +252,7 @@ export function projectText(conversationId: string) {
         `  north star: ${w.north_star ?? '(not set)'}${w.metric ? ` | metric ${w.metric} (${w.direction})` : ''}`,
         `  baseline ${v(w.baseline)} → target ${v(w.target)} | latest ${v(w.current)} | best ${v(w.best)}${w.progress != null ? ` | ${Math.round(w.progress * 100)}%` : ''} | ${w.readings.length} readings`,
         ...(w.measure ? [`  measure: ${w.measure}`] : []),
-        ...(w.agents.length ? [`  agents: ${w.agents.map(a => `${a.name} (${a.kind}${a.status ? `, ${a.status}` : ''}) perch://${a.id}`).join('; ')}`] : []),
+        ...(w.agents.length ? [`  agents: ${w.agents.map(a => `${a.name} (${a.kind}${a.status ? `, ${a.status}` : ''}) ${convLink(a.id)}`).join('; ')}`] : []),
         ...(w.prs.length ? [`  PRs: ${w.prs.map(p => `${n(p.url)} (${p.phase})`).join(', ')}`] : []),
       ].join('\n')
     })] : ['', 'No workstreams yet: add them with action=workstreams for plans with parallel parts and north-star metrics.']),

@@ -11,8 +11,10 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { HOME } from './settings.ts'
+import { MCP_SERVER, mcpTool } from '../shared/brand.ts'
 
-const MARK = '<!-- written by perch (server/agentsync.ts) from ~/.claude; delete this line to keep your own edits -->'
+const MARK = '<!-- written by auto-m8 (server/agentsync.ts) from ~/.claude; delete this line to keep your own edits -->'
+const OLD_MARK = '<!-- written by perch (server/agentsync.ts) from ~/.claude; delete this line to keep your own edits -->'
 const CODEX = join(HOME, '.codex'), CLAUDE = join(HOME, '.claude')
 const memoryDirs = () => { const p = join(CLAUDE, 'projects'); return existsSync(p) ? readdirSync(p).map(d => join(p, d, 'memory')).filter(d => existsSync(join(d, 'MEMORY.md'))) : [] }
 const read = (f: string) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
@@ -22,7 +24,7 @@ function agentsMd(): string {
   return `${MARK}
 # Standing instructions (shared with Claude Code)
 
-These are the user's own instructions, written for Claude Code and shared with every agent. Where they name Claude-only tools (ToolSearch, Skill, Agent, TodoWrite, Monitor, the perch tools as mcp__perch__*), use your equivalent: the shell, the MCP servers you have (perch's tools are on the \`perch\` server), and skills in ~/.codex/skills.
+These are the user's own instructions, written for Claude Code and shared with every agent. Where they name Claude-only tools (ToolSearch, Skill, Agent, TodoWrite, Monitor, the auto-m8 tools as ${mcpTool('*')}), use your equivalent: the shell, the MCP servers you have (auto-m8's tools are on the \`${MCP_SERVER}\` server), and skills in ~/.codex/skills.
 
 ${read(join(CLAUDE, 'CLAUDE.md')).trim()}
 
@@ -34,7 +36,7 @@ ${mem || '(none yet)'}
 function syncAgentsMd() {
   const f = join(CODEX, 'AGENTS.md')
   const cur = read(f)
-  if (cur && !cur.startsWith(MARK)) return 'kept yours'
+  if (cur && !cur.startsWith(MARK) && !cur.startsWith(OLD_MARK)) return 'kept yours'
   const next = agentsMd()
   if (cur !== next) { writeFileSync(f, next); return 'updated' }
   return 'unchanged'
@@ -55,10 +57,31 @@ function syncSkills() {
 }
 
 type Server = { type?: string; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> }
-function claudeServers(perch: Server): Record<string, Server> {
+// Our own server used to be registered as "perch"; it is now MCP_SERVER (auto-m8). An old "perch"
+// entry that runs our server/mcp.ts is removed, so agents don't see every tool twice.
+const LEGACY = 'perch'
+const runsOurMcp = (s: Server | undefined, ours: Server) => !!s?.command && (s.args ?? []).some(a => (ours.args ?? []).includes(a) || /[\\/]server[\\/]mcp\.ts$/.test(a))
+function claudeServers(ours: Server): Record<string, Server> {
   let cfg: any = {}
   try { cfg = JSON.parse(read(join(HOME, '.claude.json')) || '{}') } catch {}
-  return { ...(cfg.projects?.[join(HOME, 'Development')]?.mcpServers ?? {}), ...(cfg.projects?.[HOME]?.mcpServers ?? {}), ...(cfg.mcpServers ?? {}), perch }
+  const all: Record<string, Server> = { ...(cfg.projects?.[join(HOME, 'Development')]?.mcpServers ?? {}), ...(cfg.projects?.[HOME]?.mcpServers ?? {}), ...(cfg.mcpServers ?? {}), [MCP_SERVER]: ours }
+  if (runsOurMcp(all[LEGACY], ours)) delete all[LEGACY]
+  return all
+}
+
+// Drops the [mcp_servers.perch] table (and its .env / .http_headers sub-tables) when it runs our mcp.ts.
+export function withoutLegacyToml(toml: string, ours: Server): string {
+  const lines = toml.split('\n')
+  const header = (l: string) => /^\s*\[/.test(l)
+  const legacyHeader = (l: string) => new RegExp(`^\\s*\\[mcp_servers\\.("?)${LEGACY}\\1(\\.[^\\]]*)?\\]\\s*$`).test(l)
+  const start = lines.findIndex(l => new RegExp(`^\\s*\\[mcp_servers\\.("?)${LEGACY}\\1\\]\\s*$`).test(l))
+  if (start < 0) return toml
+  let end = start + 1
+  while (end < lines.length && (!header(lines[end]) || legacyHeader(lines[end]))) end++
+  const block = lines.slice(start, end).join('\n')
+  const args = [...block.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(m => m[1])
+  if (!runsOurMcp({ command: 'x', args }, ours)) return toml
+  return [...lines.slice(0, start), ...lines.slice(end)].join('\n')
 }
 
 const q = (s: string) => JSON.stringify(s)
@@ -69,10 +92,12 @@ function tomlBlock(name: string, s: Server): string | null {
   return `\n[mcp_servers.${key}]\ncommand = ${q(s.command)}\nargs = [${(s.args ?? []).map(q).join(', ')}]\n` + (s.env && Object.keys(s.env).length ? `\n[mcp_servers.${key}.env]\n${Object.entries(s.env).map(([k, v]) => `${q(k)} = ${q(v)}`).join('\n')}\n` : '')
 }
 
-function syncCodexMcp(servers: Record<string, Server>) {
+function syncCodexMcp(servers: Record<string, Server>, ours: Server) {
   const f = join(CODEX, 'config.toml')
   if (!existsSync(f)) return []
-  const cur = read(f)
+  const was = read(f)
+  const cur = withoutLegacyToml(was, ours)
+  if (cur !== was) writeFileSync(f, cur)
   const have = new Set([...cur.matchAll(/^\[mcp_servers\.("?)([^\]."]+)\1\]/gm)].map(m => m[2]))
   const added: string[] = []
   let out = ''
@@ -85,27 +110,29 @@ function syncCodexMcp(servers: Record<string, Server>) {
   return added
 }
 
-function syncCursorMcp(servers: Record<string, Server>) {
+function syncCursorMcp(servers: Record<string, Server>, ours: Server) {
   const f = join(HOME, '.cursor', 'mcp.json')
   if (!existsSync(join(HOME, '.cursor'))) return []
   let cfg: any = { mcpServers: {} }
   try { cfg = JSON.parse(read(f) || '{"mcpServers":{}}') } catch { return [] } // unreadable: leave it alone
   cfg.mcpServers ??= {}
+  const dropped = runsOurMcp(cfg.mcpServers[LEGACY], ours)
+  if (dropped) delete cfg.mcpServers[LEGACY]
   const added = Object.keys(servers).filter(n => !cfg.mcpServers[n])
   for (const n of added) { const { type: _t, ...s } = servers[n]; cfg.mcpServers[n] = s }
-  if (added.length) writeFileSync(f, JSON.stringify(cfg, null, 2) + '\n')
+  if (added.length || dropped) writeFileSync(f, JSON.stringify(cfg, null, 2) + '\n')
   return added
 }
 
-export function syncAgents(perch: Server) {
+export function syncAgents(ours: Server) {
   const r: Record<string, unknown> = {}
   try {
     if (existsSync(CODEX)) {
       r.agentsMd = syncAgentsMd()
       r.skillsLinked = syncSkills()
-      r.codexMcpAdded = syncCodexMcp(claudeServers(perch))
+      r.codexMcpAdded = syncCodexMcp(claudeServers(ours), ours)
     }
-    r.cursorMcpAdded = syncCursorMcp(claudeServers(perch))
+    r.cursorMcpAdded = syncCursorMcp(claudeServers(ours), ours)
   } catch (e) { r.error = String(e) }
   return r
 }

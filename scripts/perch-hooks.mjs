@@ -46,10 +46,10 @@ if (cmd === "install") {
     (s.hooks[ev] ??= []).push({ matcher: "", hooks: [{ type: "command", command: hookPath, timeout: 5 }] });
   }
   write(s);
-  console.log(`perch hooks installed in ${settingsPath} (${EVENTS.join(", ")}). Undo: node ${process.argv[1]} uninstall`);
+  console.log(`auto-m8 hooks installed in ${settingsPath} (${EVENTS.join(", ")}). Undo: node ${process.argv[1]} uninstall`);
 } else if (cmd === "uninstall") {
   write(strip(s));
-  console.log(`perch hooks removed from ${settingsPath}`);
+  console.log(`auto-m8 hooks removed from ${settingsPath}`);
 } else if (cmd === "status") {
   console.log(installed(s) ? `installed in ${settingsPath}` : `not installed in ${settingsPath}`);
 } else {

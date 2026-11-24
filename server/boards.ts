@@ -1,11 +1,12 @@
 // Boards: canvases that stand on their own, not inside a folder. A board is a set of tiles
-// (canvas.ts). Agents find, read, build and change them through the perch MCP `canvas` tool,
+// (canvas.ts). Agents find, read, build and change them through the auto-m8 MCP `canvas` tool,
 // and can show one beside a chat or instead of it. A few can be pinned to Home.
 // A board's id is the tiles' folder_id, so a folder's old canvas is just a board with that id.
 import { randomUUID } from 'node:crypto'
 import './folders.ts' // the legacy migration below reads the folders table
 import { all, db, get, run } from './db.ts'
 import { makeTile, onCanvas, removeTile, saveTile, tiles, type Tile } from './canvas.ts'
+import { convLink } from '../shared/brand.ts'
 
 db.exec(`create table if not exists boards (
   id text primary key, name text not null, about text, pinned integer not null default 0,
@@ -156,7 +157,7 @@ export function ensurePlanBoard(conversationId: string, opts: { show?: boolean }
     where t.kind = 'plan' and json_extract(t.config, '$.conversation_id') = ? order by b.updated_at desc limit 1`, conversationId)?.folder_id as string | undefined
   if (!boardId) {
     const goal = String(p.goal).split(/[.:\n]/)[0].trim()
-    const made: string = createBoard(`Plan: ${goal.length > 50 ? `${goal.slice(0, 50)}…` : goal}`, `Live plan for perch://${conversationId}: workstreams, north-star metrics, agents and PRs.`, 'perch', { temporary: false })!.id
+    const made: string = createBoard(`Plan: ${goal.length > 50 ? `${goal.slice(0, 50)}…` : goal}`, `Live plan for ${convLink(conversationId)}: workstreams, north-star metrics, agents and PRs.`, 'perch', { temporary: false })!.id
     saveTile({ folder_id: made, kind: 'plan', w: 12, h: 14, config: { conversation_id: conversationId, title: 'Plan' } })
     boardId = made
   }

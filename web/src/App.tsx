@@ -323,7 +323,7 @@ export function App() {
       if (c === 'sidebar.toggle') { setListOpen(o => !o); return null }
       if (c === 'details.toggle') { setDetailsOpen(o => !o); return null }
       if (c === 'layout.switch') { api.send('PUT', '/api/layouts/active', { name: String(a?.name ?? '') }); return null }
-      return `perch has no "${c}" command`
+      return `auto-m8 has no "${c}" command`
     }
     // The window's buttons sit over the top-left corner: whatever is drawn there makes room for them.
     const corner = shell.isElectron ? topLeftOf(layout.layout, { sidebar: listOpen, details: !!(showDetails || showPrSide) }) : null

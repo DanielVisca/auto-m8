@@ -529,13 +529,13 @@ function gate(s: Session, what: string, name: string): string | null {
   const existing = [...approvals.values()].find(a => a.key === key)
   if (existing?.state === 'approved') { approvals.delete(existing.id); return null }
   if (existing?.state === 'denied') { approvals.delete(existing.id); return `${ownerName()} declined: ${what} on ${hostOf(s.url)}. Don't retry it; tell ${ownerName()} what you were trying to do.` }
-  if (existing) return `Still waiting for ${ownerName()} to approve ${what} (approval ${existing.id}). Use action=wait for=approval approval_id=${existing.id}, or end your turn: perch wakes you when ${ownerName()} answers.`
+  if (existing) return `Still waiting for ${ownerName()} to approve ${what} (approval ${existing.id}). Use action=wait for=approval approval_id=${existing.id}, or end your turn: auto-m8 wakes you when ${ownerName()} answers.`
   const a: Approval = { id: randomUUID().slice(0, 8), owner: s.owner, host: hostOf(s.url), what, url: s.url, key, at: Date.now(), state: 'pending' }
   approvals.set(a.id, a)
   try { run('insert into chat_notices (conversation_id, at, text) values (?, ?, ?)', s.owner, Date.now(), `Browser: approve ${what} on ${a.host}? (approval ${a.id})`) } catch {}
   emit(s.owner, 'browser_needs_user', `Waiting for ${ownerName()} to approve ${what} on ${a.host} (approval ${a.id}).`)
   changed()
-  return `Held for ${possessive(ownerName())} OK: ${what} on ${a.host} looks irreversible (${name}). ${ownerName()} sees it under the chat (approval ${a.id}). Do the rest of the work; then use action=wait for=approval approval_id=${a.id}, or end your turn and perch wakes you when ${ownerName()} answers. After ${ownerName()} approves, run the same step again.`
+  return `Held for ${possessive(ownerName())} OK: ${what} on ${a.host} looks irreversible (${name}). ${ownerName()} sees it under the chat (approval ${a.id}). Do the rest of the work; then use action=wait for=approval approval_id=${a.id}, or end your turn and auto-m8 wakes you when ${ownerName()} answers. After ${ownerName()} approves, run the same step again.`
 }
 
 // always: allow this exact action on this site from now on (e.g. "clicking button "Send"" on mail.google.com).
@@ -980,7 +980,7 @@ export async function replay(s: Session, p: SitePath, values: Record<string, str
   const newSteps: LoggedStep[] = []
   beginGoal(s, p.goal)
   for (const [i, st] of p.steps.entries()) {
-    if (st.secret) { lines.push(`${i + 1}. stopped: this step types a password, which perch never caches`); return { ok: false, lines, at: i, ms: Date.now() - t0 } }
+    if (st.secret) { lines.push(`${i + 1}. stopped: this step types a password, which auto-m8 never caches`); return { ok: false, lines, at: i, ms: Date.now() - t0 } }
     const value = st.value != null && values[st.value] != null ? values[st.value] : st.value
     const step: Step = { do: st.do, value, key: st.key, url: st.url, dy: st.dy, ms: st.ms, text: st.text, submit: st.submit }
     try {

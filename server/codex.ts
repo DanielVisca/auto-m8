@@ -19,6 +19,7 @@ import { DATA_DIR, HOME } from './settings.ts'
 import { durableRun, savedRuns, type RunRecord } from './durable-run.ts'
 import { codexExhausted } from './usage.ts'
 import { claudePeer, codexPeer, modelTier, type ModelTier } from './model-tiers.ts'
+import { MCP_SERVER } from '../shared/brand.ts'
 
 const exec = promisify(execFile)
 const CANDIDATES = [
@@ -73,9 +74,11 @@ function argsFor(o: { model?: string; conversationId?: string; mcpScript?: strin
   else a.push('--dangerously-bypass-approvals-and-sandbox')
   if (o.textOnly) a.push('--ephemeral', '-c', 'mcp_servers={}')
   else if (o.mcpScript && o.node) {
-    // perch's own tools are pre-approved: in a read-only (plan/default) chat Codex otherwise refuses every MCP call.
-    a.push('-c', `mcp_servers.perch.command=${toml(o.node)}`, '-c', `mcp_servers.perch.args=[${toml(o.mcpScript)}]`, '-c', 'mcp_servers.perch.default_tools_approval_mode="approve"')
-    if (o.conversationId) a.push('-c', `mcp_servers.perch.env={PERCH_CONVERSATION_ID=${toml(o.conversationId)},PERCH_AGENT="auto-m8 chat (codex)"}`)
+    // auto-m8's own tools are pre-approved: in a read-only (plan/default) chat Codex otherwise refuses every MCP call.
+    // A TOML bare key may contain "-", so the server is mcp_servers.auto-m8 here too (tools: mcp__auto-m8__<tool>).
+    const s = `mcp_servers.${MCP_SERVER}`
+    a.push('-c', `${s}.command=${toml(o.node)}`, '-c', `${s}.args=[${toml(o.mcpScript)}]`, '-c', `${s}.default_tools_approval_mode="approve"`)
+    if (o.conversationId) a.push('-c', `${s}.env={PERCH_CONVERSATION_ID=${toml(o.conversationId)},PERCH_AGENT="auto-m8 chat (codex)"}`)
   }
   if (o.model) a.push('-m', o.model)
   if (o.system) a.push('-c', `developer_instructions=${toml(o.system)}`)

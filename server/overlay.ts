@@ -282,7 +282,7 @@ async function investigate(st: State, s: B.Session, key: string, keys?: string[]
   const prompt = [
     `Investigate this element of a live product, using the PostHog MCP (project ${st.project}) and the code if you can find it.`,
     ``, `Page: ${s.url}`, `Element: ${it.match} (label "${it.label}")`, `Page path pattern: ${st.path}`,
-    ``, `What the perch product overlay saw in the last 24 hours:`,
+    ``, `What the auto-m8 product overlay saw in the last 24 hours:`,
     st.cohort === 'new' ? `- Narrowed to ${d.unit} new to this page in the last 7 days (the rollout view).` : '',
     `- ${d.clicks} clicks from ${d.people} people in ${d.orgs} ${d.unit} (a week earlier: ${d.prevOrgs} ${d.unit}, ${d.prevClicks} clicks), ${d.rage} rage clicks, ${d.dead} dead clicks`,
     `- errors within 10s after a click on it: ${d.errors?.length ? d.errors.map((e: any) => `${e.type}: ${e.value} (${e.count}×, ${e.orgs} ${d.unit}${e.noise ? ', likely noise' : ''})`).join('; ') : 'none'}`,
@@ -293,7 +293,7 @@ async function investigate(st: State, s: B.Session, key: string, keys?: string[]
   ].join('\n')
   const port = process.env.PERCH_PORT ?? 4777
   const r = await fetch(`http://127.0.0.1:${port}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify({ prompt, noRoute: true }) })
-  if (!r.ok) throw new Error(`perch ${r.status}`)
+  if (!r.ok) throw new Error(`auto-m8 ${r.status}`)
   return ((await r.json()) as any).id as string
 }
 

@@ -11,6 +11,7 @@ import { settings } from './settings.ts'
 import { recordError, resolveErrors } from './errors.ts'
 import { toItems, itemsOf } from './transcript.ts'
 import { snoozed } from './pr.ts'
+import { mcpTool } from '../shared/brand.ts'
 
 const DAY = 86400_000
 export const today = () => new Date().toLocaleDateString('sv') // YYYY-MM-DD, local time
@@ -120,7 +121,7 @@ export function digest() {
   ].join('\n\n')
 }
 
-const BRIEF_PROMPT = `You are writing a short morning brief for an engineer about their own agent work. They run many conversations and PRs at once and lose track of them. Below is everything perch knows.
+const BRIEF_PROMPT = `You are writing a short morning brief for an engineer about their own agent work. They run many conversations and PRs at once and lose track of them. Below is everything auto-m8 knows.
 
 Reply with ONLY a JSON object, no prose, in exactly this shape:
 {
@@ -161,14 +162,14 @@ export function generateBrief(): Promise<Row> {
 }
 
 // "Ask my history": Claude with only the perch tools answers from your past conversations.
-const ASK_PROMPT = `You answer questions about the user's own past agent conversations, using only the perch tools (search_conversations, get_conversation, open_prs).
+const ASK_PROMPT = `You answer questions about the user's own past agent conversations, using only the auto-m8 tools (search_conversations, get_conversation, open_prs).
 Search with two or three different phrasings, read the most relevant conversations, then answer concisely. For anything about PRs or stacks, also call open_prs: it is live GitHub state and beats what old conversations say.
-Cite every conversation you rely on as a markdown link [title](perch://<id>). If nothing relevant exists, say so plainly.`
+Cite every conversation you rely on as a markdown link [title](auto-m8://<id>). If nothing relevant exists, say so plainly.`
 
 export function ask(question: string, l: (ev: Row) => void) {
   const args = ['-p', question, '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--model', settings.ai.model,
     '--no-session-persistence', '--strict-mcp-config', '--mcp-config', PERCH_MCP(), '--permission-mode', 'dontAsk',
-    '--append-system-prompt', ASK_PROMPT, '--allowedTools', 'mcp__perch__search_conversations', 'mcp__perch__get_conversation', 'mcp__perch__open_prs']
+    '--append-system-prompt', ASK_PROMPT, '--allowedTools', ...['search_conversations', 'get_conversation', 'open_prs'].map(t => mcpTool(t))]
   return ephemeral(args, settings.chat.cwd, l)
 }
 

@@ -47,7 +47,7 @@ const CREATES_PR = /gh pr create|create_pull_request|pull_request_create/
 // doesn't make the conversation about those PRs. Only a few PRs, or one it created, link.
 // Listing tools by name; anything else naming more than 10 PRs is treated as a listing too. A PR
 // view whose description names its stack still links that PR.
-const LISTS_PRS = /open_prs|mcp__perch__shepherd|search_pull_requests|list_pull_requests|gh pr list|gh search prs|recent_activity/
+const LISTS_PRS = /open_prs|mcp__(?:auto-m8|auto_m8|perch)__shepherd|search_pull_requests|list_pull_requests|gh pr list|gh search prs|recent_activity/
 export const LISTING = 10
 function addPrs(meta: Meta, text: string, created: boolean, fromTool = false, listing = false) {
   const urls = [...new Set(text.match(PR_RE) ?? [])]

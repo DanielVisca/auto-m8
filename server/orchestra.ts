@@ -15,6 +15,7 @@ import { parsePr, prLine, prStates, type PrState } from './ghpr.ts'
 import { scorePrs, todaysArm } from './learn.ts'
 import { liveSessions } from './presence.ts'
 import { titleFor } from './relay.ts'
+import { convIdOf, convLink } from '../shared/brand.ts'
 import { toItems, itemsOf } from './transcript.ts'
 
 run(`create table if not exists watches (
@@ -48,7 +49,7 @@ export function watch(input: { owner: string; targets: string[]; events?: string
   const added: string[] = []
   for (const raw of input.targets ?? []) {
     const pr = parsePr(String(raw))
-    const target = pr ? pr.url : String(raw).replace(/^perch:\/\//, '').trim()
+    const target = pr ? pr.url : convIdOf(String(raw).trim())
     if (!target || target === owner) continue
     if (!pr && !get('select 1 from conversations where id = ?', target) && !chats.has(target)) throw new Error(`No conversation ${target}.`)
     const kind = pr ? 'pr' : 'conv'
@@ -77,7 +78,7 @@ export function stopTargets(b: { stop?: unknown; targets?: unknown }): string[] 
 export function unwatch(owner: string, targets: string[] | 'all'): number {
   let n = 0
   if (targets === 'all') n = Number(run('update watches set active = 0 where owner = ? and active = 1', owner).changes)
-  else for (const t of targets) n += Number(run('update watches set active = 0 where owner = ? and target = ? and active = 1', owner, parsePr(t)?.url ?? t.replace(/^perch:\/\//, '')).changes)
+  else for (const t of targets) n += Number(run('update watches set active = 0 where owner = ? and target = ? and active = 1', owner, parsePr(t)?.url ?? convIdOf(t)).changes)
   changed()
   return n
 }
@@ -119,7 +120,7 @@ function pollConvs() {
     // moved: a conversation perch doesn't run got new messages (someone is working in it in a terminal); reported once it settles
     if (snap.seen == null) snap.seen = c.updated_at
     else if (c.updated_at > snap.seen && now - c.updated_at > 2 * 60_000) {
-      if (!chats.has(w.target) && wants(w, 'moved')) push(w.owner, w.target, 'moved', `"${titleFor(w.target)}" moved (new messages outside perch, last ${ago(c.updated_at)}). ${lastAgentLine(w.target)}`)
+      if (!chats.has(w.target) && wants(w, 'moved')) push(w.owner, w.target, 'moved', `"${titleFor(w.target)}" moved (new messages outside auto-m8, last ${ago(c.updated_at)}). ${lastAgentLine(w.target)}`)
       snap.seen = c.updated_at
     }
     const idleMs = (w.idle_minutes ?? 30) * 60_000
@@ -196,8 +197,8 @@ function deliver() {
     if (chats.get(owner)?.state === 'running') continue // delivered at the end of its turn
     if (!ours(owner)) continue // a terminal conversation: the board shows them; never written to behind your back
     run(`update inbox set delivered_at = ? where owner = ? and delivered_at is null and id <= ?`, now, owner, items[items.length - 1].id)
-    const body = items.map((e, i) => `${i + 1}. [${e.event}${e.target ? ` · ${e.target.startsWith('http') || e.target.startsWith('term:') ? e.target : `perch://${e.target}`}` : ''}] ${e.text}`).join('\n\n')
-    send({ id: owner, resume: true, prompt: `EVENTS (${items.length}) from what you're watching (perch, not the user):\n\n${body}\n\nAct on what needs it (send_to_conversation, gh, the shepherd), then carry on. board gives the full picture.` })
+    const body = items.map((e, i) => `${i + 1}. [${e.event}${e.target ? ` · ${e.target.startsWith('http') || e.target.startsWith('term:') ? e.target : convLink(e.target)}` : ''}] ${e.text}`).join('\n\n')
+    send({ id: owner, resume: true, prompt: `EVENTS (${items.length}) from what you're watching (auto-m8, not the user):\n\n${body}\n\nAct on what needs it (send_to_conversation, gh, the shepherd), then carry on. board gives the full picture.` })
     changed()
   }
 }
@@ -242,9 +243,9 @@ export async function board(owner: string, opts: { scope?: 'mine' | 'all'; hours
   const convLines = [...convIds].map(id => {
     const c = row<any>(`select c.source, c.updated_at, c.status, u.state, a.reason from conversations c left join user_state u on u.id = c.id left join attention a on a.id = c.id and a.verdict = 1 where c.id = ?`, id)
     const chat = chats.get(id)
-    const state = chat?.state === 'running' ? 'RUNNING' : chat ? 'idle in perch' : terminals.has(id) ? 'open in a terminal' : 'not running'
+    const state = chat?.state === 'running' ? 'RUNNING' : chat ? 'idle in auto-m8' : terminals.has(id) ? 'open in a terminal' : 'not running'
     const extra = [c?.state ? `marked ${c.state}` : '', c?.reason ? `needs you: ${c.reason}` : '', watched.has(id) ? 'watched' : ''].filter(Boolean).join(' · ')
-    return { at: c?.updated_at ?? 0, line: `- perch://${id} "${titleFor(id)}" | ${c?.source ?? 'perch'} | ${state} | active ${c?.updated_at ? ago(c.updated_at) : '?'}${extra ? ` | ${extra}` : ''}\n  ${lastAgentLine(id) || '(no transcript)'}` }
+    return { at: c?.updated_at ?? 0, line: `- ${convLink(id)} "${titleFor(id)}" | ${c?.source ?? 'auto-m8'} | ${state} | active ${c?.updated_at ? ago(c.updated_at) : '?'}${extra ? ` | ${extra}` : ''}\n  ${lastAgentLine(id) || '(no transcript)'}` }
   }).sort((a, b) => b.at - a.at).map((x, i) => opts.scope === 'all' && i >= 20 && !/needs you|RUNNING/.test(x.line) ? x.line.split('\n')[0] : x.line)
   const stages = new Map(rows<{ url: string; stage: string; outcome: string }>('select url, stage, outcome from shepherd_watch').map(r => [r.url, r]))
   const states = await prStates([...prUrls])
@@ -270,13 +271,13 @@ export async function board(owner: string, opts: { scope?: 'mine' | 'all'; hours
   const decisions = rows<any>(`select conversation_id, title, url, stakes from decisions where status = 'open' and conversation_id in (${marks})`, ...ids)
   const inbox = pendingFor(owner)
   return [
-    `# Board for perch://${owner} (${new Date().toLocaleString()})`,
+    `# Board for ${convLink(owner)} (${new Date().toLocaleString()})`,
     `## Conversations (${convLines.length})`, convLines.join('\n') || '(none: watch some, or use scope=all)',
     `## PRs (${prLines.length}, live from GitHub via gh; dig in with gh pr view/checks/diff <url>)${arm ? ` · ordered by ${arm === 'learned' ? 'learned value per hour' : 'fixed rank'} (switchback day)` : ''}`, prLines.join('\n') || '(none)',
-    promises.length ? `## Follow-ups waiting\n${promises.map(p => `- perch://${p.conversation_id}: ${p.text}${p.pr_url ? ` (until ${p.until} on ${p.pr_url})` : ''}${p.due_at ? `, due ${new Date(p.due_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`).join('\n')}` : '',
-    decisions.length ? `## Decisions open\n${decisions.map(d => `- [${d.stakes}] ${d.title}${d.url ? ` (${d.url})` : ''} · perch://${d.conversation_id}`).join('\n')}` : '',
+    promises.length ? `## Follow-ups waiting\n${promises.map(p => `- ${convLink(p.conversation_id)}: ${p.text}${p.pr_url ? ` (until ${p.until} on ${p.pr_url})` : ''}${p.due_at ? `, due ${new Date(p.due_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`).join('\n')}` : '',
+    decisions.length ? `## Decisions open\n${decisions.map(d => `- [${d.stakes}] ${d.title}${d.url ? ` (${d.url})` : ''} · ${convLink(d.conversation_id)}`).join('\n')}` : '',
     inbox.length ? `## Events not yet delivered (${inbox.length})\n${inbox.map(e => `- [${e.event}] ${e.text.split('\n')[0]}`).join('\n')}` : '',
-    `## Watching (${ws.length})\n${ws.map(w => `- ${w.kind === 'pr' ? w.target : `perch://${w.target}`}${w.events ? ` on ${w.events}` : ' on everything'}`).join('\n') || '(nothing)'}`,
+    `## Watching (${ws.length})\n${ws.map(w => `- ${w.kind === 'pr' ? w.target : convLink(w.target)}${w.events ? ` on ${w.events}` : ' on everything'}`).join('\n') || '(nothing)'}`,
   ].filter(Boolean).join('\n\n')
 }
 

@@ -37,7 +37,7 @@ The engineer runs dozens of agents and wants agents to decide and finish things 
 - a direct question or choice the agent put to the engineer that is a real judgement call (direction, scope, taste, something outward-facing or irreversible) and still unanswered;
 - a blocker only a human can physically clear: unlock a password manager or signing key, sign in / OAuth, a permission prompt, approve a settings change;
 - the engineer's own last message is unanswered or was clearly misunderstood.
-Do NOT flag (an agent or perch's PR shepherd handles these, or nothing is actually waiting): "restart/reload the app to see it", "untested / unverified / try it yourself", "uncommitted or unpushed changes", a PR waiting for review, CI, approval or merge, a report or research answer that was delivered, a draft (Slack or otherwise) that was written, "I can do X if you want" offers, a follow-up that didn't fire, a cut-off summary, or anything superseded by later work. When unsure, do not flag.
+Do NOT flag (an agent or auto-m8's PR shepherd handles these, or nothing is actually waiting): "restart/reload the app to see it", "untested / unverified / try it yourself", "uncommitted or unpushed changes", a PR waiting for review, CI, approval or merge, a report or research answer that was delivered, a draft (Slack or otherwise) that was written, "I can do X if you want" offers, a follow-up that didn't fire, a cut-off summary, or anything superseded by later work. When unsure, do not flag.
 The reason is one plain sentence (under 90 characters) naming the human action, starting with a verb (e.g. "Unlock 1Password so commits can be signed"), no hedging.
 
 Reply with ONLY JSON: {"<id>": {"needs": true|false, "reason": "..."}, ...} covering every id.`

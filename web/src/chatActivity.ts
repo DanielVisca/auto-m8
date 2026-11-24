@@ -1,8 +1,9 @@
-import { toolLabel } from './stream'
+import { toolLabel } from './stream.ts'
 // A presentation of the existing transcript. Never rewrite messages or change agent input.
 import type { Block, Item } from './api'
 
 import { blockerInText, NEEDS_LOGIN } from './blockers.ts'
+import { ourMcpTool } from '../../shared/brand.ts'
 export { NEEDS_LOGIN }
 export type Entry = { item: Item; index: number }
 export type WorkTurn = { kind: 'turn'; index: number; work: Entry[]; answer: Entry[]; attention: Entry[]; running: boolean }
@@ -27,7 +28,7 @@ export function groupMessages(items: Item[], running = false): MessageRow[] {
       if (it.kind !== 'assistant') { turn.work.push(entry); continue }
       // Sign-in actions and prepared Slack drafts must remain reachable without opening work.
       const attention = it.blocks.filter(b => b.type === 'text' ? !!blockerInText(b.text)
-        : b.type === 'tool' && b.name === 'mcp__perch__draft_slack_message' && /draft:([\w-]+)/.test(b.result ?? ''))
+        : b.type === 'tool' && ourMcpTool(b.name) === 'draft_slack_message' && /draft:([\w-]+)/.test(b.result ?? ''))
       let blocks = it.blocks.filter(b => !attention.includes(b))
       if (attention.length) turn.attention.push({ ...entry, item: { ...it, blocks: attention, activity: undefined } })
       // There is no common final/commentary marker across providers. While running, all output

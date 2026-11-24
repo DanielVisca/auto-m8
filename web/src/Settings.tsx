@@ -620,14 +620,14 @@ function LayoutPicker() {
   }
   return <>
     <div className="field">Layout
-      <div className="seg">{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => pick(x.name)} title={x.shipped ? 'Shipped with perch: copy it to change it' : `${l.dir}/${x.name}.json`}>{x.name}</button>)}</div>
+      <div className="seg">{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => pick(x.name)} title={x.shipped ? 'Shipped with auto-m8: copy it to change it' : `${l.dir}/${x.name}.json`}>{x.name}</button>)}</div>
       <span className="muted small">⌘⌥⇧Esc always goes back to default.</span>
     </div>
     <div className="field">Copy <b>{l.active}</b> as <input value={as} placeholder="my-layout" style={{ width: 140 }} onChange={e => setAs(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && as.trim()) copy() }} />
       <button className="small" disabled={!as.trim()} onClick={copy}>Copy</button>
       <button className="small" onClick={() => post('/api/layouts/reveal', {})} title={l.dir}>Show folder</button>
     </div>
-    {l.error && <div className="bad small">{l.error}. Perch is showing the last version that worked.</div>}
+    {l.error && <div className="bad small">{l.error}. auto-m8 is showing the last version that worked.</div>}
     {msg && <div className="muted small">{msg}</div>}
   </>
 }

@@ -16,7 +16,7 @@ import './cloud.ts' // cloud_leases
 
 export { isPaused }
 
-const RESUME_PROMPT = 'perch was paused to save tokens and is running again. This chat was interrupted by the pause. Check where things stand now (files, PRs, CI) and carry on, or say if it is no longer needed.'
+const RESUME_PROMPT = 'auto-m8 was paused to save tokens and is running again. This chat was interrupted by the pause. Check where things stand now (files, PRs, CI) and carry on, or say if it is no longer needed.'
 
 type Row = { id: string; by: string | null; title: string | null }
 const titled = (ids: string[]) => ids.length ? all<Row>(`select c.id, p.by, coalesce(u.title, c.title, c.first_prompt) title from conversations c

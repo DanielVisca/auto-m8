@@ -74,7 +74,7 @@ const has = (t: string) => !!get(`select 1 from sqlite_master where name = ?`, t
 const HELPERS = () => has('delegations') ? ' union select child from delegations' : ''
 // Prompts perch injects into a conversation (follow-ups, resumes, watch events, helper reports,
 // auto-decisions). They sit in the transcript as user turns, but you didn't type them.
-export const PERCH_PROMPT = /^\s*(⏰ Follow-up from perch|⏰ perch check:|You stopped here before the work was finished|\(perch: |Your previous API request got no reply|This chat stalled \(|perch restarted while you were working|\(a message sent before perch restarted\)|EVENTS \(\d+\) from what you're watching|HELPER REPORT \(|Decision on "|The user changed the decision on "|\[Request interrupted by user)/
+export const PERCH_PROMPT = /^\s*(⏰ Follow-up from (?:auto-m8|perch)|⏰ (?:auto-m8|perch) check:|You stopped here before the work was finished|\((?:auto-m8|perch): |Your previous API request got no reply|This chat stalled \(|(?:auto-m8|perch) restarted while you were working|\(a message sent before (?:auto-m8|perch) restarted\)|EVENTS \(\d+\) from what you're watching|HELPER REPORT \(|Decision on "|The user changed the decision on "|\[Request interrupted by user)/
 
 export function ingest(days = 30) {
   let added = 0
@@ -283,7 +283,7 @@ export function skillHealth() {
   })
 }
 
-const TUNE = `You maintain a Claude Code skill that perch wrote for a user. Its evidence says it isn't working well enough. Rewrite it to fix exactly that, keeping what works.
+const TUNE = `You maintain a Claude Code skill that auto-m8 wrote for a user. Its evidence says it isn't working well enough. Rewrite it to fix exactly that, keeping what works.
 - "not loaded": the job keeps coming up but agents don't load the skill. Rewrite the description so it triggers: name the situations and the user's actual phrasings.
 - "corrected": sessions that loaded it were corrected by the user. Change the instructions so the agent would have done what the user wanted. Each correction should become a rule.
 Reply with ONLY JSON: {"description": "...", "body": "full SKILL.md body without frontmatter", "change": "one sentence: what you changed and why"}`

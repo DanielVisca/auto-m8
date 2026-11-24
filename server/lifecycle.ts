@@ -16,6 +16,7 @@ import { ephemeral } from './chat.ts'
 import { all, get, run } from './db.ts'
 import { autonomyOn, settings } from './settings.ts'
 import { toItems, itemsOf } from './transcript.ts'
+import { convLink } from '../shared/brand.ts'
 
 run(`create table if not exists attention (id text primary key, verdict integer not null, reason text, judged_at integer not null, judged_updated_at integer not null)`)
 run(`create table if not exists lifecycle (
@@ -104,7 +105,7 @@ export type Harvest = { outcome: 'complete' | 'abandoned' | 'unfinished'; summar
 // Writes the memories in Claude's memory format, each pointing back at the conversation.
 export function writeMemories(dir: string, c: Pick<Candidate, 'id' | 'title' | 'updated_at'>, h: Harvest) {
   const written: string[] = []
-  const source = `Source: perch://${c.id} ("${c.title.replace(/\s+/g, ' ').slice(0, 80)}", ${new Date(c.updated_at).toISOString().slice(0, 10)})`
+  const source = `Source: ${convLink(c.id)} ("${c.title.replace(/\s+/g, ' ').slice(0, 80)}", ${new Date(c.updated_at).toISOString().slice(0, 10)})`
   if (!h.memories?.length && !h.updates?.length) return written
   mkdirSync(dir, { recursive: true })
   const indexPath = join(dir, 'MEMORY.md')
@@ -154,7 +155,7 @@ function record(c: Candidate, h: Harvest, written: string[], dir: string) {
   const note = [h.summary, written.length ? `Saved to memory: ${written.join(', ')}` : '', h.outcome === 'unfinished' ? `Loose end: ${h.loose_ends}` : ''].filter(Boolean).join('\n')
   run('insert into user_state (id) values (?) on conflict do nothing', c.id)
   // Don't overwrite a note the user wrote.
-  if (note) run(`update user_state set note = ? where id = ? and (note is null or note = '' or note like 'Closed by perch%' or note like 'Went stale%')`, `${close ? 'Closed by perch' : 'Went stale unfinished'}: ${note}`, c.id)
+  if (note) run(`update user_state set note = ? where id = ? and (note is null or note = '' or note like 'Closed by perch%' or note like 'Closed by auto-m8%' or note like 'Went stale%')`, `${close ? 'Closed by auto-m8' : 'Went stale unfinished'}: ${note}`, c.id)
   if (close) run(`update user_state set state = 'archived', state_auto = 2, state_at = ? where id = ? and (state_auto != 0 or state is null)`, Date.now(), c.id)
   // An unfinished loose end is NOT a "Needs me" flag on its own: forcing one here skipped the judge's rules and
   // filled the list with "uncommitted", "needs restart" and "PR awaits CI" (14 of 22 stale flags on 2026-11-12).

@@ -62,7 +62,7 @@ export function SpendCard() {
                   {a.sources.map((s: any) => <Row key={s.source} label={s.label} cost={s.cost} extra={s.source === 'scouts' ? `${s.msgs} runs` : `${s.msgs.toLocaleString()} calls`} />)}
                   {a.subagentCost > 0 && <div className="muted small">{money(a.subagentCost)} of it in subagents</div>}
                 </div>
-                {a.perchBy.length > 0 && <div><h4>auto-m8: who started it</h4>{a.perchBy.map((b: any) => <Row key={b.by} label={b.by === 'you' ? 'You' : b.by} cost={b.cost} />)}</div>}
+                {a.perchBy.length > 0 && <div><h4>auto-m8: who started it</h4>{a.perchBy.map((b: any) => <Row key={b.by} label={b.by === 'you' ? 'You' : b.by === 'perch' ? 'auto-m8' : b.by} cost={b.cost} />)}</div>}
                 <div><h4>By model</h4>{a.models.filter((m: any) => m.cost > 0).map((m: any) => <Row key={m.model} label={model(m.model)} cost={m.cost} extra={tok(m.tokens)} />)}</div>
                 <div><h4>By project</h4>{a.projects.map((p: any) => <Row key={p.project} label={p.project} cost={p.cost} />)}</div>
                 <div><h4>Costliest sessions</h4>{a.sessions.map((s: any) => <Row key={s.id} label={s.title} cost={s.cost} extra={NAME[s.source] ?? s.source} href={`#chat/${encodeURIComponent(s.id)}`} />)}</div>

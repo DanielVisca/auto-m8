@@ -15,6 +15,7 @@ import { prContext } from './prflow.ts'
 import { all, db, get, run } from './db.ts'
 import { localRepos } from './search.ts'
 import { HOME, settings } from './settings.ts'
+import { mcpTool } from '../shared/brand.ts'
 
 db.exec(`
 create table if not exists search_runs (
@@ -61,7 +62,7 @@ The user is working in: ${cwd}
 
 SCOPE FIRST. Before searching, decide where this most likely lives and write ONE line that starts with "Scope:" (e.g. "Scope: this repo, then my other repos" or "Scope: upstream grafana/grafana source"). Search the narrowest scope that could answer. Widen only if it doesn't, and write a new "Scope:" line each time you widen. Levels:
 1. The current project (${cwd}).
-2. Everything local: all repos below, the user's past conversations, notes and open PRs (perch tools: search_conversations, get_conversation, search_notes, open_prs, search_skills), and files anywhere in ${HOME} (rg, mdfind for documents).
+2. Everything local: all repos below, the user's past conversations, notes and open PRs (auto-m8 tools: search_conversations, get_conversation, search_notes, open_prs, search_skills), and files anywhere in ${HOME} (rg, mdfind for documents).
 3. People and talk: Slack (slack search tools), meetings (Granola tools).
 4. Outside: GitHub (gh search code / prs / issues, gh api), the web, and upstream source. When the question is how another project does something, go to the source: git clone --depth 1 --filter=blob:none https://github.com/<owner>/<repo> ${SRC_CACHE}/<owner>/<repo> (if it is already there: git -C <dir> fetch --depth 1 origin, then git -C <dir> grep … origin/HEAD), then rg in it.
 
@@ -75,7 +76,7 @@ If a command is denied, switch to an allowed one (rg, Grep, Read, git grep/show,
 ${rules ? `\nPlaybook (tactics learned from earlier searches; use them when they fit):\n${rules}\n` : ''}
 ANSWER FORMAT. Lead with the answer in 1-3 sentences, then at most ~10 short bullets (deep mode may use more). Cite everything:
 - files as [path/file.ts:42](perch-file://<absolute path>#L42)
-- past conversations as [title](perch://<id>)
+- past conversations as [title](auto-m8://<id>)
 - Slack, GitHub and web as their https links.
 Say plainly what you could not find or verify. No preamble, no restating the question.
 End with this line exactly (machine-read, hidden from the user):
@@ -95,7 +96,7 @@ export const ALLOWED = [
   // The same reads against another repo by path (this mode won't cd across folders).
   ...['log', 'show', 'grep', 'fetch', 'branch', 'rev-parse', 'ls-files', 'ls-remote', 'diff', 'status'].map(c => `Bash(git -C * ${c} *)`),
   // perch reads only (search never starts work): history, notes, PRs, skills, registry, and logging gaps.
-  ...['search_conversations', 'get_conversation', 'recent_activity', 'search_notes', 'search_skills', 'use_skill', 'open_prs', 'discover_mcp', 'report_missing_capability'].map(t => `mcp__perch__${t}`),
+  ...['search_conversations', 'get_conversation', 'recent_activity', 'search_notes', 'search_skills', 'use_skill', 'open_prs', 'discover_mcp', 'report_missing_capability'].map(t => mcpTool(t)),
   // GitHub reads only (no writes): file contents, code search, PRs, commits, issues.
   'mcp__claude_ai_GitHub_Copilot_MCP__get_file_contents', 'mcp__claude_ai_GitHub_Copilot_MCP__search_code', 'mcp__claude_ai_GitHub_Copilot_MCP__pull_request_read',
   'mcp__claude_ai_GitHub_Copilot_MCP__search_pull_requests', 'mcp__claude_ai_GitHub_Copilot_MCP__list_pull_requests', 'mcp__claude_ai_GitHub_Copilot_MCP__list_commits',

@@ -14,6 +14,7 @@
 import { execFile } from 'node:child_process'
 import { all, get, run } from './db.ts'
 import { settings } from './settings.ts'
+import { convLink } from '../shared/brand.ts'
 
 run(`create table if not exists cloud_leases (
   conversation_id text primary key,
@@ -68,11 +69,11 @@ export function cloudPrompt(o: { title: string; history: string; git: GitInfo; c
     ? `The code is in ${o.git.repository} on branch \`${o.git.branch}\`${o.git.sha ? ` (at ${o.git.sha.slice(0, 12)})` : ''}. ${o.git.note} Work on that branch and push your commits to it, so the Mac can pick them up. Open or update a PR only if the conversation was already heading there.`
     : `There is no code to carry (${o.git.note}). Continue with research, investigation or planning; say clearly what you would change if code is needed.`
   return [
-    `You are continuing a conversation that started on the user's Mac in perch. The Mac is unavailable for a while (asleep or away), so you own this work until it comes back. Pick up exactly where it left off: the last request below is what to do next.`,
+    `You are continuing a conversation that started on the user's Mac in auto-m8. The Mac is unavailable for a while (asleep or away), so you own this work until it comes back. Pick up exactly where it left off: the last request below is what to do next.`,
     code,
     o.git.untracked.length ? `These new files existed on the Mac but were not committed, so you do not have them: ${o.git.untracked.slice(0, 30).join(', ')}${o.git.untracked.length > 30 ? ' …' : ''}.` : '',
     `the user may send you messages while you run; treat them as theirs. When you finish or get blocked, end with a short summary: what you did, what is pushed where, and what is left. That summary goes back into the original conversation.`,
-    `## Conversation so far (perch://${o.convId}, "${o.title}")\n\n${o.history}`,
+    `## Conversation so far (${convLink(o.convId)}, "${o.title}")\n\n${o.history}`,
   ].filter(Boolean).join('\n\n')
 }
 

@@ -1,6 +1,6 @@
 // Delegation: a chat hands a focused job (a review, a test run, a bit of research) to a helper
-// conversation and carries on. The helper is an ordinary, visible perch chat, linked to its parent.
-// When the helper finishes a turn, perch puts its report into the parent's input; if it is stuck
+// conversation and carries on. The helper is an ordinary, visible auto-m8 chat, linked to its parent.
+// When the helper finishes a turn, auto-m8 puts its report into the parent's input; if it is stuck
 // it says so and the parent can answer it (delegate_send). Same idea as Herdr's `hc run --bg` /
 // `hc send`, but the helper stays a normal conversation you can open, search and steer.
 import { chatSubject } from './origin.ts'
@@ -13,6 +13,7 @@ import { settings } from './settings.ts'
 import { marked } from './relay.ts'
 import { createHelper } from './worktrees.ts'
 import { machineLine } from './owner.ts'
+import { convIdOf, convLink } from '../shared/brand.ts'
 
 run(`create table if not exists delegations (
   id text primary key, parent text not null, child text not null, name text not null, brief text not null,
@@ -43,7 +44,7 @@ const worktreeNote = (w: Wt) => `
 YOUR WORKTREE: you work in your own git worktree, ${w.dir}, on a new branch ${w.branch}, started from ${w.base} (${w.from}) of ${w.repo}. Other agents edit other checkouts at the same time, so stay in this directory.${w.dirtyParent ? ` The parent's ${w.dirtyParent} uncommitted changes are NOT here; if the job depends on them, say NEEDS HELP.` : ''}
 - Deliver by committing on ${w.branch} (clear messages). Don't push or open a PR unless the brief says so. Your report names the branch and its commits; the parent merges them.
 - This Mac is shared by every running agent (${machineLine}, one Docker daemon). A new worktree has no node_modules or virtualenv: install dependencies only if the job needs them (the package manager's shared cache makes it quick). Run only the tests for what you changed, never the full suite; don't start dev servers, docker compose stacks or anything on a default port.
-- Finish with the worktree clean (everything committed or discarded). perch removes it once it is idle and clean; the branch and its commits stay.`
+- Finish with the worktree clean (everything committed or discarded). auto-m8 removes it once it is idle and clean; the branch and its commits stay.`
 
 // Which model runs the helper: Claude and Codex are peers, so the parent picks per job. 'auto' (or
 // nothing) lets perch route it like any chat; 'claude' pins Claude Sonnet; 'codex' or 'codex:<model>'
@@ -57,7 +58,7 @@ export function helperEngine(e?: string): string {
 }
 
 export async function start(input: { parent: string; brief: string; name?: string; cwd?: string; mode?: string; worktree?: boolean; engine?: string }) {
-  const parent = String(input.parent || '')
+  const parent = convIdOf(String(input.parent || ''))
   if (!parent) throw new Error('delegate needs the parent conversation_id (yours).')
   if (get('select 1 from delegations where child = ?', parent)) throw new Error('You are already a helper: do the job yourself instead of delegating it on.')
   if (all<any>(`select 1 from delegations where parent = ? and status = 'running'`, parent).length >= MAX_RUNNING) throw new Error(`${MAX_RUNNING} helpers are already running for this conversation. Wait for a report or stop one.`)
@@ -102,8 +103,8 @@ function report(id: string, text: string, failed: boolean) {
   const status = failed ? 'failed' : needsHelp ? 'needs-help' : 'done'
   run('update delegations set status = ?, result = ?, finished_at = ?, reports = reports + 1 where id = ?', status, body, Date.now(), id)
   const head = failed ? 'FAILED' : needsHelp ? 'BLOCKED, NEEDS YOU' : 'DONE'
-  const wtLine = d.worktree ? `\nIts worktree: ${d.worktree} (branch ${d.branch}). Review with \`git log -p HEAD..${d.branch}\` in your checkout, then merge or cherry-pick it; perch removes the worktree once it is idle and clean, the branch stays.` : ''
-  const prompt = `HELPER REPORT (from a helper you delegated to, not from the user): "${d.name}" ${head}.\n\n${body}\n\nHelper conversation: perch://${d.child}${wtLine}${needsHelp ? `\nAnswer with delegate_send (id ${id}) to unblock it.` : ''}`
+  const wtLine = d.worktree ? `\nIts worktree: ${d.worktree} (branch ${d.branch}). Review with \`git log -p HEAD..${d.branch}\` in your checkout, then merge or cherry-pick it; auto-m8 removes the worktree once it is idle and clean, the branch stays.` : ''
+  const prompt = `HELPER REPORT (from a helper you delegated to, not from the user): "${d.name}" ${head}.\n\n${body}\n\nHelper conversation: ${convLink(d.child)}${wtLine}${needsHelp ? `\nAnswer with delegate_send (id ${id}) to unblock it.` : ''}`
   // Only conversations perch itself runs can take the report as input; resuming one that is open in
   // a terminal would fork its history. Those get the report in the helper's thread and Needs me.
   const ours = chats.has(d.parent) || !!get('select 1 from perch_started where id = ?', d.parent)

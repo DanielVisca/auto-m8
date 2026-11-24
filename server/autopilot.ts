@@ -159,9 +159,9 @@ async function digest() {
     `## Skills used\n${skills.map(s => `- ${s.detail}: ${s.n}`).join('\n') || 'none'}`,
     `## When work starts (weekday 0=Sun, hour, count)\n${hours.map(h => `- ${h.dow} ${h.h}:00 ${h.n}`).join('\n')}`,
     `## My PostHog scouts\n${myScouts || 'none'}`,
-    `## perch routines already running\n${mine || 'none'}`,
+    `## auto-m8 routines already running\n${mine || 'none'}`,
     `## Suggestions already made (don't repeat these)\n${past || 'none'}`,
-    `## perch errors that keep recurring (flag the ones the user must fix)\n${broken || 'none'}`,
+    `## auto-m8 errors that keep recurring (flag the ones the user must fix)\n${broken || 'none'}`,
     `## Use cases: the jobs the user hands to agents, from every ask in the last 30 days (evolve writes skills for these; you propose the schedules that run them)\n${(() => { try { return useCaseDigest() } catch { return '' } })() || 'none yet'}`,
   ].join('\n\n')
 }
@@ -171,7 +171,7 @@ const PROMPT = `You are the user's automation autopilot. Read how they work belo
 Reply with ONLY a JSON array. Each item is one of:
 {"kind": "routine", "title": "...", "why": "the evidence, with counts", "evidence": ["conversation ids"], "risk": "low" | "high", "blast": "one line: what it can change, where", "what": "one plain sentence for the user: what they will get, when, and where it shows up (e.g. 'Every Friday at 16:00 you get a short summary of your week in perch: what shipped, what stalled, which automations did nothing.')", "ask": "one friendly sentence to ask the user, naming the repetition (e.g. 'You asked for a PR shepherd 20 times: want me to check your open PRs every 2 hours and shepherd the ones with failing CI?')", "routine": {"name": "...", "prompt": "a complete, self-contained instruction for Claude Code, including when to stop and what to report", "cwd": "folder", "cron": "5-field cron, local time", "mode": "fresh"}}
 RISK: "low" only when the routine just reads and reports (summaries, checks, digests, local notes): nothing pushed, commented, merged, posted, or changed in GitHub, Slack or PostHog. Anything that writes outside this machine, or could touch production, is "high".
-{"kind": "rule", "title": "...", "why": "...", "evidence": [], "rule": {"name": "...", "query": "perch search, e.g. #label repo:x in:code older:7d", "action": "label|archive|snooze", "value": "label or days"}}
+{"kind": "rule", "title": "...", "why": "...", "evidence": [], "rule": {"name": "...", "query": "auto-m8 search, e.g. #label repo:x in:code older:7d", "action": "label|archive|snooze", "value": "label or days"}}
 {"kind": "attention", "title": "...", "why": "what is wrong and what to do", "evidence": [], "link": "optional URL"}
 Prefer: things asked 3+ times, daily or weekly check-ins, PR follow-ups, and cleanup. Use cases with many asks, or with dropped work (agents that stopped before finishing), are the strongest candidates for a schedule that does the job before the user asks; if a perch-* skill exists for it, have the routine use that skill. A routine prompt must be safe to run unattended: read, check, summarise, open drafts. Never merge, delete, or post publicly without asking.
 NO PARALLEL WORK: before proposing anything, check the scouts, routines, automated runs and recent asks listed below. If something already covers it, don't propose a new one; at most propose extending that one (kind "attention", saying exactly which existing item to change and how). Return [] if nothing is worth it.`
@@ -370,7 +370,7 @@ export function dryRun(id: string, l: (ev: any) => void) {
   const prompt = `PREVIEW RUN of an automation the user is deciding whether to turn on. Do the automation for real, right now, and reply with exactly what a real run would produce (if it writes a report, the reply IS that report, not a description of it).
 - Do every read for real. Never describe a check you could run: run it.
 - The only difference from a real run: anything that would change something (comment, push, merge, label, post, create or start a task) is NOT done. List each one at the end under "Would have done", with its target.
-- For PostHog tasks, scouts, workflows and routines, use the perch recent_activity tool. For PRs, use open_prs, then gh for anything more (shape output with gh's own --json/--jq flags: piping into python, node or other programs is blocked here).
+- For PostHog tasks, scouts, workflows and routines, use the auto-m8 recent_activity tool. For PRs, use open_prs, then gh for anything more (shape output with gh's own --json/--jq flags: piping into python, node or other programs is blocked here).
 - If a source fails (e.g. a GitHub 5xx), retry it once. If it still fails, finish with what you have and add one line naming what's missing.
 
 The automation:

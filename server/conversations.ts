@@ -238,7 +238,7 @@ export function parseQuery(input: string): Query {
     else if (key === 'is' && val === 'pinned') q.pinned = true
     else if (key === 'is' && (val === 'auto' || val === 'automated')) q.auto = true
     else if (key === 'is' && val === 'any') q.any = true
-    else if (key === 'where' || key === 'on') q.where.push(val.replace(/^#/, ''))
+    else if (key === 'where' || key === 'on') q.where.push(val.replace(/^#/, '').replace(/^auto-m8$/i, 'perch')) // where:auto-m8 = where:perch (started in the app)
     else if (key === 'origin') q.origin = val
     else if (key === 'repo') q.repo = val
     else if (key === 'pr') q.pr = val.replace(/^#/, '')

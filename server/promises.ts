@@ -104,9 +104,9 @@ export function scanForPromises() {
   }
 }
 
-const FOLLOW = (p: any, why: string) => `⏰ Follow-up from perch. Earlier you told the user: “${p.text}”
+const FOLLOW = (p: any, why: string) => `⏰ Follow-up from auto-m8. Earlier you told the user: “${p.text}”
 ${why}
-Check it now and report the result to the user in a few lines. If it isn't done yet, say where it stands, then call the perch follow_up tool again with a sensible time or condition instead of promising to come back.`
+Check it now and report the result to the user in a few lines. If it isn't done yet, say where it stands, then call the auto-m8 follow_up tool again with a sensible time or condition instead of promising to come back.`
 
 // Is it time? Either the clock ran out, or the PR condition it was waiting on is met.
 function due(p: any) {

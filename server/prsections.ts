@@ -43,7 +43,7 @@ export function resortSections() {
   for (const l of onPrSections) l()
 }
 
-const line = (p: SectionInput) => `- ${p.url} | ${p.repo} | area: ${p.area}${p.folder ? ` | perch folder: ${p.folder}` : ''} | ${p.title.slice(0, 110)} | updated ${new Date(p.updatedAt).toISOString().slice(0, 10)}`
+const line = (p: SectionInput) => `- ${p.url} | ${p.repo} | area: ${p.area}${p.folder ? ` | auto-m8 folder: ${p.folder}` : ''} | ${p.title.slice(0, 110)} | updated ${new Date(p.updatedAt).toISOString().slice(0, 10)}`
 
 function organise(prs: SectionInput[], missing: SectionInput[]) {
   const key = missing.map(p => p.url).sort().join(',')
@@ -57,7 +57,7 @@ function organise(prs: SectionInput[], missing: SectionInput[]) {
 ${first ? `Make 4-9 sections from all of these PRs.` : `Existing sections (reuse them; add a new one only for clearly new work with 2+ PRs):\n${existing.map(s => `- ${s.icon} ${s.name} (${s.n} PRs)`).join('\n')}\n\nFile only these new PRs.`}
 Rules:
 - Name a section after the product or workstream, short (1-3 words), e.g. "Metrics ingestion", "Metrics UI", "MCP analytics", "Canvas", "Logs & traces".
-- The conventional-commit scope in the title (feat(metrics-ingestion): ...) is the strongest hint; the perch folder and code area help.
+- The conventional-commit scope in the title (feat(metrics-ingestion): ...) is the strongest hint; the auto-m8 folder and code area help.
 - Work in the same product across repos (posthog, charts, posthog.com docs) belongs together.
 - Personal, school or long-dormant repos go in one section named "Personal & old".
 - Every PR gets exactly one section.

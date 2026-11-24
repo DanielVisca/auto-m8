@@ -11,7 +11,7 @@ const ASKS_USER_TO_RUN = [
   /\bcontinue in your terminal\b/i,
 ]
 // It already did the right thing (opened the command for the user in perch), or it's narrating its own run.
-const ALREADY_OPEN = /\b(?:opened|open(?:ed)? it|typed in|is waiting|waiting for you) (?:it |the command )?(?:in|under|below)?\s*(?:the |this )?(?:perch )?(?:terminal|chat)\b|needs_user|terminal (?:below|under the chat)/i
+const ALREADY_OPEN = /\b(?:opened|open(?:ed)? it|typed in|is waiting|waiting for you) (?:it |the command )?(?:in|under|below)?\s*(?:the |this )?(?:perch |auto-m8 )?(?:terminal|chat)\b|needs_user|terminal (?:below|under the chat)/i
 
 export function asksUserToRun(text: string): string | null {
   if (!text || ALREADY_OPEN.test(text)) return null
@@ -29,7 +29,7 @@ export function asksUserToRun(text: string): string | null {
   return null
 }
 
-export const RUN_CORRECTION = (said: string) => `⏰ perch check: your last reply asked the user to run a command themselves (“${said}”).
+export const RUN_CORRECTION = (said: string) => `⏰ auto-m8 check: your last reply asked the user to run a command themselves (“${said}”).
 Don't hand commands to the user. Run it yourself with Bash. If it needs a TTY, use the terminal tool with run=true and drive it. If it really needs the user (a password, a browser approval, a hardware key, or a permission only they can grant, like editing your own settings), call terminal action=open with the command, run=false and needs_user, so it opens under the chat with the command typed in, then wait on it (action=read wait_seconds) and carry on. Do that now, and reply in one or two lines with the result. If nothing is actually needed from the user, just say so in one line.`
 
 // One correction per chat per half hour, so a reply that legitimately mentions a terminal can't loop.

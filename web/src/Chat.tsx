@@ -25,6 +25,7 @@ import { BlockerCard, knownBlocker } from './BlockerCard'
 import { blockerFor, blockerInText } from './blockers.ts'
 import { groupMessages, NEEDS_LOGIN, shortDuration, workPhases, workPulse, workSummary, type Entry, type Phase, type WorkTurn } from './chatActivity'
 export { agentSender } from '../../shared/messageOrigin'
+import { CONV_SCHEME_RE, convIdOf, convLink, isConvLink, ourMcpTool } from '../../shared/brand.ts'
 export { NEEDS_LOGIN } from './chatActivity'
 
 const SHELL_LANGS = new Set(['bash', 'sh', 'zsh', 'shell', 'console', 'terminal'])
@@ -60,7 +61,7 @@ export async function copyText(text: string) {
 const flash = (el: HTMLElement, label = '✓') => { const old = el.textContent; el.textContent = label; el.classList.add('copied'); setTimeout(() => { el.textContent = old; el.classList.remove('copied') }, 1200) }
 // An inline video whose file is gone (or a placeholder path) hides instead of showing a broken player.
 addEventListener('error', e => { const t = e.target as HTMLElement; if (t instanceof HTMLVideoElement && t.classList.contains('inline-video')) t.hidden = true }, true)
-// perch://<id> links (from Ask Claude and the brief) open that conversation in place.
+// auto-m8://<id> (or the older perch://<id>) links from Ask Claude and the brief open that conversation in place.
 const onLinkClick = (e: React.MouseEvent) => {
   const a = (e.target as HTMLElement).closest('a')
   const fp = (e.target as HTMLElement).closest('code.file-path') as HTMLElement | null
@@ -76,7 +77,7 @@ const onLinkClick = (e: React.MouseEvent) => {
   const copy = (e.target as HTMLElement).closest('.code-copy') as HTMLElement | null
   if (copy) { e.preventDefault(); copyText(copy.parentElement?.querySelector('pre')?.textContent ?? '').then(ok => ok && flash(copy)); return }
   const href = a?.getAttribute('href') ?? ''
-  if (href.startsWith('perch://')) { e.preventDefault(); window.dispatchEvent(new CustomEvent('perch-open', { detail: href.slice(8).replace(/\/$/, '') })) }
+  if (isConvLink(href)) { e.preventDefault(); window.dispatchEvent(new CustomEvent('perch-open', { detail: convIdOf(href) })) }
   else if (a && /^https?:/.test(href)) { e.preventDefault(); window.open(href, '_blank') }
 }
 // PR links become PR pills: state, repo#n, title and the robots on it.
@@ -87,8 +88,8 @@ const resolveBare = (n: string) => {
   if (!p) { p = fetch(`/api/pr/resolve?n=${n}`).then(r => r.ok ? r.json() : null).then(d => d?.url ?? '').catch(() => ''); resolved.set(n, p) }
   return p
 }
-// perch://<id> in a reply shows as that conversation's title, not the internal link.
-const CONV_LINK = /perch:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?/g
+// auto-m8://<id> (or perch://<id>) in a reply shows as that conversation's title, not the internal link.
+const CONV_LINK = new RegExp(`${CONV_SCHEME_RE}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\/?`, 'g')
 const convTitles = new Map<string, Promise<string>>()
 const convTitle = (id: string) => {
   let p = convTitles.get(id)
@@ -109,15 +110,15 @@ const titleConvLinks = (root: HTMLElement) => {
     let last = 0; const v = t.nodeValue ?? ''
     for (const m of v.matchAll(CONV_LINK)) {
       frag.append(v.slice(last, m.index))
-      const a = document.createElement('a'); a.href = `perch://${m[1]}`; a.textContent = 'chat'
+      const a = document.createElement('a'); a.href = convLink(m[1]); a.textContent = 'chat'
       frag.append(a); last = m.index! + m[0].length
     }
     frag.append(v.slice(last)); t.replaceWith(frag)
   }
-  for (const a of Array.from(root.querySelectorAll('a[href^="perch://"]')) as HTMLAnchorElement[]) {
-    const id = (a.getAttribute('href') ?? '').slice(8).replace(/\/$/, '')
+  for (const a of Array.from(root.querySelectorAll('a[href^="auto-m8://"], a[href^="perch://"]')) as HTMLAnchorElement[]) {
+    const id = convIdOf(a.getAttribute('href') ?? '')
     const raw = (a.textContent ?? '').trim()
-    if (a.closest('pre, code') || !(raw === 'chat' || raw.startsWith('perch://') || raw === id)) continue
+    if (a.closest('pre, code') || !(raw === 'chat' || isConvLink(raw) || raw === id)) continue
     a.classList.add('conv-link'); a.title = 'Open this chat'
     if (raw !== 'chat') a.textContent = 'chat'
     convTitle(id).then(title => { if (title && a.isConnected) a.textContent = title.length > 60 ? title.slice(0, 57).trimEnd() + '…' : title })
@@ -255,7 +256,7 @@ function Fix({ text, items, at, convId }: { text: string; items: Item[]; at: num
 // Prompts perch itself injects (follow-ups, event batches, helper reports). The agent sees the
 // whole text; the chat shows one line you can expand.
 export function perchSummary(text: string): string | null {
-  const f = text.match(/^⏰ Follow-up from perch\. Earlier you told the user: “([\s\S]*?)”\n([^\n]*)/)
+  const f = text.match(/^⏰ Follow-up from (?:auto-m8|perch)\. Earlier you told the user: “([\s\S]*?)”\n([^\n]*)/)
   if (f) {
     const pr = f[2].match(/#(\d+)/)?.[1] ?? f[1].match(/#(\d+)/)?.[1]
     const what = f[1].replace(/\s+/g, ' ').trim()
@@ -495,7 +496,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
   const prKey = `${items.length}:${last?.kind === 'assistant' ? last.blocks.map((b: any) => b.result === undefined ? 0 : 1).join('') : ''}`
   const known = useMemo(() => knownPrs(items.flatMap(it => it.kind === 'assistant' ? it.blocks.map((b: any) => b.type === 'tool' ? `${JSON.stringify(b.input ?? '')} ${b.result ?? ''}` : b.text ?? '') : 'text' in it ? [it.text] : [])), [prKey])
   // Follow-up timers this chat set, so the Waiting card can say whether each is still live.
-  const hasTimers = items.some(it => it.kind === 'assistant' && it.blocks.some(b => b.type === 'tool' && b.name === 'mcp__perch__follow_up'))
+  const hasTimers = items.some(it => it.kind === 'assistant' && it.blocks.some(b => b.type === 'tool' && ourMcpTool(b.name) === 'follow_up'))
   const promises = useLive<{ promises: PromiseRow[] }>(convId && hasTimers ? `/api/conversations/${encodeURIComponent(convId)}/promises` : null, ['conversations'], undefined, 60_000).data?.promises ?? []
   const renderEntry = ({ item: it, index: i }: Entry) => {
     const at = `${convId ?? ''}:${i}`
@@ -518,7 +519,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
         <MsgActions uuid={it.uuid} onBranch={onBranch} onRewind={onRewind} text={textOf(it)} ts={it.ts} />
         {it.blocks.map((b, j) => b.type === 'text' && blockerInText(b.text) ? <div key={j}><Markdown text={b.text} /><Fix text={b.text} items={items} at={i} convId={convId} /></div>
           : b.type === 'text' ? <RichText key={j} text={b.text} />
-          : b.type === 'tool' && b.name === 'mcp__perch__draft_slack_message' && /draft:([\w-]+)/.test(b.result ?? '') ? <SlackDraftCard key={j} id={(b.result ?? '').match(/draft:([\w-]+)/)![1]} />
+          : b.type === 'tool' && ourMcpTool(b.name) === 'draft_slack_message' && /draft:([\w-]+)/.test(b.result ?? '') ? <SlackDraftCard key={j} id={(b.result ?? '').match(/draft:([\w-]+)/)![1]} />
           : b.type === 'tool' ? <ToolViz key={j} b={b} />
           : b.text ? <details key={j} className="thinking"><summary>thinking</summary><div>{b.text}</div></details> : null)}
         {it.activity && <Activity activity={it.activity} />}
@@ -1003,7 +1004,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
           {['auto', 'acceptEdits', 'plan', 'manual', 'dontAsk', 'bypassPermissions'].map(m => <option key={m}>{m}</option>)}
         </select>
         {!id && (
-          <label className="toggle" title="Off: a clean chat with no memory of you. No CLAUDE.md, memory, settings, MCP servers, skills, perch instructions or other conversations; runs in an empty folder and stays clean on every reply.">
+          <label className="toggle" title="Off: a clean chat with no memory of you. No CLAUDE.md, memory, settings, MCP servers, skills, auto-m8 instructions or other conversations; runs in an empty folder and stays clean on every reply.">
             <input type="checkbox" checked={context} onChange={e => setContext(e.target.checked)} /> context
           </label>
         )}

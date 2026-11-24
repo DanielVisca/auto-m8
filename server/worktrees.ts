@@ -168,7 +168,7 @@ function refresh(): Promise<Worktree[]> {
 
 // ---------- removal ----------
 export async function remove(path: string, opts: { force?: boolean; onlyIfIdle?: boolean } = {}): Promise<{ ok: boolean; note: string }> {
-  if (!path.includes(`/${DIR_NAME}/`)) return { ok: false, note: `Only perch worktrees (under ${DIR_NAME}/) can be removed here.` }
+  if (!path.includes(`/${DIR_NAME}/`)) return { ok: false, note: `Only auto-m8 worktrees (under ${DIR_NAME}/) can be removed here.` }
   const w = await inspect(path)
   if (opts.onlyIfIdle && w.keep) return { ok: false, note: `kept: ${w.keep}` }
   if (!w.repo) return { ok: false, note: 'Not linked to a repo (orphan folder); not removing it automatically.' }
@@ -250,7 +250,7 @@ export function startSweeping() {
 export function describe(list: Worktree[], limit = 60) {
   const ago = (t: number) => { const h = (Date.now() - t) / H; return h < 1 ? 'now' : h < 48 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago` }
   const go = list.filter(w => !w.keep).length
-  const head = `${list.length} perch worktrees, ${go} removable now (the hourly sweep takes them), ${list.length - go} kept.`
+  const head = `${list.length} auto-m8 worktrees, ${go} removable now (the hourly sweep takes them), ${list.length - go} kept.`
   const rows = list.slice(0, limit).map(w => `- ${w.path} | ${w.kind}${w.pr ? ` ${w.pr} (${w.prState ?? '?'})` : ''} | ${w.branch ?? `detached ${w.head ?? '?'}`} | dirty ${w.dirty ?? '?'}, only-here commits ${w.unique ?? '?'} | used ${ago(w.lastUsed)}${w.running.length ? ` | RUNNING ${w.running.join(',')}` : ''} | ${w.keep ? `keep: ${w.keep}` : 'removable'}`)
   return [head, ...rows, list.length > limit ? `…and ${list.length - limit} more` : ''].filter(Boolean).join('\n')
 }

@@ -71,7 +71,7 @@ export function problemWith(raw: unknown): string | null {
   if (root.colors !== undefined) {
     if (typeof root.colors !== 'object' || Array.isArray(root.colors)) return 'colors must be an object such as {"accent": "#a7b4c6"}'
     for (const [k, v] of Object.entries(root.colors)) {
-      if (!(COLORS as readonly string[]).includes(k)) return `colors.${k} isn't a colour perch knows (use ${COLORS.join(', ')})`
+      if (!(COLORS as readonly string[]).includes(k)) return `colors.${k} isn't a colour auto-m8 knows (use ${COLORS.join(', ')})`
       if (typeof v !== 'string' || !/^#[0-9a-f]{3,8}$/i.test(v)) return `colors.${k} must be #rgb, #rrggbb or #rrggbbaa`
     }
   }
@@ -192,12 +192,12 @@ export function writeGuide() {
   writeFileSync(join(LAYOUT_DIR, 'AGENTS.md'), GUIDE)
 }
 
-const GUIDE = `# Perch layouts
+const GUIDE = `# auto-m8 layouts
 
-<!-- Written by perch on every start. Edits here are overwritten. -->
+<!-- Written by auto-m8 on every start. Edits here are overwritten. -->
 
-This folder is **perch's window, as files**. A layout says where perch's views
-go, what tiles sit around them, and how the window looks. Perch redraws within a
+This folder is **auto-m8's window, as files**. A layout says where auto-m8's views
+go, what tiles sit around them, and how the window looks. auto-m8 redraws within a
 second of a save. Layouts only change how things are shown: conversations, PRs
 and settings stay as they are.
 
@@ -209,10 +209,10 @@ or "make it warmer", do it by editing a layout here.
 | File | What it is |
 |---|---|
 | \`<name>.json\` | one whole window (yours) |
-| \`<name>.error\` | why \`<name>.json\` didn't load; perch keeps the last good version meanwhile |
+| \`<name>.error\` | why \`<name>.json\` didn't load; auto-m8 keeps the last good version meanwhile |
 | \`tiles/*.html\` | tiles that layouts put in blocks |
 
-Shipped layouts (${Object.keys(SHIPPED).map(n => '`' + n + '`').join(', ')}) live in perch's code and can't be
+Shipped layouts (${Object.keys(SHIPPED).map(n => '`' + n + '`').join(', ')}) live in auto-m8's code and can't be
 edited. To change one, clone it, then edit the clone:
 
 \`\`\`sh
@@ -250,19 +250,20 @@ ${JSON.stringify(DEFAULT, null, 2)}
 \`\`\`
 
 ⌘\\\\ still folds the sidebar and ⌘I the details column in any layout. Below
-640px wide perch uses its one-column phone layout, whatever the file says.
+640px wide auto-m8 uses its one-column phone layout, whatever the file says.
 
 ## Tiles
 
 A tile is one HTML file with its CSS and JS, run in a sandbox with no network of
 its own. It gets the theme colours as CSS variables (\`--bg\`, \`--fg\`,
-\`--muted\`, \`--line\`, \`--accent\`, \`--ok\`, \`--bad\`, \`--warn\`) and a \`perch\` object:
+\`--muted\`, \`--line\`, \`--accent\`, \`--ok\`, \`--bad\`, \`--warn\`) and a \`perch\` object
+(the tile API keeps that name; use it exactly):
 
 - \`await perch.data({source: 'posthog', hogql: 'select …'})\`, or \`source: 'github', path\`,
-  or \`source: 'perch', path\`: read data
-- \`perch.onRefresh(fn)\`: runs at start, when perch's data changes and when vars change
+  or \`source: 'perch', path\` (auto-m8's own data): read data
+- \`perch.onRefresh(fn)\`: runs at start, when auto-m8's data changes and when vars change
 - \`perch.vars\`: the block's \`vars\`
-- \`await perch.run(command, args)\`: ask perch to do something. Commands:
+- \`await perch.run(command, args)\`: ask auto-m8 to do something. Commands:
   - \`open {id}\`: open a conversation
   - \`view {kind}\`: home, needs, settings, insights, library, automations, evolve, paused, board, search
   - \`chat.new {prompt?}\`: start a chat, with the prompt typed in

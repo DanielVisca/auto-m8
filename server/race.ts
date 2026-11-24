@@ -424,7 +424,7 @@ ${Object.entries(f.taken ?? {}).map(([m, xs]: any) => `- **${pretty(m)}:** ${(xs
 ${(f.lessons ?? []).map((l: string) => `- ${l}`).join('\n') || '–'}
 
 ## Evidence
-${d.entries.map((e: any) => `- ${pretty(e.model)}: branch \`${e.branch ?? '–'}\`, event log \`${e.out ?? '–'}\`${e.verify ? `, check output in perch (race ${id.slice(0, 8)})` : ''}`).join('\n')}
+${d.entries.map((e: any) => `- ${pretty(e.model)}: branch \`${e.branch ?? '–'}\`, event log \`${e.out ?? '–'}\`${e.verify ? `, check output in auto-m8 (race ${id.slice(0, 8)})` : ''}`).join('\n')}
 - Reviews: ${d.reviews.length} (${d.reviews.filter((v: any) => v.result).length} with verdicts); adjudications: ${(f.adjudication ?? []).length}
 `
 }

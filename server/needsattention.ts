@@ -5,6 +5,7 @@
 // half. Low-credit sources stop reaching him; their items go back to agents to decide or park.
 import { all, db, get, run } from './db.ts'
 import { HOUR, need, updateNeed, type Need } from './needsstore.ts'
+import { convLink } from '../shared/brand.ts'
 
 db.exec(`create table if not exists needs_credit (
   source text primary key, used integer not null default 0, wasted integer not null default 0,
@@ -95,7 +96,7 @@ export function sweepAttention(now = Date.now()) {
     run('update needs_surfaced set outcome = ?, outcome_at = ? where need_id = ? and revision = ?', 'ignored', now, s.need_id, s.revision)
     if (!n || n.status !== 'needs_you') continue
     bump(n.source, 'ignored', now)
-    updateNeed(n.id, { status: 'checking', evidence: `Mentioned to the user on ${new Date(s.at).toISOString().slice(0, 16)}Z in perch://${s.conversation_id}; no response in ${ATTENTION.ignoredAfter / HOUR}h, so it was not worth their attention. ${PARK}\nAsk was: ${n.human_action}` }, 'attention', now)
+    updateNeed(n.id, { status: 'checking', evidence: `Mentioned to the user on ${new Date(s.at).toISOString().slice(0, 16)}Z in ${convLink(s.conversation_id)}; no response in ${ATTENTION.ignoredAfter / HOUR}h, so it was not worth their attention. ${PARK}\nAsk was: ${n.human_action}` }, 'attention', now)
   }
   for (const n of all<Need>(`select * from needs n where status = 'needs_you' and created_at <= ?
     and not exists (select 1 from needs_surfaced s where s.need_id = n.id and s.revision = n.revision)`, now - ATTENTION.unseenAfter)) {

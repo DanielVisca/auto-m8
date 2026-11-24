@@ -10,6 +10,7 @@ let fixtures = 0
 import { claudePeer, codexPeer, modelTier } from './model-tiers.ts'
 import { chooseProvider } from './subscription-budget.ts'
 import type { Usage } from './usage.ts'
+import { MCP_SERVER, mcpTool } from '../shared/brand.ts'
 
 const models = ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'].map(slug => ({ slug, tier: modelTier(slug) }))
 
@@ -26,7 +27,7 @@ function fixture(lastModel = '') {
   const runner = { write: (line: string) => writes.push(JSON.parse(line)), kill() {}, stop() {} }
   const context: any = {
     chats: new Map([[c.id, c]]), waiting: new Map(), sendInterceptors: new Set(), shouldHold: () => false, hold() {}, randomUUID: () => 'uuid', Date, Buffer,
-    settings: { chat: {}, local: { model: 'qwen3-coder:30b' } }, QUEUED, stampPrompt, agentSender, MCP_SCRIPT: '', process: { execPath: 'node' },
+    settings: { chat: {}, local: { model: 'qwen3-coder:30b' } }, QUEUED, stampPrompt, agentSender, MCP_SCRIPT: '', MCP_SERVER, mcpTool, process: { execPath: 'node' },
     get: (sql: string) => sql.startsWith('select model from turns') ? { model: lastModel } : null, run() {}, startChatOrigin() {}, setTurbo() {}, turboFor: () => false, setEngine: (_id: string, e: string) => { s.pin = e }, engineFor: () => s.pin,
     isCodex: (e: string) => e === 'codex' || e.startsWith('codex:'),
     isLocal: (e: string) => !!e && e !== 'auto' && !e.startsWith('claude:') && !e.startsWith('codex'),
@@ -365,10 +366,10 @@ test('a Codex reply that hands the user a command gets one correction, on Codex,
   assert.equal(f.turns.length, 2)
   assert.equal(f.turns[1].opts.prompt, 'Also tag it')
   assert.equal(f.c.codexQueue.length, 1)
-  assert.match(f.c.codexQueue[0].prompt, /^⏰ perch check: your last reply asked the user to run a command/)
+  assert.match(f.c.codexQueue[0].prompt, /^⏰ auto-m8 check: your last reply asked the user to run a command/)
   f.turns[1].resolve({ ok: true, text: 'Tagged v1.' }); await flush()
   assert.equal(f.turns.length, 3)
-  assert.match(f.turns[2].opts.prompt, /^⏰ perch check/)
+  assert.match(f.turns[2].opts.prompt, /^⏰ auto-m8 check/)
   assert.deepEqual(f.echoes().filter(t => !t.startsWith('⏰')), ['Push it', 'Also tag it'])
   // Cooldown: the corrected agent repeating itself doesn't loop.
   f.turns[2].resolve({ ok: true, text: HANDS_OFF }); await flush()
@@ -388,7 +389,7 @@ test('a Codex reply with no hand-off, a failed turn or a capped turn sends no co
   f.send({ prompt: 'Push it', engine: 'codex' })
   f.turns[0].resolve({ ok: false, capped: true, text: HANDS_OFF }); await flush()
   assert.ok(!f.echoes().some(t => t.startsWith('⏰')))
-  assert.ok(!f.writes.some(w => /perch check/.test(JSON.stringify(w))))
+  assert.ok(!f.writes.some(w => /auto-m8 check/.test(JSON.stringify(w))))
 })
 
 test('the local-model fallback finishes through the Claude result path, which runs the same check', () => {

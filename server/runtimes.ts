@@ -65,7 +65,7 @@ export async function profiles(): Promise<Profile[]> {
       strengths: ['free, private, no cap'], limits: ['weak on long multi-file changes', 'smaller context'] },
     { id: 'cloud-task', label: 'PostHog cloud task', where: 'cloud', ready: true,
       can: { localFiles: false, tailscale: false, browserProfile: false, perchTools: false }, github: { accounts: ['PostHog cloud runner'], owners: CLOUD_OWNERS }, mcp: {},
-      strengths: ['runs while the Mac is closed or busy', 'parallel, no local load'], limits: ['only repos the PostHog GitHub app can reach', 'no Tailscale (Grafana, Argo CD, kubectl)', 'no signed-in browser', 'no perch tools or local files; unpushed work must be on a branch'] },
+      strengths: ['runs while the Mac is closed or busy', 'parallel, no local load'], limits: ['only repos the PostHog GitHub app can reach', 'no Tailscale (Grafana, Argo CD, kubectl)', 'no signed-in browser', 'no auto-m8 tools or local files; unpushed work must be on a branch'] },
   ]
 }
 
@@ -76,8 +76,8 @@ export function needsFrom(text: string, o: { repoOwner?: string; dirty?: boolean
   const n: Needs = {}
   if (o.dirty || /(^|\s)(~\/|\/users\/)/i.test(text)) n.localFiles = true
   if (/grafana|argo ?cd|kargo|kubectl|\beks\b|tailscale|tailnet|victoriametrics|vmagent/.test(t)) n.tailscale = true
-  if (/signed.?in|agent chrome|perch browser|browser tool|logged.?in session/.test(t)) n.browserProfile = true
-  if (/\b(delegate|shepherd|needs_me|canvas|perch tool|follow_up)\b/.test(t)) n.perchTools = true
+  if (/signed.?in|agent chrome|perch browser|auto-m8 browser|browser tool|logged.?in session/.test(t)) n.browserProfile = true
+  if (/\b(delegate|shepherd|needs_me|canvas|perch tool|auto-m8 tool|follow_up)\b/.test(t)) n.perchTools = true
   if (o.repoOwner) n.repoOwner = o.repoOwner
   const norm = (s: string) => s.toLowerCase().replace(/^(claude\.ai |plugin:)/, '').replace(/[^a-z0-9]/g, '')
   const mcp = serverNames.filter(s => s.length > 3 && norm(s) && t.replace(/[^a-z0-9 ]/g, '').includes(norm(s)))
@@ -94,7 +94,7 @@ export function check(profs: Profile[], needs: Needs): Verdict[] {
     if (needs.localFiles && !p.can.localFiles) b.push('needs local files or unpushed work')
     if (needs.tailscale && !p.can.tailscale) b.push('needs Tailscale (internal Grafana, Argo CD, kubectl)')
     if (needs.browserProfile && !p.can.browserProfile) b.push('needs the signed-in Agent Chrome')
-    if (needs.perchTools && !p.can.perchTools) b.push('needs perch tools')
+    if (needs.perchTools && !p.can.perchTools) b.push('needs auto-m8 tools')
     if (needs.repoOwner && p.github.owners !== 'any-local-account' && !p.github.owners.some(o => o.toLowerCase() === needs.repoOwner!.toLowerCase())) b.push(`cannot push to ${needs.repoOwner} (only ${p.github.owners.join(', ')})`)
     if (needs.repoOwner && p.github.owners === 'any-local-account' && !p.github.accounts.length) b.push('no GitHub login')
     for (const s of needs.mcp ?? []) {

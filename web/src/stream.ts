@@ -116,8 +116,9 @@ export function toolSummary(name: string, input: any): string {
 export function toolLabel(name: string) {
   if (name.startsWith('mcp__')) {
     const [, server, tool] = name.split('__')
-    // The MCP server keeps its internal name (perch); people see the product name.
-    const shown = server === 'perch' ? 'auto-m8' : server.replace(/^claude_ai_|^plugin_\w+?_/, '')
+    // Our own server is auto-m8 (old transcripts call it perch); both show as the product name.
+    // Inline, not shared/brand.ts: a test loads this file into a vm without module imports.
+    const shown = server === 'auto-m8' || server === 'auto_m8' || server === 'perch' ? 'auto-m8' : server.replace(/^claude_ai_|^plugin_\w+?_/, '')
     return `${shown} · ${tool}`
   }
   return name

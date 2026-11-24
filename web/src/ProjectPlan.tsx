@@ -4,6 +4,7 @@
 // perch stores (project action=record, linked autoresearch runs), so it can't go stale like a note.
 import './project.css'
 import { post, useLive } from './api'
+import { convLink } from '../../shared/brand.ts'
 
 export type Workstream = {
   key: string; name: string; north_star: string | null; metric: string | null; unit: string | null; direction: 'minimize' | 'maximize'
@@ -67,7 +68,7 @@ function Row({ w }: { w: Workstream }) {
       {w.agents.length > 0 && (
         <div className="ws-links small">
           {w.agents.map(a => (
-            <button key={a.id} className={`link ws-agent ws-agent-${a.status ?? 'idle'}`} onClick={() => open(a.id)} title={`perch://${a.id}`}>
+            <button key={a.id} className={`link ws-agent ws-agent-${a.status ?? 'idle'}`} onClick={() => open(a.id)} title={convLink(a.id)}>
               {a.kind === 'autoresearch' ? '⟳ ' : ''}{a.name}{a.status ? ` · ${a.status}` : ''}
             </button>
           ))}
@@ -149,7 +150,7 @@ export function PlanTile({ id }: { id: string }) {
   const { data: p } = useLive<PlanProject>(id ? `/api/projects/${encodeURIComponent(id)}` : null, ['home', 'conversations', 'prs'], undefined, 15_000)
   if (!id) return <div className="muted small plan-tile">This plan tile has no conversation.</div>
   if (!p) return <div className="muted small plan-tile">Loading…</div>
-  if (p.error) return <div className="muted small plan-tile">No project in perch://{id}.</div>
+  if (p.error) return <div className="muted small plan-tile">No project in {convLink(id)}.</div>
   const tied = new Set((p.workstreams ?? []).flatMap(w => w.prs.map(x => x.url)))
   const loose = p.prs.filter(x => !tied.has(x.url))
   return (

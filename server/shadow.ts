@@ -35,6 +35,7 @@ import { agentEnv, loadedModels, localStatus, unloadModel } from './local.ts'
 import { isQuiet, isUnderPressure, quietState, startQuiet } from './quiet.ts'
 import { learningGate, type UsageSnapshot } from './learning-budget.ts'
 import { noteClaude } from './usage.ts'
+import { ourMcpTool } from '../shared/brand.ts'
 
 const exec = promisify(execFile)
 const git = (cwd: string, args: string[], timeout = 300_000) => exec('git', ['-c', 'commit.gpgsign=false', ...args], { cwd, maxBuffer: 50e6, timeout }).then(r => r.stdout.trim())
@@ -145,7 +146,7 @@ function userMessages(session: string) {
   const clean = (t: string) => t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/<!--perch[\s\S]*?-->/g, '').trim()
   // Only what you typed: perch's own injections (follow-up alarms, helper reports, PR events,
   // task notifications) would send the replay chasing things that no longer exist.
-  const injected = /^(\[perch|\(perch:|⏰|<task-notification>|HELPER REPORT|NEEDS HELP|EVENTS\b|\[SYSTEM NOTIFICATION|Caveat:|<command-|<local-command|You stopped here before the work was finished)/
+  const injected = /^(\[(?:perch|auto-m8)|\((?:perch|auto-m8):|⏰|<task-notification>|HELPER REPORT|NEEDS HELP|EVENTS\b|\[SYSTEM NOTIFICATION|Caveat:|<command-|<local-command|You stopped here before the work was finished)/
   const items = itemsOf(c.path)
   const messages = items.filter((i: any) => i.kind === 'user').map((i: any) => clean(String(i.text ?? ''))).filter(m => m && !injected.test(m))
   return { cwd: c.cwd as string | null, messages, items, path: c.path as string }
@@ -204,7 +205,7 @@ export function checkpoint(path: string | null, originalDiff: string, prNumbers:
   if (fetchedPr && added.filter(l => prefix.includes(JSON.stringify(l).slice(1, -1))).length > 3) return { pickedUp: true as const }
   // Otherwise overlap means the cut came too late (an edit perch didn't recognise): no fork.
   if (added.filter(l => prefix.includes(JSON.stringify(l).slice(1, -1))).length > 3) return null
-  const injected = /^(\[perch|\(perch:|⏰|<task-notification>|HELPER REPORT|NEEDS HELP|EVENTS\b|\[SYSTEM NOTIFICATION|Caveat:|<command-|<local-command|You stopped here before the work was finished)/
+  const injected = /^(\[(?:perch|auto-m8)|\((?:perch|auto-m8):|⏰|<task-notification>|HELPER REPORT|NEEDS HELP|EVENTS\b|\[SYSTEM NOTIFICATION|Caveat:|<command-|<local-command|You stopped here before the work was finished)/
   const later = toItems(raw.slice(cut).join('\n')).filter((i: any) => i.kind === 'user').map((i: any) => String(i.text ?? '').replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim()).filter(m => m && !injected.test(m))
   // Where the original worked on this repo: its checkout, and any worktree of it the chat used
   // (`cd ~/Development/posthog-rm-mcp-registry`). The fork rewrites these to the replay's worktree.
@@ -214,7 +215,7 @@ export function checkpoint(path: string | null, originalDiff: string, prNumbers:
   return { lines, ts, later, reason, srcs }
 }
 
-const FORK = `(perch shadow replay) From here on you are a different model continuing this conversation, to compare outcomes. Your working copy is now {{DIR}}, a fresh checkout of the repository at the commit the work started from: paths above have been rewritten to it. Read and edit only under {{DIR}}.
+const FORK = `(auto-m8 shadow replay) From here on you are a different model continuing this conversation, to compare outcomes. Your working copy is now {{DIR}}, a fresh checkout of the repository at the commit the work started from: paths above have been rewritten to it. Read and edit only under {{DIR}}.
 External tools (Slack, GitHub, MCP servers, the web) are unavailable now; what they returned above is all you have. Work only on local files, leave your changes uncommitted, don't push or open PRs. Carry on and finish the code change the conversation asks for, then summarise it in two sentences.`
 function forkPrompt(later: string[], _top: string) {
   return `${FORK}${later.length ? `\n\nLater in the original conversation the user also said, in order (satisfy these too):\n${later.map((m, i) => `--- ${i + 1} ---\n${m}`).join('\n\n').slice(0, 15_000)}` : ''}`
@@ -255,7 +256,7 @@ export function fetchedContext(items: any[], originalDiff: string, cap = 25_000)
       if (b.type !== 'tool' || !b.result || b.isError) continue
       const cmd = b.name === 'Bash' ? String((b.input as any)?.command ?? '') : ''
       if (!EXTERNAL.test(b.name) && !EXTERNAL_CMD.test(cmd)) continue
-      if (/^mcp__perch__(send_to_conversation|delegate|follow_up|watch|shepherd|terminal|project|board)/.test(b.name)) continue
+      if (/^(send_to_conversation|delegate|follow_up|watch|shepherd|terminal|project|board)/.test(ourMcpTool(b.name) ?? '')) continue
       const result = String(b.result)
       if (leaks(result)) { dropped++; continue }
       const entry = `### ${b.name}${cmd ? `: ${cmd.slice(0, 200)}` : ` ${JSON.stringify(b.input).slice(0, 200)}`}\n${result.slice(0, 3000)}`

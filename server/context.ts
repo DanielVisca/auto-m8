@@ -46,7 +46,7 @@ export function contextBlock(ids: string[]) {
       last ? `Where it ended:\n${last.length > 2500 ? last.slice(0, 2500) + '…' : last}` : '',
     ].filter(Boolean).join('\n')
   }).filter(Boolean)
-  return `<earlier-conversations>\nThe user pulled these earlier conversations into this one. Use the perch get_conversation tool to read one in full if this brief is not enough.\n\n${parts.join('\n\n')}\n</earlier-conversations>`
+  return `<earlier-conversations>\nThe user pulled these earlier conversations into this one. Use the auto-m8 get_conversation tool to read one in full if this brief is not enough.\n\n${parts.join('\n\n')}\n</earlier-conversations>`
 }
 
 export function link(a: string, b: string, kind: string, note?: string) {

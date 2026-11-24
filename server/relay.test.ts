@@ -40,6 +40,6 @@ test('watch and board for an owner', async () => {
   push('drv-1', 'wk-1', 'turn_end', 'done')
   assert.equal(pendingFor('drv-1').length, 1)
   const text = await board('drv-1')
-  assert.match(text, /perch:\/\/wk-1 "worker"/)
+  assert.match(text, /auto-m8:\/\/wk-1 "worker"/)
   assert.match(text, /Events not yet delivered \(1\)/)
 })

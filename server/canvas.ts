@@ -98,23 +98,23 @@ async function fetchSource(q: any) {
     try { v = JSON.parse(text) } catch { v = text.slice(0, 500_000) }
   } else if (q.source === 'perch') {
     const path = String(q.path ?? '')
-    if (!path.startsWith('/api/')) throw new Error('perch paths start with /api/')
+    if (!path.startsWith('/api/')) throw new Error("source 'perch' paths start with /api/")
     const port = process.env.PERCH_PORT ?? 4777
     v = await (await fetch(`http://127.0.0.1:${port}${path}`, { headers: { Host: `127.0.0.1:${port}` } })).json()
-  } else throw new Error(`Unknown source "${q.source}". Use posthog, github, http or perch.`)
+  } else throw new Error(`Unknown source "${q.source}". Use posthog, github, http or perch (auto-m8's own data).`)
   return v
 }
 
-const MAKER = `You write small single-file web apps ("tiles") that live on a dashboard canvas inside perch.
+const MAKER = `You write small single-file web apps ("tiles") that live on a dashboard canvas inside auto-m8.
 Reply with one line of JSON, then the app in one \`\`\`html block. Nothing else.
 {"title": "short name", "refresh": seconds between refreshes, or 0 if it never needs one}
 
 The app runs in a sandboxed iframe: plain HTML/CSS/JS, no build step. Prefer no libraries (SVG or canvas for charts). If you need one, load it from cdnjs.cloudflare.com with an exact version.
-It talks to the outside only through this API, already on the page:
+It talks to the outside only through this API, already on the page (it is called perch for historical reasons; keep the names exactly):
 - await perch.data({ source: 'posthog', hogql: 'select … from events where timestamp > now() - interval 1 day …' }) → { columns, rows }
 - await perch.data({ source: 'github', path: 'repos/PostHog/posthog/pulls?state=open&per_page=50' }) → GitHub REST JSON (GET only)
 - await perch.data({ source: 'http', url: 'https://…' }) → JSON (or text)
-- await perch.data({ source: 'perch', path: '/api/home' }) → perch's own data: /api/home (needsMe, running), /api/insights/prs (your PRs with area and outcome), /api/conversations?q=…
+- await perch.data({ source: 'perch', path: '/api/home' }) → auto-m8's own data: /api/home (needsMe, running), /api/insights/prs (your PRs with area and outcome), /api/conversations?q=…
 - perch.state: whatever you saved last time (or null); await perch.save(obj) saves it.
 - perch.onRefresh(fn): fn runs every refresh interval; call your load function there and once at start.
 - Colours: use the CSS variables --bg --fg --muted --line --accent (light and dark are set for you). Body margin 0, font inherits.

@@ -41,7 +41,7 @@ export function answerDecision(id: string, answer: string, auto = false) {
   const w = d.url ? get<any>('select * from shepherd_watch where url = ?', d.url) : null
   let extra = ''
   if (w && /^gate:/.test(d.key) && /cleared/i.test(a)) run(`update shepherd_watch set stage = case when stage in ('failed', 'blocked') then 'deploying' else stage end, enabled = 1, stopped_at = null, paused_reason = null, verify_attempts = 0, awaiting = null, verify_due_at = ? where url = ?`, Date.now(), d.url)
-  if (w && /^gate:/.test(d.key) && /draft/i.test(a)) extra = `Find who can clear this blocker (the environment's required reviewers, the CODEOWNERS team, or whoever approved the last release) and draft the ask with the perch draft_slack_message tool. Do not send or post anything yourself.`
+  if (w && /^gate:/.test(d.key) && /draft/i.test(a)) extra = `Find who can clear this blocker (the environment's required reviewers, the CODEOWNERS team, or whoever approved the last release) and draft the ask with the auto-m8 draft_slack_message tool. Do not send or post anything yourself.`
   if (w && /^unverified:/.test(d.key) && /again/i.test(a)) run(`update shepherd_watch set stage = 'deploying', enabled = 1, stopped_at = null, paused_reason = null, verify_attempts = 0, verify_due_at = ?, awaiting = null where url = ?`, Date.now(), d.url)
   if (w && /^unverified:/.test(d.key) && /mark it verified/i.test(a)) run(`update shepherd_watch set stage = 'verified', enabled = 0, outcome = 'marked verified by you' where url = ?`, d.url)
   if (w && /^regression:/.test(d.key) && /merge the revert/i.test(a)) extra = 'Merge the revert PR the shepherd opened (find it in the PR comments), then confirm it deployed.'

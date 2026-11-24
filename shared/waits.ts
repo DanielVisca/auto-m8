@@ -2,6 +2,7 @@
 // workflows (Claude Code reports each back with a <task-notification>), and perch follow-up
 // timers. The chat shows these as a "Waiting" card so you can tell a turn that's done from one
 // that's waiting on something, whether that wait is still live, and what it's waiting for.
+import { ourMcpTool } from './brand.ts'
 
 export type TaskDone = { status: string; summary?: string; at?: number }
 type ToolLike = { type: 'tool'; id: string; name: string; input: any; result?: string; isError?: boolean; done?: TaskDone }
@@ -47,7 +48,7 @@ export function waitsOf(tools: { block: ToolLike; ts?: number }[]): Wait[] {
       const label = str(b.input?.description) || (what === 'workflow' ? str(b.result.match(/Summary: (.*)/)?.[1]) || str(b.input?.name) : '') || str(b.input?.command).slice(0, 100) || b.name
       const state = !b.done ? 'live' : b.done.status === 'completed' ? 'done' : 'failed'
       out.push({ kind: 'task', id: b.id, label, what, state, startedAt: ts, done: b.done, input: inputOf(b.name, b.input), outputPath: outputPathOf(b.result), tool: b.name })
-    } else if (b.name === 'mcp__perch__follow_up') {
+    } else if (ourMcpTool(b.name) === 'follow_up') {
       const mins = Number(b.input?.minutes) || (b.input?.pr_url ? 120 : 20)
       out.push({ kind: 'timer', id: b.id, label: str(b.input?.note) || 'Follow-up', what: 'follow-up', dueAt: ts ? ts + mins * 60_000 : undefined, prUrl: b.input?.pr_url, until: b.input?.pr_url ? (b.input?.until ?? 'checks') : undefined })
     } else if (b.name === 'ScheduleWakeup' && !b.input?.stop) {

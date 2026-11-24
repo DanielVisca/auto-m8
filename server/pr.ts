@@ -302,7 +302,7 @@ How:
 1. Group stacks: a PR whose base is another PR's branch sits on it. Fix a stack bottom-up, then restack the PRs above (the gh-stack skill, via use_skill, if needed). Independent PRs go in parallel: one subagent each (Agent tool, launched together), each in its own worktree: \`git worktree add ../.perch-worktrees/<repo>-pr<N> origin/<branch>\`. Never work in the user's own checkout.
 2. Each subagent, for its PR: read failing checks (\`gh pr checks <url>\`, \`gh run view <id> --log-failed\`) and the unresolved review threads (\`gh api graphql\` reviewThreads). Fix causes, not symptoms; flaky failures get \`gh run rerun <id> --failed\` instead of code changes. Reply on each review thread with what changed, or why not. Push with \`git push origin HEAD:<branch>\`. Never force-push over other people's commits.
 3. Stop and report a PR instead of fixing it when it needs a design decision or the reviewer's call.
-4. After pushing, call the perch follow_up tool with each PR and until: "checks", so you come back and confirm CI went green (and fix again if not).
+4. After pushing, call the auto-m8 follow_up tool with each PR and until: "checks", so you come back and confirm CI went green (and fix again if not).
 End with one line per PR: what was wrong, what you did, and its state now.`
 
 export async function orchestrate(prs: Target[], where: 'here' | 'cloud', goal: 'ci' | 'comments' | 'both' = 'both') {

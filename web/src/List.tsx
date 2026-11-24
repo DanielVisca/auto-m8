@@ -130,7 +130,7 @@ const FILTERS: { id: string; label: string; states: State[] }[] = [
 ]
 
 const SEARCH_HELP = `Words and "phrases" search titles, messages, labels, notes, branches and PR titles.
-Filters: #label  -#label  in:claude | code | task  where:slack | cloud | mac | perch | ollama  state:waiting  repo:posthog  pr:1234  project:dash  is:pinned  older:7d  newer:2d
+Filters: #label  -#label  in:claude | code | task  where:slack | cloud | mac | auto-m8 | ollama  state:waiting  repo:posthog  pr:1234  project:dash  is:pinned  older:7d  newer:2d
 Ask a question in plain words and use "Ask Claude" for an answer from your history.`
 
 export function List({ selectedId, onOpen, terms, selectedTerm, onOpenTerm, searchRef, onMenu, onAsk, onSearchEverywhere }: {

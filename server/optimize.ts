@@ -40,7 +40,7 @@ const RESEARCH = ['```autoresearch', 'type: research', 'summary: <what you inves
 export function kickoff(cfg: Config) {
   const dir = cfg.direction === 'maximize' ? 'maximize' : 'minimize'
   const target = cfg.target == null ? '' : `\nTarget: the run ends early once the metric ${cfg.direction === 'maximize' ? 'reaches' : 'drops to'} ${cfg.target}.`
-  return `You are in autoresearch mode: an iterative loop to ${dir} the metric defined by the brief below. You are working in a dedicated git worktree, so change files freely; perch commits every improvement for you.
+  return `You are in autoresearch mode: an iterative loop to ${dir} the metric defined by the brief below. You are working in a dedicated git worktree, so change files freely; auto-m8 commits every improvement for you.
 
 Every iteration:
 1. Make ONE focused change aimed at the metric. Keep it small and attributable.

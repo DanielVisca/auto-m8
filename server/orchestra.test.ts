@@ -13,12 +13,12 @@ test('stopTargets: stop arrays, legacy stop:true + targets, and all', () => {
   assert.equal(stopTargets({ stop: 'all' }), 'all')
 })
 
-test('stop: [ids] (raw and perch://) actually deactivates those watches and reports how many', () => {
+test('stop: [ids] (raw, auto-m8:// and perch://) actually deactivates those watches and reports how many', () => {
   const owner = 'owner-stop-test'
   for (const id of ['conv-1', 'conv-2', 'conv-3']) run(`insert or ignore into conversations (id, source, started_at, updated_at, messages) values (?, 'claude', 0, 0, 0)`, id)
   watch({ owner, targets: ['conv-1', 'conv-2', 'conv-3'] })
   assert.deepEqual(active(owner), ['conv-1', 'conv-2', 'conv-3'])
-  assert.equal(unwatch(owner, stopTargets({ stop: ['conv-1', 'perch://conv-2'] })), 2)
+  assert.equal(unwatch(owner, stopTargets({ stop: ['auto-m8://conv-1', 'perch://conv-2'] })), 2)
   assert.deepEqual(active(owner), ['conv-3'])
   assert.equal(unwatch(owner, stopTargets({ stop: ['conv-1'] })), 0) // already stopped: honest zero
   assert.equal(unwatch(owner, stopTargets({ stop: 'all' })), 1)

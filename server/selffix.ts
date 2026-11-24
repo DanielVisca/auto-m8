@@ -24,20 +24,20 @@ const DAY = 86400_000
 const REPO = join(import.meta.dirname, '..')
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
 
-const PROMPT = (e: any, branch: string, decisionKey: string) => `perch keeps hitting this error, and you are fixing it in perch's own code (~/Development/perch, but work only in this worktree, branch ${branch}).
+const PROMPT = (e: any, branch: string, decisionKey: string) => `auto-m8 keeps hitting this error, and you are fixing it in auto-m8's own code (~/Development/perch, but work only in this worktree, branch ${branch}).
 
 Where: ${e.source}
 Seen ${e.count} times, first ${new Date(e.first_at).toISOString()}, last ${new Date(e.last_at).toISOString()}.
-What perch told the user: ${e.message}
+What auto-m8 told the user: ${e.message}
 Raw error:
 ${String(e.detail ?? '').slice(0, 2500)}
 
 1. Load the perch-perch-app-dev skill (use_skill) and follow its rules.
 2. Find the cause in this worktree's code. Investigate against a COPY of the live database (sqlite3 ".backup" into /tmp), never the live one.
 3. Fix it at the cause, with a test in server/perch.test.ts when the logic is testable. Run \`npx tsc --noEmit -p .\` and \`npm test\` here.
-4. Commit on ${branch} in this worktree (never on main, never push, never restart perch).
-5. Then call the perch ask_decision tool with this conversation's id, question "Merge perch fix: <one line>?", options ["Merge it", "Leave it"], your recommendation, and in context: the cause, the fix, and what you ran. If the answer comes back "Merge it": in ~/Development/perch, check \`git status --short\`; if main has uncommitted changes that touch the same files, stop and say so; otherwise \`git merge --no-ff ${branch}\`, then remove the worktree. Tell the user perch needs a restart (⌘⇧R) to run the fix.
-If it turns out not to be a bug in perch (an outside service, the user's setup), don't change code: say what it is and what the user would do, and use ask_decision for that instead.`
+4. Commit on ${branch} in this worktree (never on main, never push, never restart auto-m8).
+5. Then call the auto-m8 ask_decision tool with this conversation's id, question "Merge auto-m8 fix: <one line>?", options ["Merge it", "Leave it"], your recommendation, and in context: the cause, the fix, and what you ran. If the answer comes back "Merge it": in ~/Development/perch, check \`git status --short\`; if main has uncommitted changes that touch the same files, stop and say so; otherwise \`git merge --no-ff ${branch}\`, then remove the worktree. Tell the user auto-m8 needs a restart (⌘⇧R) to run the fix.
+If it turns out not to be a bug in auto-m8 (an outside service, the user's setup), don't change code: say what it is and what the user would do, and use ask_decision for that instead.`
 
 export async function selfFix() {
   if (!existsSync(join(REPO, '.git'))) return
@@ -74,14 +74,14 @@ export function findingToDecision(s: { id: string; title: string; why: string; l
 
 // "Fix it for me" on a finding: an agent takes it, in perch's repo when it's about perch.
 export function fixFinding(title: string, why: string, link: string | null) {
-  const aboutPerch = /\bperch\b|shepherd|autopilot|routine|brief/i.test(`${title} ${why}`)
-  const prompt = `perch's autopilot found this and the user asked you to fix it:
+  const aboutPerch = /\bperch\b|\bauto-m8\b|shepherd|autopilot|routine|brief/i.test(`${title} ${why}`)
+  const prompt = `auto-m8's autopilot found this and the user asked you to fix it:
 
 ${title}
 ${why}${link ? `\n${link}` : ''}
 
 Fix it at the cause, then verify the fix worked (re-run the check, or look at the data again).
-- If it's about perch itself, load perch-perch-app-dev (use_skill) and follow its rules: work on a perch-fix/ branch in a worktree, never on main, don't push or restart.
+- If it's about auto-m8 itself, load perch-perch-app-dev (use_skill) and follow its rules: work on a perch-fix/ branch in a worktree, never on main, don't push or restart.
 - If it's a PostHog scout, workflow or task, use the PostHog MCP.
 - Never post to Slack or message anyone. If the fix needs someone else, draft it with draft_slack_message for the user.
 - If a real choice is left that only the user can make, use ask_decision, don't end on a question.`
