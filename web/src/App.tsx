@@ -160,10 +160,13 @@ export function App() {
   useEffect(() => {
     const h = (e: Event) => { // sign in without a terminal; Settings shows progress and a paste-code box
       post('/api/claude/login', { conversationId: (e as CustomEvent).detail?.convId })
-      toast('Finish signing in to Claude in your browser', { kind: 'info', action: 'Progress in Settings → Connections' })
+      toast('Finish signing in to Claude in your browser', { kind: 'info', action: 'The card in the chat shows progress and sends your message again' })
     }
-    addEventListener('perch:login', h)
-    return () => removeEventListener('perch:login', h)
+    // From a blocker card (BlockerCard.tsx): a terminal for a CLI sign-in, or Settings → Connections.
+    const term = (e: Event) => { const d = (e as CustomEvent).detail ?? {}; newTerm({ cmd: d.cmd, title: d.title }) }
+    const sett = () => setView({ kind: 'settings' })
+    addEventListener('perch:login', h); addEventListener('perch:terminal', term); addEventListener('perch:settings', sett)
+    return () => { removeEventListener('perch:login', h); removeEventListener('perch:terminal', term); removeEventListener('perch:settings', sett) }
   })
   const startChat = (prompt?: string) => { if (prompt) try { sessionStorage.setItem('perch.draft', prompt) } catch {} setView({ kind: 'chat', id: null }) }
   const askHistory = (q: string) => setView({ kind: 'search', q, agent: 'yes' })

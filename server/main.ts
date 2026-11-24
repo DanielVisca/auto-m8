@@ -44,7 +44,7 @@ import { execFile as execFileCb } from 'node:child_process'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { extname, join, normalize } from 'node:path'
 import { WebSocketServer } from 'ws'
-import { btw, chats, interrupt, noticeLive, noticesFor, onChatsChange, reattachChats, runningChats, send, sendInterceptors, setCloudFallback, subscribe } from './chat.ts'
+import { btw, chats, interrupt, onAuthLapse, noticeLive, noticesFor, onChatsChange, reattachChats, runningChats, send, sendInterceptors, setCloudFallback, subscribe } from './chat.ts'
 import { contextBlock, link, links, related } from './context.ts'
 import { planForPrompt } from './prroute.ts'
 import { all, get, refreshMeta, run, writes } from './db.ts'
@@ -780,7 +780,12 @@ route('GET', '/api/status', () => ({
   // For the setup checklist (web/src/Setup.tsx).
   setup: { owner: process.env.PERCH_OWNER_NAME, cwdExists: existsSync(settings.chat.cwd), cwdIsHome: settings.chat.cwd.replace(/\/+$/, '') === homedir(), chrome: existsSync(settings.browser.chromePath) },
 }))
-const loginChanged = () => { broadcast('status'); if (claudeLogin.state === 'done') refreshBasics().then(() => broadcast('status')) }
+const loginChanged = () => {
+  if (claudeLogin.state === 'done') status.claudeAuthLapse = undefined // a fresh sign-in: the next chat process reads it
+  broadcast('status')
+  if (claudeLogin.state === 'done') refreshBasics().then(() => broadcast('status'))
+}
+onAuthLapse.add(() => broadcast('status'))
 route('POST', '/api/claude/login', async (_m, req) => {
   const b = await body(req)
   const c = b.conversationId ? get<Row>('select source from conversations where id = ?', b.conversationId) : undefined

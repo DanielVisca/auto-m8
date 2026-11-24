@@ -5,7 +5,10 @@ import { promisify } from 'node:util'
 const exec = promisify(execFile)
 
 export type Mcp = { name: string; target: string; status: 'connected' | 'needs-auth' | 'failed' | 'not-configured' | 'unknown'; kind: 'claude.ai' | 'plugin' | 'local' }
-export const status: { claude?: any; claudeVersion?: string; gh?: { ok: boolean; account?: string; error?: string }; mcp?: { checkedAt: number; servers: Mcp[]; error?: string }; mcpChecking?: boolean } = {}
+export const status: { claude?: any; claudeVersion?: string; gh?: { ok: boolean; account?: string; error?: string }; mcp?: { checkedAt: number; servers: Mcp[]; error?: string }; mcpChecking?: boolean
+  // A chat's Claude reported a lapsed sign-in (e.g. "OAuth session expired and could not be refreshed")
+  // while `claude auth status` may still say logged in. Cleared by the next good Claude turn or a sign-in.
+  claudeAuthLapse?: { at: number; text: string; conversationId: string } } = {}
 
 export function parseMcpList(out: string): Mcp[] {
   const servers: Mcp[] = []

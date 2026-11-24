@@ -27,6 +27,8 @@ import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { close, closeSync, constants, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, write, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { blockerFor } from '../web/src/blockers.ts'
+import { status as connStatus } from './status.ts'
 import { all, get, run } from './db.ts'
 import { askMe, DATA_DIR, settings } from './settings.ts'
 import { snapshot } from './branch.ts'
@@ -274,6 +276,16 @@ function attach(c: Chat, pid: number, offset: number): Runner {
         const until = ev.is_error ? capFrom(`${ev.result ?? ''} ${ev.error ?? ''} ${JSON.stringify(ev.errors ?? '')}`) : null
         if (until && c.tier) onCap(c, until, capScope(`${ev.result ?? ''} ${ev.error ?? ''}`), unanswered)
         else if (!ev.is_error) { c.capRetries = 0; if (c.tier) forgetCodexThread(c.id) } // back on Claude: a later hand-off to Codex starts fresh, with these turns in it
+        // A lapsed Claude sign-in: say so in /api/status (the composer offers sign-in before the next
+        // send) and stop this process, which keeps the dead session: the next message starts a fresh
+        // claude that reads the new login. It's idle, so nothing is lost (same as the idle reaper).
+        const blocked = ev.is_error ? blockerFor(`${ev.result ?? ''} ${ev.error ?? ''}`) : null
+        if (blocked?.kind === 'claude-login') {
+          connStatus.claudeAuthLapse = { at: Date.now(), text: String(ev.result ?? ev.error ?? '').slice(0, 300), conversationId: c.id }
+          onAuthLapse.forEach(f => f())
+          const old = c.proc
+          if (old) setTimeout(() => { if (c.proc === old && c.state === 'idle') { old.kill(); setTimeout(() => { if (c.proc === old) exited(c, old) }, 3000) } }, 500).unref?.()
+        } else if (!ev.is_error && connStatus.claudeAuthLapse && !isCodex(c.engine) && !isLocal(c.engine)) { connStatus.claudeAuthLapse = undefined; onAuthLapse.forEach(f => f()) }
         // The reply told the user to run a command in their terminal: send the agent one correction.
         const fix = !ev.is_error && typeof ev.result === 'string' ? runCorrectionFor(c.id, ev.result) : null
         if (fix) setTimeout(() => { if (c.state === 'idle') send({ id: c.id, prompt: fix, resume: true }) }, 1500).unref?.()
@@ -288,6 +300,9 @@ function attach(c: Chat, pid: number, offset: number): Runner {
   timer.unref?.()
   return runner
 }
+
+// Fired when a Claude sign-in lapse is seen or cleared (main.ts broadcasts 'status').
+export const onAuthLapse = new Set<() => void>()
 
 function exited(c: Chat, runner: Runner) {
   runner.stop()

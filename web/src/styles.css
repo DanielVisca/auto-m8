@@ -1367,3 +1367,13 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 .layout-tile { position: relative; display: flex; flex-direction: column; background: var(--bg2); }
 .layout-tile iframe { flex: 1; border: 0; width: 100%; background: var(--bg); }
 .layout-tile-err { padding: 6px 8px; border-top: 1px solid var(--line); }
+
+/* Blocker cards (BlockerCard.tsx): a fix for a lapsed sign-in or missing connection, in the chat */
+.blocker-card { border: 1px solid var(--bad); border-left-width: 3px; border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: color-mix(in srgb, var(--bad) 6%, transparent); display: flex; flex-direction: column; gap: 6px; color: var(--fg); }
+.blocker-card.compact { padding: 6px 8px; margin: 4px 0; }
+.blocker-card .blocker-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.blocker-card .ok { color: var(--ok, #2a9d5b); }
+.composer > .blocker-card { margin: 0 0 6px; }
+.blocker-card.ok { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.blocker-card.ok > .blocker-head > b { color: var(--ok); }
+.blocker-card .blocker-extras { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

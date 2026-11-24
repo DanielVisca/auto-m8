@@ -21,6 +21,8 @@ import { ApprovalBar, BrowserDock, useBrowser } from './BrowserView'
 import { createRoot, type Root } from 'react-dom/client'
 import { PR_URL, PrPill, PrRefs, bareRefs, knownPrs, linkPrRefs, type PrKnown } from './PrPill'
 import { agentSender, userBody } from '../../shared/messageOrigin'
+import { BlockerCard, knownBlocker } from './BlockerCard'
+import { blockerFor, blockerInText } from './blockers.ts'
 import { groupMessages, NEEDS_LOGIN, shortDuration, workPhases, workPulse, workSummary, type Entry, type Phase, type WorkTurn } from './chatActivity'
 export { agentSender } from '../../shared/messageOrigin'
 export { NEEDS_LOGIN } from './chatActivity'
@@ -191,9 +193,21 @@ function MsgActions({ uuid, onBranch, onRewind, text, ts }: { uuid?: string; onB
   )
 }
 
-// Claude says "Please run /login" when its sign-in lapsed (or the OAuth token expired).
-function LoginFix({ convId }: { convId?: string | null }) {
-  return <div className="msg note bad small">Claude is signed out. <button onClick={() => dispatchEvent(new CustomEvent('perch:login', { detail: { convId } }))}>Sign in (/login)</button> then send your message again.</div>
+// The thread's last reply is itself a blocker (its card is already showing): don't repeat it by the composer.
+function lastFailureBlocked(items: Item[]): boolean {
+  const last = items.findLast(x => x.kind !== 'user' && x.kind !== 'notice') as any
+  if (!last) return false
+  if (last.kind === 'assistant') return last.blocks.some((b: any) => b.type === 'text' && blockerInText(b.text))
+  return !!blockerFor(last.text)
+}
+
+// A failure a settings change clears (lapsed sign-in, MCP auth, a key): a card that does the fix, and
+// resends the message before it after a Claude sign-in.
+function Fix({ text, items, at, convId }: { text: string; items: Item[]; at: number; convId?: string | null }) {
+  const b = blockerFor(text)
+  if (!b) return null
+  const prev = items.slice(0, at).findLast(x => x.kind === 'user') as any
+  return <BlockerCard blocker={b} convId={convId} resend={prev?.text} />
 }
 
 
@@ -392,11 +406,11 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
   const promises = useLive<{ promises: PromiseRow[] }>(convId && hasTimers ? `/api/conversations/${encodeURIComponent(convId)}/promises` : null, ['conversations'], undefined, 60_000).data?.promises ?? []
   const renderEntry = ({ item: it, index: i }: Entry) => {
     if (it.kind === 'user') return <div key={i} className="msg user" onContextMenu={e => msgMenu(e, it.uuid, it.text)}><MsgActions uuid={it.uuid} onBranch={onBranch} onRewind={onRewind} text={it.text} ts={it.ts} /><UserBubble text={it.text} /></div>
-    if (it.kind === 'error') return <div key={i} className="msg note bad">{it.text}{NEEDS_LOGIN.test(it.text) && <LoginFix convId={convId} />}</div>
+    if (it.kind === 'error') return <div key={i} className="msg note bad">{it.text}<Fix text={it.text} items={items} at={i} convId={convId} /></div>
     if (it.kind === 'notice') return <div key={i} className="msg notice small muted">↳ {it.text}</div>
     if (it.kind === 'result') return (
       <div key={i} className={`msg result ${it.ok ? '' : 'bad'}`}>
-        {it.ok ? 'done' : it.text} {!it.ok && NEEDS_LOGIN.test(it.text) && <LoginFix convId={convId} />} {it.ms ? `· ${(it.ms / 1000).toFixed(1)}s` : ''} {it.cost ? `· $${it.cost.toFixed(2)}` : ''}
+        {it.ok ? 'done' : it.text} {!it.ok && <Fix text={it.text} items={items} at={i} convId={convId} />} {it.ms ? `· ${(it.ms / 1000).toFixed(1)}s` : ''} {it.cost ? `· $${it.cost.toFixed(2)}` : ''}
         {it.denials ? <span className="warn"> · {it.denials} tool call{it.denials > 1 ? 's' : ''} denied by permission mode</span> : null}
         {it.switched ? <span className="warn" title="The new model had no cache of this conversation, so the whole context was loaded again"> · model switch reloaded {Math.round(it.switched.tokens / 1000)}k tokens (~${it.switched.cost.toFixed(2)})</span> : null}
       </div>
@@ -408,7 +422,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
       <div key={i} className="msg assistant" onContextMenu={e => msgMenu(e, it.uuid, textOf(it))}>
         {changed && <div className="model-switch small muted">↳ {modelName(it.model!)}</div>}
         <MsgActions uuid={it.uuid} onBranch={onBranch} onRewind={onRewind} text={textOf(it)} ts={it.ts} />
-        {it.blocks.map((b, j) => b.type === 'text' && NEEDS_LOGIN.test(b.text) && b.text.length < 400 ? <div key={j}><Markdown text={b.text} /><LoginFix convId={convId} /></div>
+        {it.blocks.map((b, j) => b.type === 'text' && blockerInText(b.text) ? <div key={j}><Markdown text={b.text} /><Fix text={b.text} items={items} at={i} convId={convId} /></div>
           : b.type === 'text' ? <RichText key={j} text={b.text} />
           : b.type === 'tool' && b.name === 'mcp__perch__draft_slack_message' && /draft:([\w-]+)/.test(b.result ?? '') ? <SlackDraftCard key={j} id={(b.result ?? '').match(/draft:([\w-]+)/)![1]} />
           : b.type === 'tool' ? <ToolViz key={j} b={b} />
@@ -597,7 +611,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
       {id && browserOwned && <BrowserDock owner={id} approvals={browserApprovals} />}
       {id && !browserOwned && browserApprovals.length > 0 && <div className="browser-dock collapsed"><ApprovalBar approvals={browserApprovals} /></div>}
       {dock && <div className="term-dock"><TermView key={dock.id} term={dock} compact onClose={reloadTerms} /></div>}
-      <Composer id={id} running={running} settings={settings} onStarted={onOpen} onBtw={() => setBtwOpen(true)} compact={compact} conv={conv} />
+      <Composer id={id} running={running} settings={settings} onStarted={onOpen} onBtw={() => setBtwOpen(true)} compact={compact} conv={conv} shownInThread={lastFailureBlocked(items)} />
     </div>
   )
 }
@@ -638,8 +652,8 @@ export function useDraft(id: string | null, fresh?: () => string) {
   return [text, setText] as const
 }
 
-function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
-  id: string | null; running: boolean; settings: any; onStarted: (id: string) => void; onBtw: () => void; compact: boolean; conv?: Conversation
+function Composer({ id, running, settings, onStarted, onBtw, compact, conv, shownInThread }: {
+  id: string | null; running: boolean; settings: any; onStarted: (id: string) => void; onBtw: () => void; compact: boolean; conv?: Conversation; shownInThread?: boolean
 }) {
   const outbox = useOutbox()
   const queued = outbox.filter(q => (q.body.id ?? null) === (id ?? null))
@@ -653,6 +667,9 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
   // Which model this chat runs on: Claude (your plan), Codex (ChatGPT plan) or a local Ollama model. Sticky per chat.
   const { data: local } = useLive<any>('/api/local', ['settings'])
   const [engine, setEngineS] = useState<string>(() => { try { return id ? '' : localStorage.getItem('perch.engine.next') ?? '' } catch { return '' } })
+  // A sign-in perch already knows has lapsed: offer the fix before you send, not after it fails.
+  const { data: connSt } = useLive<any>('/api/status', ['status'])
+  const preBlock = knownBlocker(connSt, local, engine)
   useEffect(() => { if (id) api.get<{ engine: string }>(`/api/chat/${encodeURIComponent(id)}/engine`).then(r => setEngineS(r.engine ?? '')).catch(() => {}) }, [id])
   const pickEngine = (v: string) => {
     setEngineS(v)
@@ -818,6 +835,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv }: {
           {queued.map(q => <span key={q.key} className="chip" title={q.body.prompt}>⏳ Queued, sends when auto-m8 reconnects: “{String(q.body.prompt ?? '').slice(0, 60)}”</span>)}
         </div>
       )}
+      {preBlock && !shownInThread && <BlockerCard blocker={preBlock} convId={id} compact={compact} />}
       {dragOver && <div className="drop-hint">Drop images, files, links, PRs or text to share them with the agent</div>}
       {shared.length > 0 && (
         <div className="chips">
