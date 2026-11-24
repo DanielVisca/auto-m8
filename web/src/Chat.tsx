@@ -87,6 +87,42 @@ const resolveBare = (n: string) => {
   if (!p) { p = fetch(`/api/pr/resolve?n=${n}`).then(r => r.ok ? r.json() : null).then(d => d?.url ?? '').catch(() => ''); resolved.set(n, p) }
   return p
 }
+// perch://<id> in a reply shows as that conversation's title, not the internal link.
+const CONV_LINK = /perch:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?/g
+const convTitles = new Map<string, Promise<string>>()
+const convTitle = (id: string) => {
+  let p = convTitles.get(id)
+  if (!p) { p = api.get<any>(`/api/conversations/${encodeURIComponent(id)}`).then(d => String(d?.title || d?.conversation?.title || d?.first_prompt || '').replace(/\s+/g, ' ').trim()).catch(() => ''); convTitles.set(id, p) }
+  return p
+}
+const titleConvLinks = (root: HTMLElement) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const hits: Text[] = []
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const el = n.parentElement
+    if (!el || el.closest('pre, code, a')) continue
+    CONV_LINK.lastIndex = 0
+    if (CONV_LINK.test(n.nodeValue ?? '')) hits.push(n as Text)
+  }
+  for (const t of hits) {
+    const frag = document.createDocumentFragment()
+    let last = 0; const v = t.nodeValue ?? ''
+    for (const m of v.matchAll(CONV_LINK)) {
+      frag.append(v.slice(last, m.index))
+      const a = document.createElement('a'); a.href = `perch://${m[1]}`; a.textContent = 'chat'
+      frag.append(a); last = m.index! + m[0].length
+    }
+    frag.append(v.slice(last)); t.replaceWith(frag)
+  }
+  for (const a of Array.from(root.querySelectorAll('a[href^="perch://"]')) as HTMLAnchorElement[]) {
+    const id = (a.getAttribute('href') ?? '').slice(8).replace(/\/$/, '')
+    const raw = (a.textContent ?? '').trim()
+    if (a.closest('pre, code') || !(raw === 'chat' || raw.startsWith('perch://') || raw === id)) continue
+    a.classList.add('conv-link'); a.title = 'Open this chat'
+    if (raw !== 'chat') a.textContent = 'chat'
+    convTitle(id).then(title => { if (title && a.isConnected) a.textContent = title.length > 60 ? title.slice(0, 57).trimEnd() + '…' : title })
+  }
+}
 export const Markdown = memo(({ text }: { text: string }) => {
   const ref = useRef<HTMLDivElement>(null)
   const conv = useContext(PrRefs)
@@ -102,6 +138,7 @@ export const Markdown = memo(({ text }: { text: string }) => {
   }, [missing])
   const html = useMemo(() => marked.parse(linkPrRefs(text, known), { async: false, gfm: true, breaks: false }) as string, [text, known])
   useEffect(() => {
+    if (ref.current) titleConvLinks(ref.current)
     const roots: Root[] = []
     for (const a of Array.from(ref.current?.querySelectorAll('a[href*="/pull/"]') ?? []) as HTMLAnchorElement[]) {
       const href = a.getAttribute('href') ?? ''
@@ -966,7 +1003,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
           {['auto', 'acceptEdits', 'plan', 'manual', 'dontAsk', 'bypassPermissions'].map(m => <option key={m}>{m}</option>)}
         </select>
         {!id && (
-          <label className="toggle" title="Off: no related-conversation suggestions and no access to your other conversations">
+          <label className="toggle" title="Off: a clean chat with no memory of you. No CLAUDE.md, memory, settings, MCP servers, skills, perch instructions or other conversations; runs in an empty folder and stays clean on every reply.">
             <input type="checkbox" checked={context} onChange={e => setContext(e.target.checked)} /> context
           </label>
         )}

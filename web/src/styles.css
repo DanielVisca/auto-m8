@@ -1399,3 +1399,4 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 .blocker-card.ok { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, transparent); }
 .blocker-card.ok > .blocker-head > b { color: var(--ok); }
 .blocker-card .blocker-extras { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.md a.conv-link::before { content: '💬 '; }
