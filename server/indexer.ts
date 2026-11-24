@@ -176,9 +176,13 @@ export function watchSources() {
 export const posthogStatus: { ok: boolean; error?: string; user?: { id: number; email: string }; tasks?: number; lastSync?: number } = { ok: false }
 
 // Every PostHog call retries dropped connections, 429s and 5xx with backoff.
+// A project path built before a project was known (/api/projects/undefined/...) is never sent:
+// the indexer's next sync picks the key's own project (ensureUser), or you choose one in Settings.
+const NO_PROJECT = /^\/api\/projects\/(?:undefined|null|0)?\//
 export async function posthogFetch(path: string, init: RequestInit = {}) {
   const key = posthogKey()
   if (!key) throw new Error('No PostHog personal API key (Settings → PostHog)')
+  if (NO_PROJECT.test(path)) throw new Error('No PostHog project chosen yet (Settings → PostHog)')
   return withRetry(async () => {
     const res = await fetch(settings.posthog.host + path, { ...init, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...init.headers } })
     if (!res.ok) {

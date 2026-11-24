@@ -36,6 +36,7 @@ export function friendly(e: unknown, what = 'That'): Friendly {
   const m = (re: RegExp) => re.test(raw)
   const mcp = serverNeedingAuth(raw)
   if (mcp) return { message: `${serverLabel(mcp)} needs you to authorize it.`, action: `auto-m8 opened ${serverLabel(mcp)}'s sign-in in your browser. Approve it there, then try again.`, status: 'needs-you', transient: false, authorize: mcp }
+  if (m(/No PostHog project chosen yet/)) return { message: `${what} needs a PostHog project.`, action: 'It is picked from your key on the next sync, or choose one in Settings → Connections.', status: 'needs-you', transient: false, setup: true }
   if (m(/No PostHog personal API key/)) return { message: `${what} needs your PostHog key.`, action: 'Add it in Settings → Connections.', status: 'needs-you', transient: false, setup: true }
   if (m(/does not support personal API key/)) return { message: `PostHog only allows ${what.toLowerCase()} from its web app, not with a personal API key.`, action: 'auto-m8 used a different way where it can; otherwise do this one in PostHog.', status: 'needs-you', transient: false }
   if (m(/PostHog 401|authentication_failed|invalid.*(api )?key/i)) return { message: 'PostHog rejected your key.', action: 'Create a new personal API key and save it in Settings.', status: 'needs-you', transient: false }

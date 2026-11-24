@@ -109,6 +109,8 @@ export function captureApproval(a: { id: string; owner: string; what: string; ur
 
 let cloudBusy = false
 export async function syncScoutNeeds(fetch: (path: string) => Promise<any>, now = Date.now()) {
+  // No project yet: the indexer picks the key's own project on its next sync (indexer.ts ensureUser).
+  if (!settings.posthog.projectId) return
   const interval = syncValue('cloudError') ? 2 * 60_000 : 15 * 60_000
   if (cloudBusy || now - Number(syncValue('cloudAttempt') ?? 0) < interval) return
   cloudBusy = true

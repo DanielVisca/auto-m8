@@ -138,6 +138,11 @@ test('local collection includes automation and PostHog summaries, excludes its o
 })
 
 test('cloud collection verifies ownership, reads known reports for resolution and keeps errors visible', async () => {
+  const calledWithoutProject: string[] = []
+  settings.posthog.projectId = null
+  await syncScoutNeeds(async (p: string) => { calledWithoutProject.push(p); return {} }, now)
+  assert.deepEqual(calledWithoutProject, []) // no project chosen yet: nothing is fetched
+  settings.posthog.projectId = 42
   const prefix = `/api/projects/${settings.posthog.projectId}`
   const report = { id: 'r1', scout_name: 'mine', title: 'Pick scope', status: 'pending_input', actionability: 'requires_human_input', summary: 'Choose one' }
   let resolved = false, fail = false

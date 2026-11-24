@@ -500,11 +500,11 @@ function PosthogKey({ status, settings, save }: { status: any; settings: any; sa
       {status?.hasKey && <button className="link small" onClick={() => post('/api/posthog/key', { key: '' })}>remove</button>}
       {msg && <span className="muted small">{msg}</span>}
       <div className="row-flex small full">
-        <select value={settings.posthog.host} onChange={e => save({ posthog: { ...settings.posthog, host: e.target.value, projectId: 0 } })}>
+        <select value={settings.posthog.host} onChange={e => save({ posthog: { ...settings.posthog, host: e.target.value, projectId: null } })}>
           {[...new Set(["https://us.posthog.com", "https://eu.posthog.com", settings.posthog.host])].map(h => <option key={h} value={h}>{h.replace("https://", "")}</option>)}
         </select>
         <span className="muted">project</span>
-        <input size={6} defaultValue={settings.posthog.projectId || ""} placeholder="from key" onBlur={e => { const n = Number(e.target.value) || 0; if (n !== settings.posthog.projectId) save({ posthog: { ...settings.posthog, projectId: n } }) }} />
+        <input size={6} defaultValue={settings.posthog.projectId || ""} placeholder="from key" onBlur={e => { const n = Number(e.target.value) || null; if (n !== (settings.posthog.projectId || null)) save({ posthog: { ...settings.posthog, projectId: n } }) }} />
       </div>
       <div className="muted small full">Create one at <a href={`${settings.posthog.host}/settings/user-api-keys`} target="_blank" rel="noreferrer">PostHog → Personal API keys</a> with read access to tasks, users and LLM skills (and scouts to run them). Stored in the macOS keychain, never in a file.</div>
     </div>

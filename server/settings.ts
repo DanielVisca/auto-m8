@@ -32,7 +32,8 @@ export type Source = { id: string; label: string; dir: string; configDir: string
 export type Settings = {
   port: number
   sources: Source[]
-  posthog: { host: string; projectId: number; pollSeconds: number }
+  // projectId: unset until you pick one in Settings, or picked from the key's own project (indexer.ts ensureUser).
+  posthog: { host: string; projectId?: number | null; pollSeconds: number }
   chat: { permissionMode: string; model: string; cwd: string; chrome: boolean; idleMinutes: number }
   window: { alwaysOnTop: boolean; hotkey: string; collapseHotkey?: string; bounds: { x: number; y: number; width: number; height: number } | null; autoMini: boolean; autoTuck?: boolean }
   ui: { theme: 'system' | 'light' | 'dark'; layout?: string } // layout: a file in layouts/ or a shipped one (server/layout.ts)
@@ -76,7 +77,7 @@ export const defaults: Settings = {
     { id: 'claude', label: 'Claude Code', dir: join(profile.claudeDir, 'projects'), configDir: profile.claudeDir },
     ...(profile.id === 'work' ? [{ id: 'posthog-code', label: 'PostHog Code', dir: join(POSTHOG_CODE, 'projects'), configDir: POSTHOG_CODE }] : []),
   ],
-  posthog: { host: 'https://us.posthog.com', projectId: 2, pollSeconds: 60 },
+  posthog: { host: 'https://us.posthog.com', pollSeconds: 60 },
   chat: { permissionMode: 'auto', model: '', cwd: join(HOME, 'Development'), chrome: false, idleMinutes: 20 },
   window: { alwaysOnTop: true, hotkey: 'Control+Alt+Space', collapseHotkey: 'Control+Alt+M', bounds: null, autoMini: true, autoTuck: true },
   ui: { theme: 'system' },
@@ -108,12 +109,12 @@ function merge(base: Settings, patch: Partial<Settings>): Settings {
 // A brand-new install (no settings file yet) starts quiet: nothing acts on its own, and nothing spends the
 // Claude subscription in the background, until the owner turns autonomy on. Existing installs keep theirs.
 export const FRESH = !existsSync(FILE)
-// projectId 0: picked from the PostHog key once one is saved (indexer.ts ensureUser).
+// No projectId: picked from the PostHog key once one is saved (indexer.ts ensureUser).
 // The usual places people keep repos; the first that exists is where new chats start.
 const CODE_DIRS = ['Development', 'code', 'src', 'Projects', 'projects', 'dev', 'repos', 'workspace', 'GitHub', 'Documents/GitHub', 'Developer']
 // Where repos live: the chat folder plus whichever usual places exist (search, PR checkouts).
 export const codeRoots = () => [...new Set([settings.chat.cwd, ...CODE_DIRS.map(d => join(HOME, d))])].filter(d => d && d !== HOME && existsSync(d))
-const FRESH_START = { autonomy: { enabled: false }, welcome: true, posthog: { projectId: 0 },
+const FRESH_START = { autonomy: { enabled: false }, welcome: true, posthog: { projectId: null },
   chat: { ...defaults.chat, cwd: CODE_DIRS.map(d => join(HOME, d)).find(d => existsSync(d)) ?? HOME } }
 export let settings: Settings = merge(defaults, FRESH ? FRESH_START as Partial<Settings> : JSON.parse(readFileSync(FILE, 'utf8')))
 if (FRESH) saveSettings(FRESH_START)

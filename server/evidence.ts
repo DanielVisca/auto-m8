@@ -71,7 +71,7 @@ function fromPostHog(server: string, input: any, result: string): Evidence | nul
   const url = result.match(/https:\/\/[\w.-]*posthog\.com\/project\/\d+\/[^\s"')]+/)?.[0]
   // Only production PostHog gets a link; a local dev instance's would point nowhere useful.
   const prod = !/dev/.test(server)
-  const link = url ?? (sql && prod ? `${settings.posthog.host}/project/${settings.posthog.projectId}/sql?open_query=${encodeURIComponent(sql)}` : null)
+  const link = url ?? (sql && prod && settings.posthog.projectId ? `${settings.posthog.host}/project/${settings.posthog.projectId}/sql?open_query=${encodeURIComponent(sql)}` : null)
   return { at: null, source: 'posthog', tool: m[1], title: sql ?? `${m[1]} ${m[2] ? m[2].slice(0, 160) : ''}`.trim(), query: sql ?? m[2] ?? '', numbers, link, linkLabel: sql ? 'Open in PostHog SQL' : 'Open in PostHog' }
 }
 

@@ -24,7 +24,7 @@ test('a fresh install starts quiet, with the setup checklist on', { timeout: 60_
     const s: any = await get('/api/settings')
     assert.equal(s.autonomy.enabled, false)
     assert.equal(s.welcome, true)
-    assert.equal(s.posthog.projectId, 0)
+    assert.equal(s.posthog.projectId ?? null, null)
     assert.deepEqual(JSON.parse(readFileSync(join(data, 'settings.json'), 'utf8')).autonomy, { enabled: false })
     // Give the startup checks (claude, gh) a moment to fail the way they do for a new user.
     await new Promise(r => setTimeout(r, 4000))
