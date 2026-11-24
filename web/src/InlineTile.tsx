@@ -53,6 +53,7 @@ export function InlineTile({ info, body }: { info: string; body: string }) {
       }
       // A chat tile keeps no saved state: its page can use perch.save, which only answers.
       if (m.perch === 'save') reply(true)
+      if (m.perch === 'run') reply(null, 'Only tiles in a layout can run commands.')
       if (m.perch === 'error') setError(String(m.payload))
     }
     addEventListener('message', on)

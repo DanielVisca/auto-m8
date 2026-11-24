@@ -33,6 +33,7 @@ import { Settings } from './Settings'
 import { Paused, PauseBar, usePause } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'
+import { LayoutTree, topLeftOf, useLayout, useLayoutColors, useLayoutEscape, type Run } from './Layout'
 
 type View =
   | { kind: 'chat'; id: string | null }
@@ -119,9 +120,13 @@ export function App() {
   usePresence(hashFor(view), '')
   const goHash = (hsh: string) => { location.hash = hsh; setViewState(parseHash()); if (mode === 'compact') setListOpen(false) }
   useEffect(() => { try { localStorage.setItem('perch.details', detailsOpen ? '1' : '0') } catch {} }, [detailsOpen])
+  // The window's layout file (server/layout.ts): its tree, and a look that beats Settings.
+  const layout = useLayout()
+  useLayoutColors(layout?.layout.colors)
+  useLayoutEscape()
   // Theme: system, light or dark, on the page and on the window chrome.
   const zen = !!settings?.focus?.active
-  const theme = settings?.ui?.theme ?? 'system'
+  const theme = layout?.layout.theme ?? settings?.ui?.theme ?? 'system'
   useEffect(() => {
     if (theme === 'system') delete document.documentElement.dataset.theme
     else document.documentElement.dataset.theme = theme
@@ -222,9 +227,11 @@ export function App() {
       {view.kind === 'automations' && <div className="scroll"><Automations draft={routineDraft} onOpen={openById} settings={settings} /></div>}
     </Boundary>
   )
+  // Any layout but the shipped default is drawn from its file; the default keeps the hand-built window below.
+  const custom = !!layout && layout.name !== 'default'
   const makeRoutine = (c: Conversation) => { setRoutineDraft({ name: titleOf(c).slice(0, 60), prompt: '', cwd: c.cwd, cron: '0 9 * * 1-5', mode: 'resume', conversation_id: c.id, enabled: 1 }); setView({ kind: 'automations' }) }
   const sidebar = (
-    <aside className="sidebar" style={mode === 'compact' ? undefined : { width: side.width }}>
+    <aside className="sidebar" style={mode === 'compact' ? undefined : custom ? { width: '100%' } : { width: side.width }}>
       {/* Two groups that wrap as units, so a narrow sidebar stacks them instead of spilling over. */}
       <div className="side-actions drag">
         <div className="side-group">
@@ -296,6 +303,54 @@ export function App() {
 
   const showDetails = mode === 'wide' && detailsOpen && !zen && view.kind === 'chat' && view.id
   const showPrSide = mode === 'wide' && detailsOpen && !zen && view.kind === 'pr' && view.id
+  if (custom) {
+    // What a layout tile may ask for. Each one only navigates; none changes data.
+    const PAGES = ['home', 'needs', 'settings', 'insights', 'library', 'automations', 'evolve', 'paused']
+    const run: Run = (c, a) => {
+      if (c === 'open') { if (typeof a?.id !== 'string') return 'open needs {id}'; openById(a.id); return null }
+      if (c === 'view') {
+        if (a?.kind === 'board') setView({ kind: 'board', id: null })
+        else if (a?.kind === 'search') setView({ kind: 'search', q: '' })
+        else if (PAGES.includes(a?.kind)) setView({ kind: a.kind } as View)
+        else return `view needs {kind}: ${[...PAGES, 'board', 'search'].join(', ')}`
+        return null
+      }
+      if (c === 'chat.new') { startChat(typeof a?.prompt === 'string' ? a.prompt : undefined); return null }
+      if (c === 'search') { setView({ kind: 'search', q: String(a?.q ?? '') }); return null }
+      if (c === 'sidebar.toggle') { setListOpen(o => !o); return null }
+      if (c === 'details.toggle') { setDetailsOpen(o => !o); return null }
+      if (c === 'layout.switch') { api.send('PUT', '/api/layouts/active', { name: String(a?.name ?? '') }); return null }
+      return `perch has no "${c}" command`
+    }
+    // The window's buttons sit over the top-left corner: whatever is drawn there makes room for them.
+    const corner = shell.isElectron ? topLeftOf(layout.layout, { sidebar: listOpen, details: !!(showDetails || showPrSide) }) : null
+    const slots = {
+      sidebar: listOpen ? sidebar : null,
+      main: (
+        <main className="main">
+          <div className={`main-top drag ${corner === 'main' ? 'no-side' : ''}`}>
+            {!listOpen && <button className="icon no-drag" onClick={() => setListOpen(true)} title="Show sidebar  ⌘\">☰</button>}
+            <span className="grow" />
+            <BrowserFlag onOpen={openById} />
+            {showDecisions && <DecisionFlag onOpen={openById} />}
+            <PinButton />
+            <Resources />
+          </div>
+          {main}
+        </main>
+      ),
+      details: showDetails ? <aside className="detail-col" style={{ width: '100%' }}><Boundary where="details"><Details id={view.id!} onOpen={openById} onMakeRoutine={makeRoutine} /></Boundary></aside>
+        : showPrSide ? <aside className="detail-col" style={{ width: '100%' }}><PrSide url={view.id!} onOpen={openById} /></aside> : null,
+    }
+    return (
+      <div className={`app ${mode} ${shell.isElectron ? 'electron' : ''} ${zen ? 'zen' : ''} layout-custom ${corner && corner !== 'main' && corner !== 'sidebar' ? 'corner-tile' : ''}`} data-corner={corner ?? ''}>
+        <Handoff current={hashFor(view)} onGo={goHash} />
+        <div className="body"><LayoutTree node={layout.layout} slots={slots} run={run} corner={corner} /></div>
+        {menu.target && <ContextMenu target={menu.target} onClose={menu.close} onOpenTerminal={openInClaude} />}
+        <Toasts zen={zen} /><AskCard /><FileViewer /><CarryDialog />
+      </div>
+    )
+  }
   return (
     <div className={`app ${mode} ${shell.isElectron ? 'electron' : ''} ${zen ? 'zen' : ''}`}>
       <Handoff current={hashFor(view)} onGo={goHash} />

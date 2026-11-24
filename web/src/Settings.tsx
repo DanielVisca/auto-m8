@@ -6,6 +6,7 @@ import { ClaudeBillingCard } from './ClaudeAccounts'
 import { PrSpendCard, SpendCard } from './Spend'
 import { useBrowser } from './BrowserView'
 import { Kits } from './Kits'
+import { useLayout } from './Layout'
 
 // The agent browser (server/browser.ts): a dedicated Chrome profile perch drives, one window per chat.
 const POLICIES = [['trusted', 'trusted: no confirmations'], ['allow', 'allow: confirm irreversible actions'], ['read', 'read only'], ['deny', 'deny']] as const
@@ -121,6 +122,7 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
         <div className="field">Theme
           <div className="seg">{(['system', 'light', 'dark'] as const).map(t => <button key={t} className={settings.ui.theme === t ? 'on' : ''} onClick={() => save({ ui: { theme: t } })}>{t}</button>)}</div>
         </div>
+        <LayoutPicker />
       </section>
       <section className="card">
         <h3>Window</h3>
@@ -601,3 +603,32 @@ function UsageCard() {
     </section>
   )
 }
+
+// Which layout file draws the window (server/layout.ts). Shipped ones can't be edited: copy one,
+// then edit the copy's JSON (or ask an agent to; the folder's AGENTS.md says how).
+function LayoutPicker() {
+  const l = useLayout()
+  const [as, setAs] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  if (!l) return null
+  const pick = async (name: string) => { const r = await api.send<any>('PUT', '/api/layouts/active', { name }); setMsg(r?.error ?? null) }
+  const copy = async () => {
+    const name = as.trim()
+    const r = await post<any>('/api/layouts/clone', { from: l.active, as: name })
+    if (r?.error) return setMsg(r.error)
+    setAs(''); await pick(name); setMsg(`Copied to ${l.dir}/${name}.json. Edit that file and the window follows.`)
+  }
+  return <>
+    <div className="field">Layout
+      <div className="seg">{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => pick(x.name)} title={x.shipped ? 'Shipped with perch: copy it to change it' : `${l.dir}/${x.name}.json`}>{x.name}</button>)}</div>
+      <span className="muted small">⌘⌥⇧Esc always goes back to default.</span>
+    </div>
+    <div className="field">Copy <b>{l.active}</b> as <input value={as} placeholder="my-layout" style={{ width: 140 }} onChange={e => setAs(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && as.trim()) copy() }} />
+      <button className="small" disabled={!as.trim()} onClick={copy}>Copy</button>
+      <button className="small" onClick={() => post('/api/layouts/reveal', {})} title={l.dir}>Show folder</button>
+    </div>
+    {l.error && <div className="bad small">{l.error}. Perch is showing the last version that worked.</div>}
+    {msg && <div className="muted small">{msg}</div>}
+  </>
+}
+

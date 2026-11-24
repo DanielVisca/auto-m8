@@ -188,6 +188,7 @@ function CodeTile({ t, save, onChange }: { t: Tile; save: (p: Partial<Tile>) => 
       }
       if (m.perch === 'save') { post('/api/canvas/tile', { id: t.id, folder_id: t.folder_id, kind: t.kind, state: m.payload }); reply(true) }
       if (m.perch === 'error') post(`/api/canvas/tile/${t.id}/report`, { error: m.payload })
+      if (m.perch === 'run') reply(null, 'Only tiles in a layout can run commands.')
     }
     addEventListener('message', on)
     // Live: refresh when perch's data changes (a background refetch found something new, a PR moved),

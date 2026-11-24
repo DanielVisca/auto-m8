@@ -1347,3 +1347,14 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 .rail-stats { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .rail-stats b { color: var(--fg); }
 .rail-cross { font-weight: 600; padding: 2px 8px; border-radius: 6px; border: 1px solid #f59e0b; background: color-mix(in srgb, #f59e0b 18%, transparent); }
+
+/* Layouts drawn from a file (web/src/Layout.tsx). */
+.layout-row, .layout-column { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.layout-row { flex-direction: row; } .layout-column { flex-direction: column; }
+.layout-cell > * { flex: 1; min-width: 0; min-height: 0; }
+.layout-cell > .sidebar, .layout-cell > .detail-col { border: none; }
+.layout-custom .layout-row > .layout-cell + .layout-cell { border-left: 1px solid var(--line); }
+.layout-custom .layout-column > .layout-cell + .layout-cell { border-top: 1px solid var(--line); }
+.layout-tile { position: relative; display: flex; flex-direction: column; background: var(--bg2); }
+.layout-tile iframe { flex: 1; border: 0; width: 100%; background: var(--bg); }
+.layout-tile-err { padding: 6px 8px; border-top: 1px solid var(--line); }

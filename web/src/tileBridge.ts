@@ -2,6 +2,7 @@
 // The page has an opaque origin (sandbox without same-origin), so it can't read perch's cookies or
 // call perch directly. Its only door is the bridge below: perch.data(...) asks perch, which serves
 // it (see /api/canvas/data). Variables reach it as perch.vars and change through the 'vars' message.
+// perch.run(command, args) asks the window to navigate; only layout tiles (Layout.tsx) answer it.
 
 export const BRIDGE = (theme: Record<string, string>, state: any, vars: Record<string, unknown> = {}) => `<!doctype html><html><head><meta charset="utf-8"><style>:root{${Object.entries(theme).map(([k, v]) => `${k}:${v}`).join(';')}}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-size:12.5px}body,button,input,select{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif!important}a{color:var(--accent)}</style>
 <script>(()=>{let n=0;const wait=new Map();const subs=[];
@@ -10,7 +11,7 @@ const call=(type,payload)=>new Promise((ok,bad)=>{const id=++n;wait.set(id,[ok,b
 const report=err=>parent.postMessage({perch:'error',payload:String(err&&err.message||err)},'*');
 let lastActivity=0;['pointerdown','pointermove','keydown','wheel'].forEach(type=>addEventListener(type,e=>{if(e.isTrusted&&Date.now()-lastActivity>1000){lastActivity=Date.now();parent.postMessage({perch:'activity'},'*')}},{passive:true,capture:true}));
 addEventListener('error',e=>report(e.message));addEventListener('unhandledrejection',e=>report(e.reason));
-window.perch={state:${JSON.stringify(state ?? null)},vars:${JSON.stringify(vars)},data:q=>call('data',q),save:o=>{window.perch.state=o;return call('save',o)},onRefresh:f=>subs.push(f),ok:()=>parent.postMessage({perch:'ok'},'*')};})()</script></head><body>`
+window.perch={state:${JSON.stringify(state ?? null)},vars:${JSON.stringify(vars)},data:q=>call('data',q),save:o=>{window.perch.state=o;return call('save',o)},onRefresh:f=>subs.push(f),run:(command,args)=>call('run',{command,args}),ok:()=>parent.postMessage({perch:'ok'},'*')};})()</script></head><body>`
 
 // The page's colour variables, copied into every tile so it matches light and dark.
 export function tileTheme(): Record<string, string> {

@@ -61,6 +61,7 @@ import { onError, recentErrors, recordError, resolveErrors } from './errors.ts'
 import { isPaused, overview as pauseOverview, pauseAll, resumeAll } from './pause.ts'
 import { deleteRoutine, fire, listRoutines, saveRoutine, startScheduler } from './routines.ts'
 import { DATA_DIR, settings, updateSettings } from './settings.ts'
+import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
 import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, sendTerm, termEvents, terms, typedInto, waitTerm } from './term.ts'
 import { completePairing, deviceFor, isLoopback, lanHosts, listDevices, revokeDevice, setRemoteOnlyPort, startPairing, UNPAIRED_PAGE } from './remote.ts'
@@ -748,6 +749,28 @@ route('PUT', '/api/settings', async (_m, req) => {
   if (patch.focus) broadcast('conversations')
   return s
 })
+// The window as files (server/layout.ts): which layout shows, and the tiles layouts put in blocks.
+writeGuide()
+watchLayouts(() => broadcast('layouts'))
+route('GET', '/api/layouts', () => ({ ...loadLayout(settings.ui.layout ?? 'default'), active: settings.ui.layout ?? 'default', layouts: listLayouts(), dir: LAYOUT_DIR }))
+route('PUT', '/api/layouts/active', async (_m, req) => {
+  const name = String((await body(req)).name ?? '')
+  const l = loadLayout(name)
+  if (l.name !== name) return { error: l.error }
+  updateSettings({ ui: { ...settings.ui, layout: name } })
+  broadcast('layouts'); broadcast('settings')
+  return { ok: true, name }
+})
+route('POST', '/api/layouts/clone', async (_m, req) => {
+  const b = await body(req)
+  const r = cloneLayout(String(b.from ?? 'default'), String(b.as ?? ''))
+  broadcast('layouts')
+  return r
+})
+// The escape hatch: back to the shipped default, whatever the files say.
+route('POST', '/api/layouts/reset', () => { updateSettings({ ui: { ...settings.ui, layout: 'default' } }); broadcast('layouts'); broadcast('settings'); return { ok: true } })
+route('POST', '/api/layouts/reveal', async (_m, req) => { if (!isLoopback(req)) return { error: 'opens Finder on the Mac' }; await new Promise(r => execFileCb('open', ['-R', join(LAYOUT_DIR, 'AGENTS.md')], r)); return { ok: true } })
+route('GET', '/api/layouts/tile', (_m, _req, _res, q) => { const html = readTile(q.get('path')); return html === null ? { error: 'no such tile in the layouts folder' } : { html } })
 route('GET', '/api/status', () => ({
   appleNotes: (checkAccess(), notesStatus),
   ...status, claudeLogin, posthog: { ...posthogStatus, hasKey: !!posthogKey() }, index: indexStatus,
