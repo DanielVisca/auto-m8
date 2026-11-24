@@ -14,21 +14,8 @@ db.exec(`create table if not exists errors (
 // authorize: an MCP server (as `claude mcp` names it) that needs OAuth; the UI offers to authorize it.
 export type Friendly = { message: string; action: string; status: 'retrying' | 'needs-you' | 'open'; transient: boolean; setup?: boolean; authorize?: string }
 
-// A readable name: "plugin:slack:slack" → "Slack", "claude.ai Slack" → "Slack".
-export const serverLabel = (s: string) => {
-  const base = s.replace(/^claude\.ai /, '').replace(/^plugin:([^:]+):.*$/, '$1')
-  return base.charAt(0).toUpperCase() + base.slice(1)
-}
-
-// Server name from an error text like "The Slack MCP server (plugin:slack:slack) needs authorization"
-// or "plugin:slack:slack: ... Needs authentication".
-export function serverNeedingAuth(text: string): string | null {
-  if (!/needs?[ -](authori[sz]ation|authenticat|auth\b)|needs-auth|not authenticated/i.test(text)) return null
-  return text.match(/\bplugin:[\w-]+:[\w-]+/)?.[0]
-    ?? text.match(/needs ([\w:.-]+) authorized/)?.[1]
-    ?? text.match(/\bclaude\.ai [\w ]+?(?= (?:MCP|connector|server|needs)\b)/)?.[0]
-    ?? null
-}
+import { serverNeedingAuth, serverLabel } from '../web/src/blockers.ts'
+export { serverNeedingAuth, serverLabel }
 
 // What a raw error means for the user. Order matters: the first match wins.
 export function friendly(e: unknown, what = 'That'): Friendly {

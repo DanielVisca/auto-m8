@@ -53,7 +53,8 @@ function startFix(b: Blocker, convId?: string | null) {
   if (b.kind === 'codex-login') return runInTerminal('codex login', 'Sign in to Codex', convId)
   if (b.kind === 'gh-login') return runInTerminal('gh auth login --web', 'Sign in to GitHub', convId)
   if (b.kind === 'claude-missing') return runInTerminal('curl -fsSL https://claude.ai/install.sh | bash', 'Install Claude Code', convId)
-  openSettings() // PostHog key and MCP servers
+  if (b.kind === 'mcp-auth') return post('/api/mcp/login', { server: b.server })
+  openSettings()
 }
 
 export function BlockerCard({ blocker, convId, resend, compact }: Props) {
@@ -70,7 +71,7 @@ export function BlockerCard({ blocker, convId, resend, compact }: Props) {
   const resentOnce = useRef(false)
   const login = st?.claudeLogin
   const codexOk = !!local?.codex?.ok
-  const mcp: any = undefined // no in-app MCP sign-in here: MCP servers authorize from Connection settings
+  const mcp = useLive<any>(blocker.kind === 'mcp-auth' && started ? `/api/mcp/login?server=${encodeURIComponent(blocker.server!)}` : null, ['mcp-login']).data
 
   // A Claude sign-in started from this card finished: send the message again, once. The last sign-in's
   // 'done' lingers in status, so only a 'done' after this card's sign-in was seen waiting counts.
@@ -99,7 +100,7 @@ export function BlockerCard({ blocker, convId, resend, compact }: Props) {
           {extras.map(x => {
             const k = `${x.kind}:${x.server ?? ''}`, on = extraStarted.includes(k)
             return <button key={k} className="small" title={x.detail} disabled={on} onClick={() => { setExtraStarted([...extraStarted, k]); startFix(x, convId) }}>
-              {on ? `${x.title}: finish in ${x.kind === 'mcp-auth' || x.kind === 'posthog-key' ? 'Settings' : 'the terminal'}` : `Connect ${x.title}`}</button>
+              {on ? `${x.title}: finish in ${x.kind === 'mcp-auth' ? 'your browser' : x.kind === 'posthog-key' ? 'Settings' : 'the terminal'}` : `Connect ${x.title}`}</button>
           })}
         </div>}
       </div>
@@ -133,7 +134,7 @@ export function BlockerCard({ blocker, convId, resend, compact }: Props) {
         : <button className="primary small" onClick={() => { setStarted(true); startFix(blocker, convId) }}>{blocker.kind === 'claude-missing' ? 'Install Claude Code' : `Sign in to ${name}`}</button>
       break
     case 'mcp-auth':
-      primary = <button className="primary small" onClick={() => { setStarted(true); startFix(blocker, convId) }}>Authorize in Connection settings</button>
+      primary = <button className="primary small" onClick={() => { setStarted(true); startFix(blocker, convId) }}>{started ? 'Open sign-in again' : 'Authorize'}</button>
       if (started && mcp?.state === 'waiting' && mcp.url) body = <div className="small">Approve it in your browser · <a href={mcp.url} target="_blank" rel="noreferrer">open the sign-in page</a></div>
       else if (started && mcp?.state === 'failed') body = <div className="small bad">Didn’t finish: {mcp.error}</div>
       break
