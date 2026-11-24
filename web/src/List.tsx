@@ -85,6 +85,8 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
     onTouchMove: () => { clearTimeout(press.current?.t) },
     onTouchEnd: (e: React.TouchEvent) => { clearTimeout(press.current?.t); if (press.current?.fired) e.preventDefault() },
   }
+  // Pinned rows sit inside a padded box, so they have room for one pill fewer.
+  const maxPrs = c.pinned ? 2 : 3
   return (
     <div className={`row ${active ? 'active' : ''} ${selected ? 'selected' : ''} ${c.pinned ? 'pinned' : ''} ${(c as any).unread && !active ? 'unread' : 'read'} ${['archived', 'done', 'hidden'].includes(c.effective) ? 'dim' : ''}`} {...touch}
       onClick={e => (e.metaKey || e.shiftKey ? onSelect(e, c) : onOpen(c))} onContextMenu={e => { e.preventDefault(); onMenu(e, c) }}>
@@ -106,8 +108,10 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
         {SHOW_LABELS && c.labels?.slice(0, 2).map(l => <span key={l} className="label">#{l}</span>)}
         {c.link_count > 0 && <span className="muted small" title={`Linked to ${c.link_count} other conversation${c.link_count > 1 ? 's' : ''} (same PR, follow-ups, or ones an agent used). Open it to see them.`}>⇄{c.link_count}</span>}
         <span className="grow" />
-        {c.prs.slice(0, 3).map(pr => <PrBadge key={pr.url} pr={pr} />)}
-        {c.prs.length > 3 && <span className="muted small pr-more">+{c.prs.length - 3}</span>}
+        {c.prs.length > 0 && <span className="row-prs">
+          {c.prs.slice(0, maxPrs).map(pr => <PrBadge key={pr.url} pr={pr} />)}
+          {c.prs.length > maxPrs && <span className="muted small pr-more">+{c.prs.length - maxPrs}</span>}
+        </span>}
       </div>
     </div>
   )
