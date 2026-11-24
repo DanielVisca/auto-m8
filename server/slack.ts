@@ -143,14 +143,26 @@ Then reply with only JSON: {"ok": true, "channel_link": "<the channel_link it re
 
 // Open Slack's desktop app directly: an https link goes through the browser first, which leaves a
 // stray "Open Slack?" tab behind. Slack returns either app.slack.com/client/T…/C… or
-// <workspace>.slack.com/archives/C…, which has no team id, so known workspaces are mapped here.
-const TEAMS: Record<string, string> = {}
+// <workspace>.slack.com/archives/C…, which has no team id, so known workspaces are mapped in the
+// slack.teams setting ("<workspace>:<team id>", or a bare team id for any workspace).
+export function slackTeams(entries: unknown = settings.slack?.teams): { byWorkspace: Record<string, string>; any?: string } {
+  const byWorkspace: Record<string, string> = {}
+  let any: string | undefined
+  for (const e of Array.isArray(entries) ? entries : []) {
+    const m = String(e ?? '').trim().match(/^(?:([\w-]+)\s*[:=]\s*)?(T[A-Z0-9]+)$/)
+    if (!m) continue
+    if (m[1]) byWorkspace[m[1].toLowerCase()] = m[2]
+    else any ??= m[2]
+  }
+  return { byWorkspace, any }
+}
 export function slackAppLink(url?: string | null) {
   const s = String(url ?? '')
   const client = s.match(/app\.slack\.com\/client\/(T\w+)\/([CDG]\w+)/)
   if (client) return `slack://channel?team=${client[1]}&id=${client[2]}`
   const archives = s.match(/\/\/([\w-]+)\.slack\.com\/archives\/([CDG]\w+)/)
-  const team = archives && (TEAMS[archives[1]] ?? process.env.PERCH_SLACK_TEAM_ID)
+  const teams = archives ? slackTeams() : null
+  const team = archives && (teams!.byWorkspace[archives[1].toLowerCase()] ?? teams!.any ?? process.env.PERCH_SLACK_TEAM_ID)
   return team ? `slack://channel?team=${team}&id=${archives![2]}` : null
 }
 

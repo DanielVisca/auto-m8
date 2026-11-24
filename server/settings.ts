@@ -39,6 +39,9 @@ export type Settings = {
   organize: { archiveDoneAfterDays: number }
   ai: { model: string; dailyBrief: boolean; attention?: boolean } // the model for briefs, history answers and skill search
   needs: { enabled: boolean; engine: string; maxRunsPerDay: number }
+  // Slack workspaces, so a <workspace>.slack.com link can open in the Slack app (slack.ts slackAppLink).
+  // Each entry is "<workspace>:<team id>", e.g. "acme:T0123ABCD". A bare team id is used for any workspace.
+  slack: { teams: string[] }
   remote: { enabled: boolean } // phone access on the local network
   // Phone (server/mobile.ts): push when something needs you while you're away; keep the Mac awake while agents run.
   mobile: { push: boolean; stayAwake: boolean; tailscale: boolean }
@@ -80,6 +83,7 @@ export const defaults: Settings = {
   organize: { archiveDoneAfterDays: 7 },
   ai: { model: 'sonnet', dailyBrief: true },
   needs: { enabled: true, engine: 'codex', maxRunsPerDay: 24 },
+  slack: { teams: [] },
   remote: { enabled: false },
   mobile: { push: true, stayAwake: true, tailscale: false },
   local: { baseUrl: 'http://127.0.0.1:11434', model: '', background: false },
