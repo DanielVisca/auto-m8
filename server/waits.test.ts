@@ -37,3 +37,16 @@ test('parseTaskNotification reads failures and ignores other text', () => {
 test('foreground calls and errors are not waits', () => {
   assert.deepEqual(waitsOf([{ block: { type: 'tool', id: 'b', name: 'Bash', input: {}, result: 'ok' } }, { block: { type: 'tool', id: 'c', name: 'Agent', input: {}, result: 'Async agent launched', isError: true } }]), [])
 })
+
+test('a background task keeps its command and where its output goes', async () => {
+  const { stepsOf } = await import('./taskOutput.ts')
+  const [w] = waitsOf([{ block: { type: 'tool', id: 'b', name: 'Bash', input: { command: 'npm test', description: 'Run tests', run_in_background: true }, result: 'Command running in background with ID: bx1. Output is being written to: /private/tmp/claude-501/p/s/tasks/bx1.output. You will be notified.' } }])
+  assert.deepEqual([(w as any).input, (w as any).outputPath], ['npm test', '/private/tmp/claude-501/p/s/tasks/bx1.output'])
+  const [a] = waitsOf([{ block: { type: 'tool', id: 'a', name: 'Agent', input: { prompt: 'Dig in' }, result: 'Async agent launched successfully.\noutput_file: /private/tmp/claude-501/p/s/tasks/a1.output\nDo NOT Read' } }])
+  assert.equal((a as any).outputPath, '/private/tmp/claude-501/p/s/tasks/a1.output')
+  const steps = stepsOf([
+    JSON.stringify({ type: 'user', message: { content: 'Dig in' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Looking' }, { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } }),
+  ].join('\n'))
+  assert.deepEqual(steps.map(s => s.kind), ['prompt', 'text', 'tool'])
+})

@@ -199,7 +199,16 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .wait-icon.live { animation: wait-tip 2.4s ease-in-out infinite; }
 @keyframes wait-tip { 0%, 40% { transform: rotate(0); } 50%, 90% { transform: rotate(180deg); } 100% { transform: rotate(360deg); } }
 .wait-list { list-style: none; margin: 0; padding: 8px 12px 10px; border-top: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; gap: 8px; }
-.wait-row { display: flex; gap: 8px; align-items: flex-start; }
+.wait-row { display: flex; flex-direction: column; gap: 6px; }
+.wait-row-btn { display: flex; gap: 8px; align-items: flex-start; width: 100%; text-align: left; background: none; border: 0; padding: 2px 0; color: inherit; font: inherit; cursor: pointer; white-space: normal; }
+.wait-row-btn:hover .wait-label { color: var(--accent); }
+.wait-drill { margin-left: 23px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wait-h { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-top: 4px; }
+.wait-h .wait-tool, .wait-tool { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.wait-pre { margin: 0; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; background: var(--bg); padding: 6px 8px; border-radius: 4px; }
+.wait-steps { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.wait-step { display: flex; gap: 6px; align-items: baseline; overflow-wrap: anywhere; white-space: pre-wrap; }
+.wait-step.tool, .wait-step.result { color: var(--muted); }
 .wait-kind { width: 15px; text-align: center; font-size: 12px; line-height: 18px; }
 .wait-main { flex: 1; min-width: 0; }
 .wait-label { font-size: 12px; overflow-wrap: anywhere; }

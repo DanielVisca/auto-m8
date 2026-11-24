@@ -15,10 +15,25 @@ export function parseTaskNotification(text: string): { toolUseId: string; status
 }
 
 export type Wait =
-  | { kind: 'task'; id: string; label: string; what: 'agent' | 'command' | 'workflow'; state: 'live' | 'done' | 'failed'; startedAt?: number; done?: TaskDone }
+  | { kind: 'task'; id: string; label: string; what: 'agent' | 'command' | 'workflow'; state: 'live' | 'done' | 'failed'; startedAt?: number; done?: TaskDone; input?: string; outputPath?: string; tool: string }
   | { kind: 'timer'; id: string; label: string; what: 'follow-up' | 'wakeup'; dueAt?: number; prUrl?: string; until?: string }
 
 const BACKGROUND = /^(Async agent launched|Command running in background with ID|Workflow launched in background|Monitor started)/
+
+// Where Claude Code writes a background task's output: a .output log for commands and monitors,
+// the agent's JSONL transcript for agents, and a transcript directory for workflows.
+export function outputPathOf(result: string): string | undefined {
+  return result.match(/Output is being written to: (\S+?\.output)/)?.[1]
+    ?? result.match(/output_file: (\S+)/)?.[1]
+    ?? result.match(/Transcript dir: (\S+)/)?.[1]
+}
+
+// What the task was asked to do, in full: the shell command, the agent's prompt, the workflow.
+function inputOf(name: string, input: any): string | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const v = input.command ?? input.prompt ?? input.script ?? input.name
+  return typeof v === 'string' && v.trim() ? v.trim().slice(0, 20_000) : undefined
+}
 
 const str = (v: unknown) => typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : ''
 
@@ -31,7 +46,7 @@ export function waitsOf(tools: { block: ToolLike; ts?: number }[]): Wait[] {
       const what = /^Async agent/.test(b.result) ? 'agent' : /^Workflow/.test(b.result) ? 'workflow' : 'command'
       const label = str(b.input?.description) || (what === 'workflow' ? str(b.result.match(/Summary: (.*)/)?.[1]) || str(b.input?.name) : '') || str(b.input?.command).slice(0, 100) || b.name
       const state = !b.done ? 'live' : b.done.status === 'completed' ? 'done' : 'failed'
-      out.push({ kind: 'task', id: b.id, label, what, state, startedAt: ts, done: b.done })
+      out.push({ kind: 'task', id: b.id, label, what, state, startedAt: ts, done: b.done, input: inputOf(b.name, b.input), outputPath: outputPathOf(b.result), tool: b.name })
     } else if (b.name === 'mcp__perch__follow_up') {
       const mins = Number(b.input?.minutes) || (b.input?.pr_url ? 120 : 20)
       out.push({ kind: 'timer', id: b.id, label: str(b.input?.note) || 'Follow-up', what: 'follow-up', dueAt: ts ? ts + mins * 60_000 : undefined, prUrl: b.input?.pr_url, until: b.input?.pr_url ? (b.input?.until ?? 'checks') : undefined })
