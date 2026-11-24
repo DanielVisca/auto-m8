@@ -493,7 +493,8 @@ app.whenReady().then(async () => {
   createWindow()
   // The other enabled profiles start in the background, so their agents keep running too.
   for (const p of enabledProfiles()) if (p.id !== activeId) ensureServerFor(p).catch(() => {})
-  try { globalShortcut.register(settings.window?.hotkey || 'Control+Alt+Space', toggle) } catch (e) { console.error('hotkey', e) }
+  const HOTKEY = settings.window?.hotkey || 'Control+Alt+Space'
+  try { if (!globalShortcut.register(HOTKEY, toggle)) shellLog(`show/hide shortcut ${HOTKEY} is taken by another app`) } catch (e) { console.error('hotkey', e) }
   try { if (!globalShortcut.register(COLLAPSE_KEY, toggleCollapse)) shellLog(`collapse shortcut ${COLLAPSE_KEY} is taken by another app`) } catch (e) { console.error('collapse hotkey', e) }
   app.on('activate', showWindow)
 })
