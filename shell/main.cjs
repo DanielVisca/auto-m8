@@ -270,11 +270,34 @@ function createWindow() {
   win.on('resized', saveBounds)
   win.on('resize', () => { if (beforeMini || beforeTuck) win.setWindowButtonVisibility(false) })
   // Drag the picture-in-picture window mostly off the side of the screen and it tucks into the edge.
+  // On macOS 'moved' fires all through a drag, so wait until the window stops moving: tucking mid-drag
+  // shrinks the window under your cursor and macOS keeps dragging it from where you grabbed the
+  // wide one, flinging the tab off the edge.
+  let dragTimer = null
   win.on('moved', () => {
     if (!beforeMini || beforeTuck) return
-    const b = win.getBounds(), { workArea: a } = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 })
-    const off = Math.max(a.x - b.x, b.x + b.width - (a.x + a.width))
-    if (off > b.width * 0.35) setTuck(true)
+    clearTimeout(dragTimer)
+    dragTimer = setTimeout(() => {
+      if (!win || win.isDestroyed() || !beforeMini || beforeTuck) return
+      const b = win.getBounds(), { workArea: a } = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 })
+      const off = Math.max(a.x - b.x, b.x + b.width - (a.x + a.width))
+      if (off > b.width * 0.35) setTuck(true)
+    }, 300)
+  })
+  // The tab belongs on the edge: if anything moves it (a drag still going, macOS nudging it back on
+  // screen), put it back once the moving stops.
+  let snapTimer = null
+  win.on('move', () => {
+    if (!beforeTuck?.spot) return
+    clearTimeout(snapTimer)
+    snapTimer = setTimeout(() => {
+      const t = beforeTuck?.spot
+      if (!t || !win || win.isDestroyed()) return
+      const b = win.getBounds()
+      if (Math.abs(b.x - t.x) > 2 || Math.abs(b.y - t.y) > 2 || b.width !== t.width || b.height !== t.height) {
+        win.setBounds(t, false); shellLog(`tab was moved to ${b.x},${b.y}; put it back on the edge at ${t.x},${t.y}`)
+      }
+    }, 150)
   })
   // Links, artifacts and PRs open in your default browser, never inside the widget.
   // Links to perch itself navigate inside the window; everything else opens in its own app.
@@ -429,6 +452,7 @@ function setTuck(on) {
     win.setWindowButtonVisibility(false)
     win.setHasShadow(false)
     // No animation: an animated move across a display seam can land short of the edge.
+    beforeTuck.spot = bounds
     win.setBounds(bounds, false)
     const got = win.getBounds()
     if (Math.abs(got.x - bounds.x) > 2 || Math.abs(got.y - bounds.y) > 2) { win.setPosition(bounds.x, bounds.y); shellLog(`tuck landed at ${got.x},${got.y}, wanted ${bounds.x},${bounds.y}; moved it again`) }
