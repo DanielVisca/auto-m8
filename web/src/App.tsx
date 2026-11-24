@@ -51,7 +51,7 @@ type View =
 // drag it short and it becomes a single command bar.
 type Mode = 'tab' | 'bar' | 'mini' | 'compact' | 'medium' | 'wide'
 function modeFor(w: number, h: number, panel = false): Mode {
-  if (w < 60) return 'tab' // tucked into the edge of the screen
+  if (w < 60 || h < 40) return 'tab' // tucked into the edge of the screen (side edges: narrow; top or bottom: short)
   if (panel && w < 700) return 'mini' // the side panel: tall, but still picture in picture
   if (w < 480 && h < 330) return 'mini' // picture in picture (the slim pill or the card)
   if (h < 150) return 'bar'

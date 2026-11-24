@@ -80,10 +80,16 @@ function Pill({ onOpen, onExpand, onPanel }: { onOpen: (id: string) => void; onE
 export function Tab() {
   const { data } = useLive<{ needsMe: Conversation[]; running: Conversation[] }>('/api/home', ['conversations', 'home'])
   const needs = data?.needsMe?.length ?? 0, running = data?.running?.length ?? 0
-  const left = screenX - ((screen as any).availLeft ?? 0) < screen.availWidth / 2 // which edge we're on: the arrow points back onto the screen
+  // Which edge we're on (the arrow points back onto the screen), and how far the window hangs off
+  // it: the shell pushes the tab partly off screen so it sits flush, so pad the visible part.
+  const sx = screen as any, L = sx.availLeft ?? 0, T = sx.availTop ?? 0
+  const side = innerHeight > innerWidth
+  const edge = side ? (screenX + innerWidth / 2 < L + screen.availWidth / 2 ? 'left' : 'right') : (screenY + innerHeight / 2 < T + screen.availHeight / 2 ? 'top' : 'bottom')
+  const over = Math.max(0, edge === 'left' ? L - screenX : edge === 'right' ? screenX + innerWidth - (L + screen.availWidth) : edge === 'bottom' ? screenY + innerHeight - (T + screen.availHeight) : 0)
+  const pad = { left: { paddingLeft: over }, right: { paddingRight: over }, bottom: { paddingBottom: over }, top: {} }[edge]
   return (
-    <button className={`tuck-tab ${left ? 'left' : 'right'}`} onClick={() => shell.tuck?.(false)} title={`Bring auto-m8 back · ${running} running · ${needs} need you  ⌘⇧.`}>
-      <span className="tuck-arrow">{left ? '›' : '‹'}</span>
+    <button className={`tuck-tab ${edge}`} style={pad} onClick={() => shell.tuck?.(false)} title={`Bring auto-m8 back · ${running} running · ${needs} need you  ⌘⇧.`}>
+      <span className="tuck-arrow">{{ left: '›', right: '‹', top: '⌄', bottom: '⌃' }[edge]}</span>
       {needs > 0 && <span className="tuck-n">{needs}</span>}
       {running > 0 && <i className="spin" />}
     </button>

@@ -1140,6 +1140,8 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .pr-inline-row { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-bottom: 4px; }
 .pr-inline { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 520px); vertical-align: middle; font-size: 12.5px; line-height: 20px;
   padding: 1px 4px 1px 9px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg3); color: var(--fg) !important; text-decoration: none !important; cursor: pointer; }
+.tuck-tab.top, .tuck-tab.bottom { flex-direction: row; }
+.tuck-tab.top { border-bottom: 2px solid var(--accent); } .tuck-tab.bottom { border-top: 2px solid var(--accent); }
 .pr-inline:hover { border-color: var(--muted); }
 .pr-inline-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .pr-inline.st-open .pr-inline-dot { background: var(--ok); }

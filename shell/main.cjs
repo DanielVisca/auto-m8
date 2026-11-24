@@ -384,28 +384,62 @@ function setMini(on) {
   return beforeMini ? 'mini' : 'none'
 }
 
-// Tuck: slide perch into the side of the screen, leaving a small tab on the edge. Click the tab (or
-// press the show/hide shortcut) and it slides back out to exactly where and how big it was.
+// Tuck: perch slides off the nearest outer edge of the screen it's on (left, right, top or bottom),
+// leaving a small tab flush against that edge. An edge that touches another display doesn't count:
+// a tab there floats in the middle of the desktop (a laptop left of a monitor makes the monitor's
+// left edge a seam). Click the tab (or press the show/hide shortcut) and it slides back out to
+// exactly where and how big it was.
 let beforeTuck = null
-const TAB = { w: 22, h: 76 }
+// over: how far the tab hangs off the screen, so its rounded corners sit out of sight and it reads
+// as attached to the edge. Not at the top: macOS keeps windows below the menu bar.
+const TAB = { long: 76, short: 22, over: 10 }
+function tuckSpot(b, d, others) {
+  const a = d.workArea, f = d.bounds
+  const clamp = (v, lo, hi) => Math.min(Math.max(Math.round(v), lo), hi)
+  const y = clamp(b.y + b.height / 2 - TAB.long / 2, a.y, a.y + a.height - TAB.long)
+  const x = clamp(b.x + b.width / 2 - TAB.long / 2, a.x, a.x + a.width - TAB.long)
+  const near = (p, q) => Math.abs(p - q) <= 1
+  const overlap = (lo, hi, oLo, oHi) => Math.min(hi, oHi) - Math.max(lo, oLo) > 0
+  const seam = {
+    left: others.some(o => near(o.x + o.width, f.x) && overlap(y, y + TAB.long, o.y, o.y + o.height)),
+    right: others.some(o => near(o.x, f.x + f.width) && overlap(y, y + TAB.long, o.y, o.y + o.height)),
+    top: others.some(o => near(o.y + o.height, f.y) && overlap(x, x + TAB.long, o.x, o.x + o.width)),
+    bottom: others.some(o => near(o.y, f.y + f.height) && overlap(x, x + TAB.long, o.x, o.x + o.width)),
+  }
+  const dist = { left: b.x - a.x, right: a.x + a.width - (b.x + b.width), top: b.y - a.y, bottom: a.y + a.height - (b.y + b.height) }
+  const free = Object.keys(dist).filter(e => !seam[e])
+  const edge = (free.length ? free : Object.keys(dist)).sort((p, q) => dist[p] - dist[q])[0]
+  const over = seam[edge] ? 0 : TAB.over
+  const spot = {
+    left: { x: a.x - over, y, width: TAB.short + over, height: TAB.long },
+    right: { x: a.x + a.width - TAB.short, y, width: TAB.short + over, height: TAB.long },
+    top: { x, y: a.y, width: TAB.long, height: TAB.short },
+    bottom: { x, y: a.y + a.height - TAB.short, width: TAB.long, height: TAB.short + over },
+  }[edge]
+  return { edge, bounds: spot }
+}
 ipcMain.handle('tuck', (_e, on) => setTuck(on))
 function setTuck(on) {
   if (on && !beforeTuck) {
-    const b = win.getBounds(), { workArea: a } = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 })
+    const b = win.getBounds(), d = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 })
+    const { edge, bounds } = tuckSpot(b, d, screen.getAllDisplays().filter(o => o.id !== d.id).map(o => o.bounds))
     beforeTuck = { bounds: b, pinned: win.isAlwaysOnTop() }
-    const right = b.x + b.width / 2 > a.x + a.width / 2
-    const y = Math.min(Math.max(Math.round(b.y + b.height / 2 - TAB.h / 2), a.y), a.y + a.height - TAB.h)
     win.setMinimumSize(1, 1)
     win.setAlwaysOnTop(true, 'floating')
     win.setWindowButtonVisibility(false)
-    win.setBounds({ x: right ? a.x + a.width - TAB.w : a.x, y, width: TAB.w, height: TAB.h }, true)
+    win.setHasShadow(false)
+    // No animation: an animated move across a display seam can land short of the edge.
+    win.setBounds(bounds, false)
+    const got = win.getBounds()
+    if (Math.abs(got.x - bounds.x) > 2 || Math.abs(got.y - bounds.y) > 2) { win.setPosition(bounds.x, bounds.y); shellLog(`tuck landed at ${got.x},${got.y}, wanted ${bounds.x},${bounds.y}; moved it again`) }
     setTimeout(() => { if (beforeTuck) win.setWindowButtonVisibility(false) }, 450)
-    shellLog(`tucked to the ${right ? 'right' : 'left'} edge`)
+    shellLog(`tucked to the ${edge} edge at ${bounds.x},${bounds.y}`)
     return 'tucked'
   } else if (!on && beforeTuck) {
     autoTucked = false
     const { bounds, pinned } = beforeTuck
     beforeTuck = null
+    win.setHasShadow(true)
     win.setBounds(bounds, true)
     win.setMinimumSize(260, 48)
     win.setAlwaysOnTop(beforeMini ? true : pinned, 'floating')
