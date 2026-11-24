@@ -47,6 +47,8 @@ before(async () => {
   server = createServer(async (req, res) => {
     const url = new URL(req.url!, 'http://x')
     if (url.pathname === '/form') return res.end(FORM)
+    // a submit whose navigation starts a beat after the click (a validation script, or a slow machine)
+    if (url.pathname === '/slowform') return res.end(page('Slow order', `<h1>Slow order</h1><form method="post" action="/post" onsubmit="event.preventDefault(); setTimeout(() => this.submit(), 250)"><label>Customer name <input name="custname"></label><button>Send</button></form>`))
     if (url.pathname === '/spa') return res.end(SPA(url.searchParams.get('v') ?? '1'))
     if (url.pathname === '/api/items') { await new Promise(r => setTimeout(r, 120)); res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ items: ['alpha', 'beta', 'gamma'] })) }
     if (url.pathname === '/setcookie') { res.setHeader('set-cookie', 'who=ana; Path=/'); return res.end(page('ok', 'cookie set')) }
@@ -181,6 +183,20 @@ test('read-only and denied sites', { skip }, async () => {
   S.settings.browser.sites = { '127.0.0.1': 'deny' }
   await assert.rejects(B.navigate(s, base + '/spa'), /deny list/)
   S.settings.browser.sites = {}
+})
+
+test('a submit whose navigation starts late is waited for, so the next step reads the new page', { skip }, async () => {
+  S.settings.browser.sites = { '127.0.0.1': 'trusted' }
+  const s = (await B.session('conv-latenav'))!
+  await B.navigate(s, base + '/slowform')
+  const r = await B.runSteps(s, [
+    { do: 'fill', name: 'Customer name', value: 'Late Nav' },
+    { do: 'click', role: 'button', name: 'Send' },
+  ])
+  assert.equal(r.error, false, r.lines.join('\n'))
+  assert.equal(JSON.parse((await B.pageText(s)).text).form.custname, 'Late Nav')
+  S.settings.browser.sites = {}
+  await B.closeSession('conv-latenav')
 })
 
 test('settle waits for the fetch a click starts; the network log shows the API', { skip }, async () => {
