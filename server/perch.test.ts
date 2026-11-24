@@ -179,6 +179,18 @@ test('autopilot owns what it creates: pause on failure or idle loops, graduate o
   assert.equal(state(good).trusted, 1)
 })
 
+test('routine watchdog: a run whose agent is still working is not stalled until the ceiling', async () => {
+  const { stalledRuns, STALL_MS, LIVE_CEILING_MS } = await import('./autopilot.ts')
+  const now = 10 * LIVE_CEILING_MS
+  const runs = [
+    { started_at: now - STALL_MS - 1, conversation_id: 'dead' },
+    { started_at: now - STALL_MS - 1, conversation_id: 'working' },
+    { started_at: now - LIVE_CEILING_MS - 1, conversation_id: 'hung' },
+    { started_at: now - STALL_MS + 1000, conversation_id: 'young' },
+  ]
+  assert.deepEqual(stalledRuns(runs, new Set(['working', 'hung']), now).map(r => r.conversation_id), ['dead', 'hung'])
+})
+
 test('search picks a mode from the question', async () => {
   const { autoMode } = await import('./seek.ts')
   assert.equal(autoMode('where is the vmagent config').mode, 'fast')

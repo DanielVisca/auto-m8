@@ -3,7 +3,7 @@
 // stalls as Needs me, pauses an automation that keeps failing or runs without doing anything,
 // and graduates one that proves itself. Ownership doesn't end at creation.
 import { randomUUID } from 'node:crypto'
-import { ephemeral, PERCH_MCP, subscribe } from './chat.ts'
+import { ephemeral, PERCH_MCP, runningChats, subscribe } from './chat.ts'
 import { ALLOWED } from './seek.ts'
 import { list, saveRule, setStates } from './conversations.ts'
 import { link } from './context.ts'
@@ -64,9 +64,12 @@ export function trackRun(routineId: string, conversationId: string) {
 
 function finish(runId: string, outcome: string, detail: string, cost?: number) {
   const r = get<any>('select * from routine_runs where id = ?', runId)
-  if (!r || r.outcome !== 'running') return
+  // A late result overrides 'stalled': the watchdog's call was a guess, the result is the answer.
+  if (!r || (r.outcome !== 'running' && !(r.outcome === 'stalled' && outcome !== 'stalled'))) return
   run('update routine_runs set outcome = ?, finished_at = ?, detail = ?, cost = ? where id = ?', outcome, Date.now(), detail, cost ?? null, runId)
   run('update routines set last_status = ? where id = ?', outcome, r.routine_id)
+  // The run came back after all: take back the "automation stalled" ask the watchdog raised.
+  if (r.outcome === 'stalled') run(`update user_state set state = null, note = null, state_at = ? where id = ? and state = 'waiting' and state_auto = 2 and note like 'automation stalled%'`, Date.now(), r.conversation_id)
   // A failed or stalled run needs you: its conversation goes to Needs me with the reason.
   if (outcome === 'error' || outcome === 'stalled') {
     run('insert into user_state (id) values (?) on conflict do nothing', r.conversation_id)
@@ -99,10 +102,19 @@ function pause(routineId: string, reason: string) {
   }
 }
 
-// A run with no result after 30 minutes, and no live process, is stalled.
+// A run with no result after 30 minutes and no live process is stalled. One whose agent is still
+// working is not: the blog workshop, montage and long scouts take 40 minutes to 3 hours and used
+// to be marked stalled (then paused) while they were still going, their real answers thrown away.
+// A live agent still gets a ceiling, so a hung process can't hold a run open forever.
+export const STALL_MS = 30 * 60_000, LIVE_CEILING_MS = 4 * 60 * 60_000
+export function stalledRuns<T extends { started_at: number, conversation_id: string }>(runs: T[], working: Set<string>, now = Date.now()) {
+  return runs.filter(r => now - r.started_at > (working.has(r.conversation_id) ? LIVE_CEILING_MS : STALL_MS))
+}
 export function watchdog() {
-  for (const r of all<any>(`select * from routine_runs where outcome = 'running' and started_at < ?`, Date.now() - 30 * 60_000)) {
-    finish(r.id, 'stalled', 'no result after 30 minutes')
+  const working = new Set(runningChats().filter(c => c.live && c.state === 'running').map(c => c.id))
+  const open = all<any>(`select * from routine_runs where outcome = 'running' and started_at < ?`, Date.now() - STALL_MS)
+  for (const r of stalledRuns(open, working)) {
+    finish(r.id, 'stalled', working.has(r.conversation_id) ? `still running after ${LIVE_CEILING_MS / 3_600_000} hours` : 'no result after 30 minutes and no live agent')
   }
 }
 
