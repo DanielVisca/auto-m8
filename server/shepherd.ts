@@ -24,7 +24,7 @@ import { editLabels, setTitle } from './conversations.ts'
 import { link } from './context.ts'
 import { all, get, run } from './db.ts'
 import { recordError, resolveErrors } from './errors.ts'
-import { checkContextFields, checkContexts, summarizeChecks, ghOffline, prBatch, ghExec } from './gh.ts'
+import { checkContextFields, checkContexts, summarizeChecks, ghOffline, isGhSkippedOffline, prBatch, ghExec } from './gh.ts'
 import { activeShepherds, prWorktree } from './pr.ts'
 import { autonomyOn, settings, updateSettings } from './settings.ts'
 import { isPaused } from './pausehold.ts'
@@ -678,6 +678,9 @@ export async function tickShepherd(isRunning: (id: string) => boolean) {
     }
     resolveErrors('PR shepherd')
   } catch (e: any) {
+    // GitHub went unreachable after the check above (during enroll, or another module's call): the
+    // call that found out already reported it and gh.ts backs off, so a skipped call is not a new error.
+    if (isGhSkippedOffline(e) && ghOffline()) return
     recordError('PR shepherd', e, 'Watching PRs for comments, CI, merges and production checks')
   } finally { running.delete('tick') }
 }

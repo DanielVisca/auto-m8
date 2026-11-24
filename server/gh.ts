@@ -25,6 +25,8 @@ let failures = 0
 export const ghOffline = () => Date.now() < offlineUntil || ghLimited('graphql') > 0
 export function noteGhNetworkFailure() { failures++; offlineUntil = Date.now() + Math.min(15, 2 ** (failures - 1)) * 60_000 }
 export function noteGhOk() { failures = 0; offlineUntil = 0 }
+// The error gh() throws for a call it skipped because an earlier call already found GitHub unreachable.
+export const isGhSkippedOffline = (e: unknown) => /skipped, api\.github\.com was unreachable/.test(String((e as any)?.message ?? e))
 export const ghBackoff = () => ({ failures, until: offlineUntil, limited: { ...limitedUntil } })
 
 // ---------- rate limits: pause until the reset, and count who spends the budget ----------

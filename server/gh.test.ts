@@ -43,6 +43,8 @@ test('unreachable GitHub backs off and keeps the error short', async () => {
   assert.equal(gh.ghOffline(), true)
   assert.equal(gh.ghBackoff().failures, 1, 'stopped after the first chunk instead of hammering')
   await assert.rejects(gh.ghJson(['search', 'prs']), /skipped, api\.github\.com was unreachable/)
+  await gh.ghJson(['search', 'prs']).then(() => assert.fail('should skip'), e => assert.equal(gh.isGhSkippedOffline(e), true, 'a skipped call is recognised so callers do not report it again'))
+  assert.equal(gh.isGhSkippedOffline(r.failed), false)
   const { friendly } = await import('./errors.ts')
   assert.equal(friendly(r.failed, 'Updating PR status').transient, true)
   assert.match(friendly(r.failed, 'Updating PR status').message, /couldn't reach GitHub/)
