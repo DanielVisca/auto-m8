@@ -294,9 +294,16 @@ function createWindow() {
       const t = beforeTuck?.spot
       if (!t || !win || win.isDestroyed()) return
       const b = win.getBounds()
-      if (Math.abs(b.x - t.x) > 2 || Math.abs(b.y - t.y) > 2 || b.width !== t.width || b.height !== t.height) {
-        win.setBounds(t, false); shellLog(`tab was moved to ${b.x},${b.y}; put it back on the edge at ${t.x},${t.y}`)
-      }
+      if (Math.abs(b.x - t.x) <= 2 && Math.abs(b.y - t.y) <= 2 && b.width === t.width && b.height === t.height) return
+      // Moved by someone else. Put it back once (a drag that was still going); if macOS moves it
+      // again, that edge is off limits (Stage Manager's strip, say), so try the next nearest edge,
+      // and after a few tries leave it where macOS wants it rather than fight forever.
+      const bt = beforeTuck
+      if (!bt.putBack) { bt.putBack = true; win.setBounds(t, false); shellLog(`tab was moved to ${b.x},${b.y}; put it back on the ${bt.edge} edge`); return }
+      osBlocked.add(`${bt.display}:${bt.edge}`)
+      const next = ++bt.tries <= 3 && placeTab(bt.bounds)
+      if (next && next.edge !== bt.edge) { Object.assign(bt, next, { putBack: false }); win.setBounds(next.spot, false); shellLog(`macOS keeps moving the tab off the ${[...osBlocked].pop()} edge; using the ${next.edge} edge`) }
+      else { bt.spot = null; shellLog(`macOS keeps moving the tab (to ${b.x},${b.y}); leaving it there`) }
     }, 150)
   })
   // Links, artifacts and PRs open in your default browser, never inside the widget.
@@ -416,11 +423,29 @@ let beforeTuck = null
 // over: how far the tab hangs off the screen, so its rounded corners sit out of sight and it reads
 // as attached to the edge. Not at the top: macOS keeps windows below the menu bar.
 const TAB = { long: 76, short: 22, over: 10 }
-function tuckSpot(b, d, others) {
+// Edges macOS won't let the tab stay on: Stage Manager pushes windows out of its strip (left side,
+// or right when the Dock is on the left), plus any edge macOS moved the tab off this session.
+const osBlocked = new Set()
+function blockedEdges(displayId) {
+  const out = new Set([...osBlocked].filter(k => k.startsWith(`${displayId}:`)).map(k => k.split(':')[1]))
+  try {
+    const def = (dom, key) => spawnSync('defaults', ['read', dom, key], { encoding: 'utf8', timeout: 1000 }).stdout.trim()
+    if (def('com.apple.WindowManager', 'GloballyEnabled') === '1') { const side = def('com.apple.dock', 'orientation') === 'left' ? 'right' : 'left'; out.add(side); out.add(`strip-${side}`) }
+  } catch {}
+  return out
+}
+function placeTab(b) {
+  const d = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 })
+  const { edge, bounds } = tuckSpot(b, d, screen.getAllDisplays().filter(o => o.id !== d.id).map(o => o.bounds), blockedEdges(d.id))
+  return { edge, spot: bounds, display: d.id }
+}
+function tuckSpot(b, d, others, blocked = new Set()) {
   const a = d.workArea, f = d.bounds
   const clamp = (v, lo, hi) => Math.min(Math.max(Math.round(v), lo), hi)
   const y = clamp(b.y + b.height / 2 - TAB.long / 2, a.y, a.y + a.height - TAB.long)
-  const x = clamp(b.x + b.width / 2 - TAB.long / 2, a.x, a.x + a.width - TAB.long)
+  // Stage Manager's strip (about 250pt) also pushes away a top or bottom tab that sits over it.
+  const STRIP = 280, lo = a.x + (blocked.has('strip-left') ? STRIP : 0), hi = a.x + a.width - TAB.long - (blocked.has('strip-right') ? STRIP : 0)
+  const x = clamp(b.x + b.width / 2 - TAB.long / 2, lo, hi)
   const near = (p, q) => Math.abs(p - q) <= 1
   const overlap = (lo, hi, oLo, oHi) => Math.min(hi, oHi) - Math.max(lo, oLo) > 0
   const seam = {
@@ -430,7 +455,7 @@ function tuckSpot(b, d, others) {
     bottom: others.some(o => near(o.y, f.y + f.height) && overlap(x, x + TAB.long, o.x, o.x + o.width)),
   }
   const dist = { left: b.x - a.x, right: a.x + a.width - (b.x + b.width), top: b.y - a.y, bottom: a.y + a.height - (b.y + b.height) }
-  const free = Object.keys(dist).filter(e => !seam[e])
+  const free = Object.keys(dist).filter(e => !seam[e] && !blocked.has(e))
   const edge = (free.length ? free : Object.keys(dist)).sort((p, q) => dist[p] - dist[q])[0]
   const over = seam[edge] ? 0 : TAB.over
   const spot = {
@@ -444,15 +469,13 @@ function tuckSpot(b, d, others) {
 ipcMain.handle('tuck', (_e, on) => setTuck(on))
 function setTuck(on) {
   if (on && !beforeTuck) {
-    const b = win.getBounds(), d = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 })
-    const { edge, bounds } = tuckSpot(b, d, screen.getAllDisplays().filter(o => o.id !== d.id).map(o => o.bounds))
-    beforeTuck = { bounds: b, pinned: win.isAlwaysOnTop() }
+    const b = win.getBounds(), { edge, spot: bounds, display } = placeTab(b)
+    beforeTuck = { bounds: b, pinned: win.isAlwaysOnTop(), edge, spot: bounds, display, tries: 0, putBack: false }
     win.setMinimumSize(1, 1)
     win.setAlwaysOnTop(true, 'floating')
     win.setWindowButtonVisibility(false)
     win.setHasShadow(false)
     // No animation: an animated move across a display seam can land short of the edge.
-    beforeTuck.spot = bounds
     win.setBounds(bounds, false)
     const got = win.getBounds()
     if (Math.abs(got.x - bounds.x) > 2 || Math.abs(got.y - bounds.y) > 2) { win.setPosition(bounds.x, bounds.y); shellLog(`tuck landed at ${got.x},${got.y}, wanted ${bounds.x},${bounds.y}; moved it again`) }
