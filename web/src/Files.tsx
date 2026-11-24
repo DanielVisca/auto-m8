@@ -1,10 +1,10 @@
 // Files an agent made for you: listed per conversation, viewable in perch, and one click from
 // Finder, your clipboard (the contents, or the file itself to paste into Slack) or a download.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, post, shell, toast, useLive } from './api'
-import { copyText, Markdown } from './Chat'
+import { copyText, focusInChat, Markdown, type FocusAt } from './Chat'
 
-export type FileRef = { path: string; name: string; size: number; mtime: number; kind: 'text' | 'image' | 'video' | 'pdf' | 'archive' | 'other'; how?: string }
+export type FileRef = { path: string; name: string; size: number; mtime: number; kind: 'text' | 'image' | 'video' | 'pdf' | 'archive' | 'other'; how?: string; uses?: (FocusAt & { how: string })[] }
 const ICON = { text: '📄', image: '🖼', video: '🎬', pdf: '📕', archive: '🗜', other: '📦' }
 const size = (n: number) => n < 1024 ? `${n} B` : n < 1 << 20 ? `${Math.round(n / 1024)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`
 const raw = (p: string, download = false) => `/api/files/raw?path=${encodeURIComponent(p)}${download ? '&download=1' : ''}`
@@ -21,21 +21,85 @@ export function FilesSection({ id }: { id: string }) {
   return (
     <section>
       <h4>Files <span className="muted small">{files.length}</span></h4>
-      {(all ? files : files.slice(0, 6)).map(f => <FileRow key={f.path} f={f} />)}
+      {(all ? files : files.slice(0, 6)).map(f => <FileRow key={f.path} f={f} convId={id} />)}
       {files.length > 6 && <button className="link small" onClick={() => setAll(!all)}>{all ? 'show fewer' : `all ${files.length}`}</button>}
     </section>
   )
 }
 
-function FileRow({ f }: { f: FileRef }) {
+// The first couple of KB of a text file, fetched once per version (byte range, so big logs stay cheap).
+const heads = new Map<string, Promise<string>>()
+const textHead = (f: FileRef) => {
+  const k = `${f.path}@${f.mtime}`
+  if (!heads.has(k)) heads.set(k, fetch(raw(f.path), { headers: { Range: 'bytes=0-4095' } }).then(r => r.ok ? r.text() : '').catch(() => ''))
+  return heads.get(k)!
+}
+function useTextHead(f: FileRef, on: boolean) {
+  const [t, setT] = useState<string | null>(null)
+  useEffect(() => { if (on && f.kind === 'text') { let live = true; textHead(f).then(x => { if (live) setT(x) }); return () => { live = false } } }, [f.path, f.mtime, on])
+  return t
+}
+const firstLine = (t: string) => (t.split('\n').map(l => l.replace(/^[#>*\-\s`|]+/, '').trim()).find(Boolean) ?? '').slice(0, 140)
+
+// Small always-on preview: the image or video frame itself, or a few lines of text.
+function Thumb({ f, text }: { f: FileRef; text: string | null }) {
+  if (f.kind === 'image') return <span className="file-thumb"><img src={raw(f.path)} alt="" loading="lazy" /></span>
+  if (f.kind === 'video') return <span className="file-thumb"><video src={`${raw(f.path)}#t=0.5`} preload="metadata" muted playsInline /></span>
+  if (f.kind === 'text' && text) return <span className="file-thumb text"><span>{text.slice(0, 240)}</span></span>
+  return <span className="file-thumb icon">{ICON[f.kind]}</span>
+}
+
+// Bigger preview while hovering a row, floated beside the panel.
+function HoverPreview({ f, text, at }: { f: FileRef; text: string | null; at: DOMRect }) {
+  const w = 340
+  const left = at.left - w - 10 > 8 ? at.left - w - 10 : Math.min(at.right + 10, innerWidth - w - 8)
+  const top = Math.max(8, Math.min(at.top - 40, innerHeight - 300))
+  return (
+    <div className="file-hover" style={{ left, top, width: w }}>
+      {f.kind === 'image' && <img src={raw(f.path)} alt={f.name} />}
+      {f.kind === 'video' && <video src={raw(f.path)} autoPlay muted loop playsInline />}
+      {f.kind === 'text' && <pre>{text == null ? 'Loading…' : text.split('\n').slice(0, 40).join('\n') || '(empty)'}</pre>}
+      {f.kind === 'pdf' && <div className="muted small pad">PDF: click to open it in the viewer.</div>}
+      <div className="file-hover-name muted small ellipsis">{f.name} · {size(f.size)}</div>
+    </div>
+  )
+}
+
+// Bring the chat to where a file came up: opens that chat if another view is showing, then the folds.
+const showInChat = (convId: string, at: FocusAt) => {
+  const want = `#chat/${encodeURIComponent(convId)}`
+  if (location.hash !== want) location.hash = want
+  focusInChat(convId, at)
+}
+const clock = (t?: number) => t ? new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
+
+function FileRow({ f, convId }: { f: FileRef; convId: string }) {
+  const [usesOpen, setUsesOpen] = useState(false)
+  const uses = f.uses ?? []
+  const ref = useRef<HTMLButtonElement>(null)
+  const [hover, setHover] = useState<DOMRect | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+  const text = useTextHead(f, true)
+  const enter = () => { clearTimeout(timer.current); timer.current = window.setTimeout(() => ref.current && setHover(ref.current.getBoundingClientRect()), 250) }
+  const leave = () => { clearTimeout(timer.current); setHover(null) }
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const sub = f.kind === 'text' && text ? firstLine(text) : ''
   return (
     <div className="file-row">
-      <button className="file-main" onClick={() => openFile(f.path)} title={`${f.path}\nClick to view`}>
-        <span className="file-icon">{ICON[f.kind]}</span>
-        <span className="grow ellipsis">{f.name}</span>
-        <span className="muted small nowrap">{size(f.size)}</span>
+      <button ref={ref} className="file-main" onClick={() => { leave(); openFile(f.path) }} onMouseEnter={enter} onMouseLeave={leave} title={`${f.path}\nClick to view`}>
+        <Thumb f={f} text={text} />
+        <span className="grow file-names">
+          <span className="ellipsis">{f.name}</span>
+          <span className="muted small ellipsis">{sub || size(f.size)}</span>
+        </span>
+        {sub && <span className="muted small nowrap">{size(f.size)}</span>}
       </button>
+      {uses.length > 0 && <button className="icon file-jump" title={uses.length === 1 ? `Show where it was ${uses[0].how} in the chat` : `Show where it came up in the chat (${uses.length} places)`}
+        onClick={() => uses.length === 1 ? showInChat(convId, uses[0]) : setUsesOpen(v => !v)}>↥{uses.length > 1 && <sup>{uses.length}</sup>}</button>}
       <FileActions f={f} compact />
+      {usesOpen && <div className="file-uses">{uses.map((u, i) =>
+        <button key={i} className="link small" onClick={() => showInChat(convId, u)}>{u.how}{u.ts ? ` · ${clock(u.ts)}` : ''}</button>)}</div>}
+      {hover && f.kind !== 'archive' && f.kind !== 'other' && <HoverPreview f={f} text={text} at={hover} />}
     </div>
   )
 }

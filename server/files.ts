@@ -12,7 +12,9 @@ import { toItems, itemsOf } from './transcript.ts'
 import { ATTACH_DIR } from './attachments.ts'
 
 const exec = promisify(execFile)
-export type FileRef = { path: string; name: string; size: number; mtime: number; kind: 'text' | 'image' | 'video' | 'pdf' | 'archive' | 'other'; how: string }
+export type FileRef = { path: string; name: string; size: number; mtime: number; kind: 'text' | 'image' | 'video' | 'pdf' | 'archive' | 'other'; how: string; uses?: FileUse[] }
+// Where in the thread a file came up, so the panel can jump there: the message (uuid, else time) and the exact tool call.
+export type FileUse = { how: string; uuid?: string; ts?: number; tool?: string }
 
 const KINDS: [FileRef['kind'], RegExp][] = [
   ['image', /\.(png|jpe?g|gif|webp|svg)$/i],
@@ -47,26 +49,36 @@ export function conversationFiles(conversationId: string): FileRef[] {
   const hit = cache.get(conversationId)
   if (hit?.m === m) { hit.files.forEach(f => allowed.add(f.path)); return hit.files }
   const seen = new Map<string, string>() // path → how we know about it
-  const add = (p: string, how: string) => { if (p && !seen.has(p)) seen.set(p, how) }
+  const uses = new Map<string, FileUse[]>()
+  const add = (p: string, how: string, at: Omit<FileUse, 'how'>) => {
+    if (!p) return
+    if (!seen.has(p)) seen.set(p, how)
+    const u = uses.get(p) ?? []
+    if (u.length < 30 && !u.some(x => x.how === how && x.uuid === at.uuid && x.ts === at.ts)) u.push({ how, ...at })
+    uses.set(p, u)
+  }
   for (const it of itemsOf(c.path) as any[]) {
+    const at = { uuid: it.uuid, ts: it.ts }
+    if (it.kind === 'user') { for (const p of pathsIn(it.text)) if (p.startsWith(ATTACH_DIR + '/')) add(p, 'you attached', at); continue }
     if (it.kind !== 'assistant') continue
     for (const b of it.blocks ?? []) {
       if (b.type === 'tool') {
         const fp = b.input?.file_path ?? b.input?.notebook_path
-        if (fp && (b.name === 'Write' || b.name === 'Edit' || b.name === 'NotebookEdit')) add(isAbsolute(fp) ? fp : resolve(c.cwd ?? HOME, fp), b.name === 'Write' ? 'written' : 'edited')
-        if (b.name === 'Bash') for (const p of pathsIn(b.input?.command)) add(p, 'from a command')
-      } else if (b.type === 'text') for (const p of pathsIn(b.text)) add(p, 'mentioned')
+        if (fp && (b.name === 'Write' || b.name === 'Edit' || b.name === 'NotebookEdit')) add(isAbsolute(fp) ? fp : resolve(c.cwd ?? HOME, fp), b.name === 'Write' ? 'written' : 'edited', { ...at, tool: b.id })
+        if (b.name === 'Read' && fp && seen.has(isAbsolute(fp) ? fp : resolve(c.cwd ?? HOME, fp))) add(isAbsolute(fp) ? fp : resolve(c.cwd ?? HOME, fp), 'read', { ...at, tool: b.id })
+        if (b.name === 'Bash') for (const p of pathsIn(b.input?.command)) add(p, 'from a command', { ...at, tool: b.id })
+      } else if (b.type === 'text') for (const p of pathsIn(b.text)) add(p, 'mentioned', at)
     }
   }
   const files: FileRef[] = []
   for (const [p, how] of seen) {
     if (PRIVATE.test(p) || !existsSync(p)) continue
     // Files it only ran a command on or named count when they look like something made for you.
-    if (how !== 'written' && how !== 'edited' && (NOISE.test(p) || !DELIVERABLE.test(p))) continue
+    if (how !== 'written' && how !== 'edited' && how !== 'you attached' && (NOISE.test(p) || !DELIVERABLE.test(p))) continue
     let st
     try { st = statSync(p) } catch { continue }
     if (!st.isFile()) continue
-    files.push({ path: p, name: basename(p), size: st.size, mtime: st.mtimeMs, kind: kindOf(p), how })
+    files.push({ path: p, name: basename(p), size: st.size, mtime: st.mtimeMs, kind: kindOf(p), how, uses: uses.get(p) })
   }
   files.sort((a, b) => b.mtime - a.mtime)
   const out = files.slice(0, 80)

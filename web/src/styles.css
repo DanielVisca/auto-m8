@@ -926,6 +926,24 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .file-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px; text-align: left; }
 .file-main:hover { border-color: var(--accent); }
 .file-icon { flex: none; }
+.file-row { flex-wrap: wrap; }
+.file-jump { padding: 2px 5px; font-size: 13px; color: var(--muted); }
+.file-jump:hover { color: var(--accent); }
+.file-jump sup { font-size: 9px; margin-left: 1px; }
+.file-uses { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 2px 4px 4px 50px; }
+.focus-flash { animation: focus-flash 2.4s ease-out; border-radius: 8px; }
+@keyframes focus-flash { 0%, 30% { box-shadow: 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); } 100% { box-shadow: 0 0 0 2px transparent; } }
+.file-names { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.file-names > span { display: block; }
+.file-thumb { flex: none; width: 40px; height: 40px; border-radius: 5px; overflow: hidden; background: color-mix(in srgb, var(--fg) 6%, transparent); display: flex; align-items: center; justify-content: center; }
+.file-thumb img, .file-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.file-thumb.icon { font-size: 18px; }
+.file-thumb.text { align-items: flex-start; justify-content: flex-start; padding: 3px; }
+.file-thumb.text span { font: 4.5px/1.25 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre; overflow: hidden; }
+.file-hover { position: fixed; z-index: 150; pointer-events: none; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.35); overflow: hidden; }
+.file-hover img, .file-hover video { display: block; width: 100%; max-height: 260px; object-fit: contain; background: #000; }
+.file-hover pre { margin: 0; padding: 8px 10px; max-height: 260px; overflow: hidden; font-size: 10.5px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
+.file-hover-name { padding: 4px 10px; border-top: 1px solid var(--line); }
 .file-actions { display: inline-flex; align-items: center; gap: 1px; flex: none; }
 .file-actions .icon { padding: 2px 5px; font-size: 13px; color: var(--muted); text-decoration: none; }
 .file-actions .icon:hover { color: var(--fg); }

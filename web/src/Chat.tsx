@@ -1,6 +1,6 @@
 import { BoardButton } from './Boards'
 import { marked } from 'marked'
-import { memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { createContext, memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
 import { ago, api, cachedThread, loadThread, baseName, post, sendChat, shortPath, useOutbox, titleOf, useLive, type Conversation, type Item, type Term } from './api'
 import { adopt, apply, emptyLive, toolLabel, toolSummary, type Live } from './stream'
@@ -116,10 +116,12 @@ export const Markdown = memo(({ text }: { text: string }) => {
 })
 
 function ToolRow({ b }: { b: Extract<Item, { kind: 'assistant' }>['blocks'][number] & { type: 'tool' } }) {
+  const focus = useContext(Focus)
   const [open, setOpen] = useState(false)
+  useEffect(() => { if (focus.tool && focus.tool === b.id) setOpen(true) }, [focus.n]) // eslint-disable-line
   const pending = b.result === undefined
   return (
-    <div className={`tool ${b.isError ? 'err' : ''}`}>
+    <div className={`tool ${b.isError ? 'err' : ''}`} data-tool={b.id}>
       <button className="tool-head" onClick={() => setOpen(!open)}>
         <span className={`dot ${pending ? 'pending' : b.isError ? 'bad' : 'ok'}`} />
         <span className="tool-name">{toolLabel(b.name)}</span>
@@ -282,6 +284,8 @@ const MARK_TITLE = { ok: 'Step succeeded', err: 'Step failed', pending: 'Running
 
 function WorkingCard({ turn, renderEntry, startedAt }: { turn: WorkTurn; renderEntry: (entry: Entry) => React.ReactNode; startedAt?: number }) {
   const [open, setOpen] = useState(false)
+  const focus = useContext(Focus)
+  useEffect(() => { if (focus.index != null && turn.work.some(e => e.index === focus.index)) setOpen(true) }, [focus.n]) // eslint-disable-line
   const id = useId()
   const { preview, latestTool, steps, errors } = workSummary(turn.work)
   const intents = useMemo(() => workPhases(turn.work, turn.running).length, [turn.work, turn.running])
@@ -339,6 +343,8 @@ function WorkPhases({ turn, renderEntry }: { turn: WorkTurn; renderEntry: (entry
 }
 function PhaseRow({ p, n, renderEntry }: { p: Phase; n: number; renderEntry: (entry: Entry) => React.ReactNode }) {
   const [open, setOpen] = useState(p.state === 'running')
+  const focus = useContext(Focus)
+  useEffect(() => { if (focus.index != null && p.entries.some(e => e.index === focus.index)) setOpen(true) }, [focus.n]) // eslint-disable-line
   const took = p.startedAt && p.endedAt && p.endedAt > p.startedAt ? shortDuration(p.endedAt - p.startedAt) : ''
   return <li className={`phase phase-${p.state}`}>
     <button className="phase-head" aria-expanded={open} onClick={() => setOpen(v => !v)} title={PHASE_TITLE[p.state]}>
@@ -360,6 +366,8 @@ function PhaseRow({ p, n, renderEntry }: { p: Phase; n: number; renderEntry: (en
 // per step with the start of its output. The exact tool calls stay one click away.
 function PhaseResults({ p, renderEntry }: { p: Phase; renderEntry: (entry: Entry) => React.ReactNode }) {
   const [raw, setRaw] = useState(false)
+  const focus = useContext(Focus)
+  useEffect(() => { if (focus.index != null && p.entries.some(e => e.index === focus.index)) setRaw(true) }, [focus.n]) // eslint-disable-line
   if (!p.results.length && !p.outcome) return <>{p.entries.map(renderEntry)}</>
   return <div className="phase-results">
     {p.outcome && <div className="phase-outcome"><Markdown text={p.outcome} /></div>}
@@ -374,6 +382,22 @@ function PhaseResults({ p, renderEntry }: { p: Phase; renderEntry: (entry: Entry
   </div>
 }
 
+// Jump to a point in a thread (e.g. where a file was made): opens the folds that hide it, scrolls
+// there and flashes it. Works across views: the request waits until that chat's thread is drawn.
+export type FocusAt = { uuid?: string; ts?: number; tool?: string }
+const Focus = createContext<{ index: number | null; tool?: string; n: number }>({ index: null, n: 0 })
+let pendingFocus: { convId: string; at: FocusAt; t: number } | null = null
+export function focusInChat(convId: string, at: FocusAt) {
+  pendingFocus = { convId, at, t: Date.now() }
+  dispatchEvent(new CustomEvent('perch-focus', { detail: pendingFocus }))
+}
+const indexOf = (items: Item[], at: FocusAt) => {
+  if (at.tool) { const i = items.findIndex(it => it.kind === 'assistant' && it.blocks.some(b => b.type === 'tool' && b.id === at.tool)); if (i >= 0) return i }
+  if (at.uuid) { const i = items.findIndex(it => (it as any).uuid === at.uuid); if (i >= 0) return i }
+  if (at.ts) { const i = items.findIndex(it => ((it as any).ts ?? 0) >= at.ts!); if (i >= 0) return i }
+  return -1
+}
+
 const TAIL_ROWS = 8 // rows (turns) drawn on the first paint of a thread
 export function Messages({ items, running, onBranch, onRewind, convId }: { items: Item[]; running?: boolean; onBranch?: (u: string) => void; onRewind?: (u: string) => void; convId?: string | null }) {
   const [menu, setMenu] = useState<{ x: number; y: number; uuid?: string; text: string } | null>(null)
@@ -382,6 +406,38 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
   const threadKey = convId ?? ''
   const [fullFor, setFullFor] = useState<string | null>(null)
   const has = items.length > 0
+  const [focus, setFocus] = useState<{ index: number | null; tool?: string; n: number }>({ index: null, n: 0 })
+  const itemsRef = useRef(items); itemsRef.current = items
+  useEffect(() => {
+    if (!convId || !has) return
+    const take = () => {
+      const f = pendingFocus
+      if (!f || f.convId !== convId || Date.now() - f.t > 15_000) return
+      const i = indexOf(itemsRef.current, f.at)
+      if (i < 0) return
+      pendingFocus = null
+      setFullFor(threadKey)
+      setFocus(x => ({ index: i, tool: f.at.tool, n: x.n + 1 }))
+    }
+    take()
+    addEventListener('perch-focus', take)
+    return () => removeEventListener('perch-focus', take)
+  }, [convId, has]) // eslint-disable-line
+  useEffect(() => {
+    if (focus.index == null) return
+    let tries = 0, raf = 0
+    // The folds open over a frame or two (and the rest of a long thread may still be drawing).
+    const find = () => {
+      const item = document.querySelector<HTMLElement>(`[data-item="${CSS.escape(`${convId}:${focus.index}`)}"]`)
+      const el = (focus.tool && item?.querySelector<HTMLElement>(`[data-tool="${CSS.escape(focus.tool)}"]`)) || item
+      if (!el) { if (++tries < 40) raf = requestAnimationFrame(find); return }
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.classList.remove('focus-flash'); void el.offsetWidth; el.classList.add('focus-flash')
+      setTimeout(() => el.classList.remove('focus-flash'), 2400)
+    }
+    raf = requestAnimationFrame(find)
+    return () => cancelAnimationFrame(raf)
+  }, [focus.n]) // eslint-disable-line
   useEffect(() => {
     if (!has) return
     const f = requestAnimationFrame(() => startTransition(() => setFullFor(threadKey)))
@@ -405,8 +461,9 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
   const hasTimers = items.some(it => it.kind === 'assistant' && it.blocks.some(b => b.type === 'tool' && b.name === 'mcp__perch__follow_up'))
   const promises = useLive<{ promises: PromiseRow[] }>(convId && hasTimers ? `/api/conversations/${encodeURIComponent(convId)}/promises` : null, ['conversations'], undefined, 60_000).data?.promises ?? []
   const renderEntry = ({ item: it, index: i }: Entry) => {
-    if (it.kind === 'user') return <div key={i} className="msg user" onContextMenu={e => msgMenu(e, it.uuid, it.text)}><MsgActions uuid={it.uuid} onBranch={onBranch} onRewind={onRewind} text={it.text} ts={it.ts} /><UserBubble text={it.text} /></div>
-    if (it.kind === 'error') return <div key={i} className="msg note bad">{it.text}<Fix text={it.text} items={items} at={i} convId={convId} /></div>
+    const at = `${convId ?? ''}:${i}`
+    if (it.kind === 'user') return <div key={i} data-item={at} className="msg user" onContextMenu={e => msgMenu(e, it.uuid, it.text)}><MsgActions uuid={it.uuid} onBranch={onBranch} onRewind={onRewind} text={it.text} ts={it.ts} /><UserBubble text={it.text} /></div>
+    if (it.kind === 'error') return <div key={i} data-item={at} className="msg note bad">{it.text}<Fix text={it.text} items={items} at={i} convId={convId} /></div>
     if (it.kind === 'notice') return <div key={i} className="msg notice small muted">↳ {it.text}</div>
     if (it.kind === 'result') return (
       <div key={i} className={`msg result ${it.ok ? '' : 'bad'}`}>
@@ -419,7 +476,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
     const prevModel = (items.slice(0, i).reverse().find(x => x.kind === 'assistant' && (x as any).model) as any)?.model
     const changed = it.model && prevModel && modelName(it.model) !== modelName(prevModel)
     return (
-      <div key={i} className="msg assistant" onContextMenu={e => msgMenu(e, it.uuid, textOf(it))}>
+      <div key={i} data-item={at} className="msg assistant" onContextMenu={e => msgMenu(e, it.uuid, textOf(it))}>
         {changed && <div className="model-switch small muted">↳ {modelName(it.model!)}</div>}
         <MsgActions uuid={it.uuid} onBranch={onBranch} onRewind={onRewind} text={textOf(it)} ts={it.ts} />
         {it.blocks.map((b, j) => b.type === 'text' && blockerInText(b.text) ? <div key={j}><Markdown text={b.text} /><Fix text={b.text} items={items} at={i} convId={convId} /></div>
@@ -433,7 +490,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
     )
   }
   return (
-    <PrRefs.Provider value={known}>
+    <PrRefs.Provider value={known}><Focus.Provider value={focus}>
       {menu && (
         <div className="ctx" style={{ left: Math.min(menu.x, innerWidth - 230), top: Math.min(menu.y, innerHeight - 110) }}>
           <button onClick={() => copyText(menu.text)}>⧉ Copy message</button>
@@ -450,7 +507,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
         {!row.running && <WaitCard waits={turnWaits([...row.work, ...row.answer])} promises={promises} />}
       </div>)}
       {convId && !running && items.some(x => x.kind === 'assistant') && <div className="msg rate-row"><Rate convId={convId} /></div>}
-    </PrRefs.Provider>
+    </Focus.Provider></PrRefs.Provider>
   )
 }
 
