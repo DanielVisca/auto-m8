@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { ftsQuery } from './context.ts'
+import { retryGitHub } from './gh.ts'
 import { cronMatches, isDue, lastDue } from './routines.ts'
 import { parseMcpList } from './status.ts'
 import { applyLine, asksUser, emptyMeta, stallOf, toItems, userText } from './transcript.ts'
@@ -1025,4 +1026,19 @@ test('PR insights search: a gh call killed by its timeout is retried, and the er
   assert.equal(e.message, 'GitHub PR search "author:@me is:pr created:>=2026-08-24" (page 6): timed out')
   assert.ok(!e.message.includes('query='))
   assert.match(searchError({ stderr: 'gh: Something broke' }, 'q', 1).message, /\(page 1\): gh: Something broke$/)
+})
+
+test('a GitHub hiccup on a follow-up GraphQL call is retried, real errors are not', async () => {
+  let calls = 0
+  const flaky = async () => { if (++calls < 3) throw new Error(calls === 1 ? 'gh api graphql: empty reply' : 'gh api graphql: gh: HTTP 503'); return 'ok' }
+  assert.equal(await retryGitHub(flaky, [0, 0]), 'ok')
+  assert.equal(calls, 3)
+  calls = 0
+  await assert.rejects(retryGitHub(async () => { calls++; throw new Error('GitHub checks pagination did not advance') }, [0, 0]), /did not advance/)
+  assert.equal(calls, 1)
+  calls = 0
+  await assert.rejects(retryGitHub(async () => { calls++; throw new Error('gh api graphql: empty reply') }, [0, 0]), /empty reply/)
+  assert.equal(calls, 3)
+  assert.equal(friendly(new Error('gh api graphql: empty reply'), 'Reading all checks').status, 'retrying')
+  assert.equal(friendly(new Error('gh api graphql: gh: Something went wrong while executing your query on 2026-11-24'), 'x').transient, true)
 })

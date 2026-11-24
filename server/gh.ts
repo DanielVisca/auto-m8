@@ -205,6 +205,19 @@ export async function ghGraphql(query: string, opts: { timeout?: number; maxBuff
   throw new Error('gh api graphql: empty reply')
 }
 
+// GitHub's own hiccups on a single GraphQL call: gh exiting 0 with nothing on stdout, a 5xx,
+// "Something went wrong while executing your query", a dropped connection. They clear on the
+// next try, so a follow-up call (like a second page of checks) retries them instead of failing.
+export const GITHUB_TRANSIENT = /empty reply|HTTP 5\d\d|Something went wrong while executing your query|No server is currently available|unexpected EOF|timed out/i
+export async function retryGitHub<T>(fn: () => Promise<T>, waits = [1_000, 3_000]): Promise<T> {
+  for (let i = 0; ; i++) {
+    try { return await fn() } catch (e: any) {
+      if (i >= waits.length || ghOffline() || !GITHUB_TRANSIENT.test(String(e?.message ?? e))) throw e
+      await new Promise(r => setTimeout(r, waits[i]))
+    }
+  }
+}
+
 // Any other gh command, with the same back-off and short errors.
 export async function ghJson<T = any>(args: string[], opts: { timeout?: number; maxBuffer?: number } = {}): Promise<T> {
   const what = `gh ${args.slice(0, 2).join(' ')}`
@@ -281,9 +294,9 @@ async function allContexts(rollup: CheckRollup, pullRequestNumber?: number): Pro
     const cursor = page.pageInfo.endCursor
     if (!rollup.id || !cursor || seen.has(cursor)) throw new Error('GitHub checks pagination did not advance')
     seen.add(cursor)
-    const { data, errors } = await ghGraphql(`{ node(id: ${JSON.stringify(rollup.id)}) {
+    const { data, errors } = await retryGitHub(() => ghGraphql(`{ node(id: ${JSON.stringify(rollup.id)}) {
       ... on StatusCheckRollup { contexts(first: 100, after: ${JSON.stringify(cursor)}) { ${checkContextFields(pullRequestNumber)} } }
-    } }`)
+    } }`))
     const next = data.node?.contexts
     if (errors.length || !next?.nodes || !next?.pageInfo) throw new Error(`GitHub checks: ${errors.join('; ') || 'missing context page'}`)
     page = next
