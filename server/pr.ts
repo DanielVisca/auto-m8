@@ -164,11 +164,16 @@ export async function deepAudit(url: string) {
 // Review bots post HTML (severity badges, details blocks): keep the words, drop the markup.
 const readable = (s: any) => String(s ?? '').replace(/<!--[\s\S]*?-->/g, '').replace(/<img[^>]*alt="([^"]*)"[^>]*>/gi, '$1').replace(/<\/?(a|details|summary|br|p|div|span|sub|sup)[^>]*>/gi, ' ').replace(/<[^>]+>/g, '').replace(/[ \t]+/g, ' ').trim()
 const previewCache = new Map<string, { at: number; data: any }>()
-export async function preview(url: string) {
+// Stale-while-revalidate lives in the browser (it paints its last copy, then swaps in this answer).
+// Here: answers younger than maxAge are reused, and concurrent views of one PR share one GitHub call.
+const previewInflight = new Map<string, Promise<any>>()
+export async function preview(url: string, maxAge = 300_000) {
   const hit = previewCache.get(url)
-  if (hit && Date.now() - hit.at < 300_000) return withConversations(hit.data)
+  if (hit && Date.now() - hit.at < maxAge) return withConversations(hit.data)
+  let p = previewInflight.get(url)
+  if (!p) { p = readPreview(url).finally(() => previewInflight.delete(url)); previewInflight.set(url, p) }
   // GitHub's budget spent or GitHub unreachable: the last preview beats an error card.
-  try { return withConversations(await readPreview(url)) } catch (e) { if (hit) return withConversations(hit.data); throw e }
+  try { return withConversations(await p) } catch (e) { if (hit) return withConversations(hit.data); throw e }
 }
 async function readPreview(url: string) {
   const pr = parse(url)
@@ -187,6 +192,7 @@ async function readPreview(url: string) {
     path: t.path, line: t.line, outdated: t.isOutdated, author: t.comments.nodes[0]?.author?.login, url: t.comments.nodes[0]?.url, body: readable(t.comments.nodes[0]?.body).slice(0, 400), replies: t.comments.nodes.length - 1,
   }))
   const data = {
+    fetchedAt: Date.now(),
     url, title: p.title, state: p.state === 'OPEN' ? (p.isDraft ? 'draft' : 'open') : p.state.toLowerCase(), review: p.reviewDecision, author: p.author?.login,
     body: String(p.body ?? '').replace(/<!--[\s\S]*?-->/g, '').trim().slice(0, 4000), additions: p.additions, deletions: p.deletions, changedFiles: p.changedFiles,
     head: p.headRefName, base: p.baseRefName, updatedAt: p.updatedAt, files: p.files.nodes, checks: { state: p.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null, failing },
@@ -196,7 +202,7 @@ async function readPreview(url: string) {
       .filter((r: any) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body?.trim()) || r.state === 'APPROVED')
       .map((r: any) => ({ author: r.author?.login, state: r.state, body: String(r.body ?? '').slice(0, 1500), at: r.submittedAt })),
   }
-  previewCache.set(url, { at: Date.now(), data })
+  previewCache.set(url, { at: data.fetchedAt, data })
   return data
 }
 // Conversations about this PR, from every source perch indexes; fresh each time (cheap, local).

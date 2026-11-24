@@ -159,8 +159,8 @@ function latestStep(id: string) {
 }
 
 // One PR's page: the preview, plus every agent and conversation on it with what each is doing.
-export async function prPage(url: string) {
-  const p = await preview(url)
+export async function prPage(url: string, maxAge?: number) {
+  const p = await preview(url, maxAge)
   if (!presence(url).length) await refreshPresence([url])
   const agents = presence(url).map(a => ({ ...a, now: a.conversation ? latestStep(a.conversation) : null }))
   const conversations = all<any>(`select c.id, coalesce(u.title, c.title, c.first_prompt) title, c.source, c.origin, c.status, c.started_at, c.updated_at, c.stall

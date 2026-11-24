@@ -908,7 +908,9 @@ route('GET', '/api/insights/prs', (_m, _r, _s, q) => prFlow(Number(q.get('days')
 // The ↻ button: start a fetch now, even if the last one is under 3 minutes old; 'prflow' fires when it lands.
 route('POST', '/api/insights/prs/refresh', async (_m, _r, _s, q) => { const d = await prFlow(Number(q.get('days') ?? 90), false, true); broadcast('prflow'); return { refreshing: !!d?.refreshing } })
 route('GET', '/api/prs/sidebar', (_m, _r, _s, q) => prSidebar(q.get('fresh') === '1'))
-route('GET', '/api/pr/page', (_m, _r, _s, q) => prPage(String(q.get('url') ?? '')))
+// Someone is looking at this PR: GitHub answers up to a minute old are fine (the page polls every 30s).
+const PR_VIEW_MAX_AGE = 60_000
+route('GET', '/api/pr/page', (_m, _r, _s, q) => prPage(String(q.get('url') ?? ''), PR_VIEW_MAX_AGE))
 route('GET', '/api/prs/plan', (_m, _r, _s, q) => mergePlan(String(q.get('urls') ?? '').split(',').filter(Boolean)))
 route('GET', '/api/pr/journey', (_m, _r, _s, q) => journey(String(q.get('url') ?? ''), q.get('fresh') === '1'))
 route('POST', '/api/pr/queue', async (_m, req) => { const b = await body(req); return queuePr(String(b.pr ?? ''), b.on !== false) })
@@ -932,7 +934,7 @@ route('GET', '/api/origins', async (_m, _r, _s, q) => ({ status: originSyncStatu
 route('GET', '/api/pr/brief', async (_m, _r, _s, q) => { const { prBrief } = await import('./ghpr.ts'); return prBrief(String(q.get('url') ?? ''), u => get<any>('select title, state, draft from prs where url = ?', u)) })
 // A bare "#135188" in a reply: the one PR perch knows with that number (none or several: no link).
 route('GET', '/api/pr/resolve', (_m, _r, _s, q) => { const n = Number(q.get('n')); if (!Number.isInteger(n) || n < 1) return { url: null }; const r = all<{ url: string }>('select url from prs where number = ? limit 2', n); return { url: r.length === 1 ? r[0].url : null } })
-route('GET', '/api/pr/preview', (_m, _r, _s, q) => prPreview(String(q.get('url') ?? '')))
+route('GET', '/api/pr/preview', (_m, _r, _s, q) => prPreview(String(q.get('url') ?? ''), PR_VIEW_MAX_AGE))
 route('POST', '/api/pr/audit', async (_m, req) => { const r = await deepAudit(String((await body(req)).pr)); broadcast('conversations'); return r })
 route('POST', '/api/enrich', async (_m, req) => enrich(String((await body(req)).url ?? '')))
 route('GET', '/api/folders', () => ({ folders: folders(), organizer: organizerStatus }))

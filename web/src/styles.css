@@ -573,6 +573,8 @@ img.brand { object-fit: contain; }
 .pr-card { padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; max-width: 100%; }
 .details .pr-card { padding: 6px 0; }
 .pr-card-head b { overflow-wrap: anywhere; }
+.pr-card-head:has(.pr-fresh) { display: flex; gap: 8px; align-items: baseline; }
+.pr-fresh { display: inline-flex; gap: 5px; align-items: center; }
 .pr-section h4 { margin: 4px 0 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .pr-thread { padding: 2px 0; overflow-wrap: anywhere; }
 .pr-body { overflow-wrap: anywhere; max-height: 220px; overflow: auto; }

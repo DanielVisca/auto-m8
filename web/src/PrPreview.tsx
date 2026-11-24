@@ -8,13 +8,15 @@ import { AgentRows, usePrAgents } from './Agents'
 
 // inPage: on the PR's own page, which already shows the title, the agents and the conversations.
 export function PrPreviewCard({ url, inPage, brief }: { url: string; inPage?: boolean; brief?: { title?: string; author?: string } }) {
-  const { data: p, error } = useLive<any>(`/api/pr/preview?url=${encodeURIComponent(url)}`)
+  // Paints the last copy of this PR at once (browser cache), then swaps in GitHub's answer when it lands.
+  const { data: cached, error, loading, stale } = useLive<any>(`/api/pr/preview?url=${encodeURIComponent(url)}`)
+  const p = stale ? undefined : cached
   const agents = usePrAgents(url)
   // Title and owner show at once from the brief the pill already holds (fetched only when there is none); the rest fills in.
   const [fetched, setFetched] = useState<any>(null)
   useEffect(() => { if (brief?.author) return; let live = true; fetch(`/api/pr/brief?url=${encodeURIComponent(url)}`).then(r => r.ok ? r.json() : null).then(d => live && setFetched(d)).catch(() => {}); return () => { live = false } }, [url, brief?.author])
   const b = brief?.author ? brief : fetched
-  if (error) return <div className="pr-card muted small">{error}</div>
+  if (error && !p) return <div className="pr-card muted small">{error}</div>
   if (!p) return (
     <div className="pr-card">
       {b?.title && !inPage && <div className="pr-card-head"><b>{b.title}</b></div>}
@@ -25,7 +27,7 @@ export function PrPreviewCard({ url, inPage, brief }: { url: string; inPage?: bo
   const chk = p.checks.failing.length ? 'bad' : p.checks.state === 'SUCCESS' ? 'ok' : 'pending'
   return (
     <div className="pr-card">
-      {!inPage && <div className="pr-card-head"><b>{p.title}</b></div>}
+      {!inPage && <div className="pr-card-head"><b className="grow">{p.title}</b><Freshness loading={loading} fetchedAt={p.fetchedAt} error={error} hasData /></div>}
       {p.author && <div className="pr-owner small"><Avatar login={p.author} /><span>opened by <b>{p.author}</b></span></div>}
       <div className="pr-pills small">
         <span className={`pr-pill st-${p.state}`}>{p.state}</span>
@@ -93,4 +95,12 @@ function Diff({ add, del }: { add: number; del: number }) {
 function Avatar({ login }: { login?: string }) {
   if (!login) return null
   return <img className="pr-avatar" src={`https://github.com/${login.replace(/\[bot\]$/, '')}.png?size=40`} alt="" onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+}
+
+// How fresh the PR on screen is: the cached copy shows at once, with "pulling update" while GitHub answers.
+export function Freshness({ loading, fetchedAt, error, hasData }: { loading: boolean; fetchedAt?: number; error?: string | null; hasData: boolean }) {
+  if (!hasData) return null
+  if (loading) return <span className="muted small nowrap pr-fresh" title="Showing the last copy while the latest comes from GitHub"><span className="spin" /> Pulling update…</span>
+  if (error) return <span className="muted small nowrap pr-fresh" title={error}>⚠ couldn’t refresh{fetchedAt ? ` · ${ago(fetchedAt)} old` : ''}</span>
+  return fetchedAt ? <span className="muted small nowrap pr-fresh" title={new Date(fetchedAt).toLocaleString()}>updated {ago(fetchedAt) === 'now' ? 'just now' : `${ago(fetchedAt)} ago`}</span> : null
 }

@@ -5,13 +5,13 @@ import { ago, post, sendChat, useLive } from './api'
 import { MiniChat } from './Mini'
 import { Brand, sourceBrand } from './Brand'
 import { PrMenu } from './Home'
-import { PrPreviewCard } from './PrPreview'
+import { Freshness, PrPreviewCard } from './PrPreview'
 import { AgentRows } from './Agents'
 import { JourneyCard, ReadyCard } from './Journey'
 
 
 export function PrPage({ url, onOpen, sideConversations }: { url: string; onOpen: (id: string) => void; sideConversations?: boolean }) {
-  const { data: p, reload } = useLive<any>(`/api/pr/page?url=${encodeURIComponent(url)}`, ['conversations', 'chats'])
+  const { data: p, reload, loading, error, stale } = useLive<any>(`/api/pr/page?url=${encodeURIComponent(url)}`, ['conversations', 'chats'])
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
   useEffect(() => { const t = setInterval(reload, 30_000); return () => clearInterval(t) }, [url]) // eslint-disable-line
@@ -21,6 +21,7 @@ export function PrPage({ url, onOpen, sideConversations }: { url: string; onOpen
     <div className="page pr-page">
       <div className="row-flex">
         <h2 className="grow">{p?.title ?? `#${n}`}</h2>
+        <Freshness loading={loading} fetchedAt={stale ? undefined : p?.fetchedAt} error={p ? error : null} hasData={!!p && !stale} />
         <a className="button" href={url} target="_blank" rel="noreferrer">↗ GitHub</a>
         <button ref={btn} onClick={() => { const r = btn.current!.getBoundingClientRect(); setMenu({ x: r.left, y: r.bottom + 4 }) }}>Actions ▾</button>
       </div>
