@@ -22,6 +22,7 @@ import { all } from './db.ts'
 import { posthogFetch } from './indexer.ts'
 import { settings } from './settings.ts'
 import { ghExec, ghPressure } from './gh.ts'
+import { isPrScoutName } from './needsprcheck.ts'
 
 const exec = promisify(execFile)
 const MIN = 60_000
@@ -93,7 +94,7 @@ const reviewhogStatus = (url: string, ttl: number) => cached(`rh:${url}`, ttl, (
 // The scout that decides which PRs get a shepherd: its next run is the shepherd's next look.
 const prScout = () => cached('scout:prs', 10 * MIN, async () => {
   const r: any = await posthogFetch(`${p()}/signals/scout/configs/?limit=200`)
-  const s = ((r.results ?? r) as any[]).find(x => /scout-prs$/.test(x.skill_name) || /\bprs?\b.*shepherd|shepherd/i.test(x.description ?? ''))
+  const s = ((r.results ?? r) as any[]).find(x => isPrScoutName(x.skill_name) || /\bprs?\b.*shepherd|shepherd/i.test(x.description ?? ''))
   return s ? { id: s.id, name: s.display_name || s.skill_name, enabled: s.enabled && s.status === 'active', last: s.last_run_at ? Date.parse(s.last_run_at) : null, every: (s.run_interval_minutes ?? 240) * MIN, cron: s.run_cron_schedule } : null
 })
 

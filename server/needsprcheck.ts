@@ -9,6 +9,14 @@ import { updateNeed, saveSync, syncValue, HOUR, type Need } from './needsstore.t
 const PR_URL = /github\.com\/(PostHog\/[\w.-]+)\/pull\/(\d+)/g
 const SHORT = /^(?:☁\s*)?(?:PR shepherd: |Shepherd: |Unblock )(?:PostHog\/)?([\w.-]+)#(\d+)\s*$/
 
+// The PR digest scout's name. Any name ending in scout-prs or scout-<anything>-prs counts
+// (signals-scout-prs, signals-scout-team-prs, my-scout-prs), so you can name your own.
+const SCOUT_NAME = String.raw`[\w-]*scout(?:-[a-z0-9-]+)?-prs`
+export const isPrScoutName = (name: string) => /scout(?:-[a-z0-9-]+)?-prs$/.test(String(name ?? '').trim())
+const DIGEST_TITLE = new RegExp(`^(?:Scout: ${SCOUT_NAME}\\s*$|PR digest|PR summary)`, 'i')
+const DIGEST_PROMPT = new RegExp(`^\\[sandbox_prompt:signals_scout:${SCOUT_NAME}\\]`)
+const DIGEST_SOURCE = new RegExp(`${SCOUT_NAME}\\b`)
+
 export type PrRef = { repo: string; number: number }
 export type PrState = { state: string; mergedAt?: string | null; closedAt?: string | null }
 
@@ -19,8 +27,7 @@ export function prsDeciding(n: Pick<Need, 'source' | 'title' | 'context' | 'url'
   const isShepherd = n.source === 'shepherd' && (n.url ?? '').match(/\/pull\/\d+$/)
   // A digest's ask is "review these PRs". Other asks that merely name the digest scout
   // (e.g. "Scout self-improvement: signals-scout-prs ...") are about the scout, not the PRs.
-  const isDigest = /^(?:Scout: signals-scout-prs\s*$|PR digest|PR summary)/i.test(n.title.trim())
-    || (/signals-scout-prs/.test(n.source) && /^\[sandbox_prompt:signals_scout:signals-scout-prs\]/.test(n.title.trim()))
+  const isDigest = DIGEST_TITLE.test(n.title.trim()) || (DIGEST_SOURCE.test(n.source) && DIGEST_PROMPT.test(n.title.trim()))
   if (!isShepherd && !isDigest) return null
   const text = isShepherd ? n.url ?? '' : `${n.title}\n${n.context ?? ''}\n${n.url ?? ''}`
   const refs = new Map<string, PrRef>()

@@ -213,3 +213,13 @@ test('shepherd runs for the same PR share one Needs me item', async () => {
   assert.equal(chatNeedKey('d', 'Decide whether to merge posthog#1'), 'chat:d')
   assert.equal(chatNeedKey('e', 'Blocked work', 'Shepherd: posthog#5'), 'pr:PostHog/posthog#5')
 })
+
+test('the PR digest scout can be named scout-prs or scout-<anything>-prs', async () => {
+  const { isPrScoutName, prsDeciding } = await import('./needsprcheck.ts')
+  for (const name of ['signals-scout-prs', 'scout-prs', 'signals-scout-team-prs', 'signals-scout-my-org-2-prs']) assert.equal(isPrScoutName(name), true, name)
+  for (const name of ['signals-scout-prs-weekly', 'signals-scout', 'prs', 'scoutprs', '']) assert.equal(isPrScoutName(name), false, name)
+  const ctx = 'https://github.com/PostHog/app/pull/7'
+  assert.deepEqual(prsDeciding({ source: 'PostHog scout · signals-scout-team-prs', title: 'Scout: signals-scout-team-prs', context: ctx, url: null }), [{ repo: 'PostHog/app', number: 7 }])
+  assert.deepEqual(prsDeciding({ source: 'PostHog scout · signals-scout-team-prs', title: '[sandbox_prompt:signals_scout:signals-scout-team-prs] review', context: ctx, url: null }), [{ repo: 'PostHog/app', number: 7 }])
+  assert.equal(prsDeciding({ source: 'PostHog scout', title: 'Scout self-improvement: signals-scout-team-prs', context: ctx, url: null }), null)
+})
