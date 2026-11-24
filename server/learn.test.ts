@@ -28,8 +28,12 @@ test('ledgerRow: open PRs and unresolved proofs are censored, not failures', () 
   const base = { url: 'u', repo: 'PostHog/posthog', area: 'metrics', created: 0, closed: null }
   const open = ledgerRow({ ...base, merged: null, outcome: 'moving' }, null, null, null)
   assert.equal(open.shipped, null)
-  const quiet = ledgerRow({ ...base, merged: 3600_000, outcome: 'merged' }, { total: 2, ms: 1 }, { state: 'not_yet', works: 'no_signal' }, 'claude-opus-5-5')
+  const day = 86400_000
+  const quiet = ledgerRow({ ...base, merged: 3600_000, outcome: 'merged' }, { total: 2, ms: 1 }, { state: 'not_yet', works: 'no_signal' }, 'claude-opus-5-5', 3600_000 + 2 * day)
   assert.equal(quiet.shipped, 1); assert.equal(quiet.proven, null); assert.equal(quiet.hoursToMerge, 1)
+  // past the 7-day proof window a not_yet PR was never proven: an outcome (0), with no verdict time
+  const never = ledgerRow({ ...base, merged: 3600_000, outcome: 'merged' }, null, { state: 'not_yet', works: 'no_signal', updated_at: 5 }, null, 3600_000 + 8 * day)
+  assert.equal(never.proven, 0); assert.equal(never.verdictAt, null); assert.equal(never.hoursToVerdict, null)
   const bad = ledgerRow({ ...base, merged: 1, outcome: 'merged' }, null, { state: 'concerns', updated_at: 7200_000 }, null)
   assert.equal(bad.proven, 0); assert.equal(bad.hoursToVerdict, 2)
   assert.equal(ledgerRow({ ...base, merged: null, outcome: 'abandoned' }, null, null, null).shipped, 0)

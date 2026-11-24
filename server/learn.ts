@@ -64,14 +64,18 @@ export type LedgerRow = {
   usd: number; activeMs: number; model: string | null
   proof: string | null; works: string | null; contained: string | null; verdictAt: number | null
   shipped: 0 | 1 | null      // merged = 1, abandoned/stale = 0, still open = censored
-  proven: 0 | 1 | null       // proven = 1, concerns = 0, anything else = censored (PostHog/posthog only)
+  proven: 0 | 1 | null       // proven = 1; concerns, or still not_yet after the 7-day proof window = 0; younger = censored (PostHog/posthog only)
   hoursToMerge: number | null; hoursToVerdict: number | null; arm: string
 }
 
-export function ledgerRow(p: any, spend: any, proof: any, model: string | null): LedgerRow {
+// The scouts judge a PR by day 7 at the latest (walkthrough round 2). A PR still `not_yet` after that was
+// never proven (unused, or nothing observable), which is an outcome, not missing data.
+export const PROOF_WINDOW = 7 * DAY
+export function ledgerRow(p: any, spend: any, proof: any, model: string | null, now = Date.now()): LedgerRow {
   const shipped = p.merged ? 1 : p.outcome === 'abandoned' || p.outcome === 'stale' ? 0 : null
-  const proven = proof?.state === 'proven' ? 1 : proof?.state === 'concerns' ? 0 : null
-  const verdictAt = proven != null ? proof.updated_at ?? null : null
+  const windowOver = !!p.merged && now - p.merged >= PROOF_WINDOW
+  const proven = proof?.state === 'proven' ? 1 : proof?.state === 'concerns' ? 0 : proof?.state === 'not_yet' && windowOver ? 0 : null
+  const verdictAt = proof?.state === 'proven' || proof?.state === 'concerns' ? proof.updated_at ?? null : null
   return {
     url: p.url, repo: p.repo, area: p.area, created: p.created, merged: p.merged, closed: p.closed, outcome: p.outcome,
     usd: spend?.total ?? 0, activeMs: spend?.ms ?? 0, model,
@@ -212,8 +216,14 @@ export async function report(now = Date.now()) {
   const since30 = now - 30 * DAY
   const merged30 = rows.filter(r => r.merged && r.merged > since30)
   const coverage = merged30.length ? merged30.filter(r => r.usd > 0 && r.shipped != null).length / merged30.length : null
-  const works = all<any>(`select works from pr_proof where updated_at > ? and works is not null and works != ''`, now - 14 * DAY)
-  const noSignal = works.length ? works.filter(w => w.works === 'no_signal').length / works.length : null
+  // Labels are settled once the Works check stops being `pending` for PRs old enough to have had their round 2 (4 days).
+  // A final no_signal ("unused for 3 days", "nothing observable") is an answer, so it is reported, not gated.
+  const works = all<any>(`select p.works from pr_proof p join shepherd_watch w on w.url = p.url
+    where p.updated_at is not null and p.works is not null and p.works != '' and w.merged_at < ?`, now - 4 * DAY)
+  const share = (f: (w: any) => boolean) => works.length ? works.filter(f).length / works.length : null
+  const settled = share(w => w.works !== 'pending')
+  const noSignal = share(w => w.works === 'no_signal')
+  const resolved = share(w => w.works === 'pass' || w.works === 'concern' || w.works === 'n_a')
   const samples = all<any>(`select at, reasons from learn_samples where at > ?`, now - 14 * DAY)
   const sampledDays = samples.length ? (now - samples[0].at) / DAY : 0
   const constrainedShare = samples.length ? samples.filter(s => s.reasons).length / samples.length : null
@@ -222,8 +232,9 @@ export async function report(now = Date.now()) {
   const cal = calibration(rows)
 
   const gates = {
-    phase0: { metric: 'Works no_signal share, 14d', value: noSignal, n: works.length, target: 0.1, stopAbove: 0.2,
-      status: noSignal == null ? 'no data' : noSignal < 0.1 ? 'pass' : noSignal > 0.2 ? 'blocked' : 'improving' },
+    phase0: { metric: 'Works labels settled (not pending), PRs merged 4d+ ago', value: settled, n: works.length, target: 0.9, stopBelow: 0.6,
+      finalNoSignal: noSignal, resolvedPassConcernNa: resolved,
+      status: settled == null ? 'no data' : settled >= 0.9 ? 'pass' : settled < 0.6 ? 'blocked' : 'improving' },
     phase1: { metric: 'merged PRs (30d) with cost and outcome', value: coverage, n: merged30.length, target: 0.9,
       status: coverage == null ? 'no data' : coverage >= 0.9 ? 'pass' : 'fail' },
     phase1b: { metric: 'share of 5-min samples with a limit hit', value: constrainedShare, n: samples.length, days: sampledDays, target: 0.15, reasons,
