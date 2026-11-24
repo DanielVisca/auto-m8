@@ -1,3 +1,4 @@
+import { toolLabel } from './stream'
 // A presentation of the existing transcript. Never rewrite messages or change agent input.
 import type { Block, Item } from './api'
 
@@ -163,7 +164,7 @@ const firstSentence = (s: string) => {
 }
 const stepTitle = (t: Tool) => typeof t.input?.description === 'string' && t.input.description.trim() ? t.input.description.trim()
   : typeof t.input?.activeForm === 'string' ? t.input.activeForm : ''
-const toolName = (n: string) => n.startsWith('mcp__') ? n.split('__').slice(1).join(' · ') : n
+const toolName = toolLabel
 const inputHint = (i: any) => {
   if (!i || typeof i !== 'object') return ''
   const v = i.command ?? i.file_path ?? i.query ?? i.pattern ?? i.url ?? i.prompt ?? i.skill ?? i.action ?? ''

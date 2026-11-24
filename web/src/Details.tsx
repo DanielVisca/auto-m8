@@ -1,3 +1,4 @@
+import { toolLabel } from './stream'
 import { useState } from 'react'
 import { SHOW_LABELS, ago, api, post, titleOf, useLive, type Conversation, type PR } from './api'
 import { PrBadge, StateMenu } from './List'
@@ -81,7 +82,7 @@ export function Details({ id, onOpen, onMakeRoutine }: { id: string; onOpen: (id
         <section>
           <h4>Tools used</h4>
           {c.tools.map(t => (
-            <div key={t.name} className="d-tool small"><span className="grow ellipsis">{t.name.replace(/^mcp__/, '')}</span><span className="muted">{t.n}{t.errors ? <b className="bad"> · {t.errors} err</b> : null}</span></div>
+            <div key={t.name} className="d-tool small"><span className="grow ellipsis">{toolLabel(t.name)}</span><span className="muted">{t.n}{t.errors ? <b className="bad"> · {t.errors} err</b> : null}</span></div>
           ))}
         </section>
       )}

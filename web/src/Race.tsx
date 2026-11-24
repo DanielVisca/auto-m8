@@ -1,3 +1,4 @@
+import { toolLabel } from './stream'
 // Insights → Models: what races and shadow runs say about which model is good at what, and how
 // often the model you reach for is more (or less) than the task needed. Every number drills into
 // the race it came from: diffs, reviews, adjudications, check output, tools used.
@@ -57,7 +58,7 @@ export function Models() {
               <td style={R}>{m.checks ? `${m.checksPassed}/${m.checks}` : '–'}</td><td style={R}>{dur(m.medianMs)}</td><td style={R}>{m.model.startsWith('codex:') ? 'plan' : money(m.medianUsd)}</td><td style={R}>{m.medianTokens ? `${Math.round(m.medianTokens / 1000)}k` : '–'}</td>
               <td style={R}>{pct(m.reviewPrecision)} <span className="muted">({m.raisedValid}/{m.judged})</span></td><td style={R}>{m.against}</td>
               <td className="muted">{Object.entries(m.sizes).map(([k, n]) => `${k} ${n}`).join(' · ') || '–'}</td>
-              <td className="muted ellipsis" style={{ maxWidth: 260 }} title={m.topTools.map(([k, n]: any) => `${k} ×${n}`).join(', ')}>{m.topTools.slice(0, 4).map(([k, n]: any) => `${k.replace(/^mcp__/, '')} ×${n}`).join(', ')}</td>
+              <td className="muted ellipsis" style={{ maxWidth: 260 }} title={m.topTools.map(([k, n]: any) => `${k} ×${n}`).join(', ')}>{m.topTools.slice(0, 4).map(([k, n]: any) => `${toolLabel(k)} ×${n}`).join(', ')}</td>
             </tr>)}</tbody>
           </table></div>}
         {o.models.some((m: any) => m.strengths.length || m.weaknesses.length) && <div className="grid2" style={{ marginTop: 10 }}>

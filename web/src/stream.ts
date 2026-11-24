@@ -116,7 +116,9 @@ export function toolSummary(name: string, input: any): string {
 export function toolLabel(name: string) {
   if (name.startsWith('mcp__')) {
     const [, server, tool] = name.split('__')
-    return `${server.replace(/^claude_ai_|^plugin_\w+?_/, '')} · ${tool}`
+    // The MCP server keeps its internal name (perch); people see the product name.
+    const shown = server === 'perch' ? 'auto-m8' : server.replace(/^claude_ai_|^plugin_\w+?_/, '')
+    return `${shown} · ${tool}`
   }
   return name
 }

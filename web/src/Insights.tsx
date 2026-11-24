@@ -1,3 +1,4 @@
+import { toolLabel } from './stream'
 import { useState } from 'react'
 import { useLive } from './api'
 import { PrFlow } from './PrFlow'
@@ -70,7 +71,7 @@ function Usage({ onOpen }: { onOpen: (id: string) => void }) {
       </section>
       <div className="two">
         <section className="card"><h3>MCP servers</h3><Bars rows={data.servers} label={r => r.server} value={r => r.calls} extra={err} /></section>
-        <section className="card"><h3>Top tools</h3><Bars rows={data.tools.slice(0, 15)} label={r => r.name.replace(/^mcp__/, '')} value={r => r.calls} extra={err} /></section>
+        <section className="card"><h3>Top tools</h3><Bars rows={data.tools.slice(0, 15)} label={r => toolLabel(r.name)} value={r => r.calls} extra={err} /></section>
       </div>
       {(data.skills.length > 0 || data.agents.length > 0) && (
         <div className="two">
