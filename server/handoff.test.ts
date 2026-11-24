@@ -50,7 +50,7 @@ function fixture(lastModel = '') {
     start: () => { c.proc = runner }, startTurn: (_id: string, _prompt: string, meta: any) => { lastModel = meta.model ?? '' }, snapshot: async () => {}, turnEvent() {},
     transcriptPath: () => '/missing', existsSync: () => false, codexThread: () => 'thread',
     tmpdir: () => '/tmp', join: (...parts: string[]) => parts.join('/'), writeFileSync() {},
-    systemPrompt: () => '', childEnv: () => ({}), recordCodexTurn() {}, recordedCodexPrompt: () => null, recordCodexPrompt() {}, recordCodexMessage() {}, indexTranscript() {},
+    systemPrompt: () => '', childEnv: () => ({}), agentsMdBytes: 0, agentsMdKept: new Set(), allMemoryLines: () => [], threadMemory: () => ({ text: '', lines: [] }), CODEX_LIMIT: 32768, statSync: () => ({ size: 0 }), HOME: '/tmp', Buffer, recordCodexTurn() {}, recordedCodexPrompt: () => null, recordCodexPrompt() {}, recordCodexMessage() {}, indexTranscript() {},
     codexTurn: (opts: any) => {
       let resolve!: (r: any) => void
       const done = new Promise(r => { resolve = r })

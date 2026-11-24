@@ -30,7 +30,9 @@ import { join } from 'node:path'
 import { blockerFor } from '../web/src/blockers.ts'
 import { status as connStatus } from './status.ts'
 import { all, get, run } from './db.ts'
-import { askMe, DATA_DIR, settings } from './settings.ts'
+import { askMe, DATA_DIR, HOME, settings } from './settings.ts'
+import { agentsMdBytes, agentsMdKept, allMemoryLines } from './agentsync.ts'
+import { CODEX_LIMIT, threadMemory } from './codexbudget.ts'
 import { snapshot } from './branch.ts'
 import { signature } from './signhook.ts'
 import { originFor, originMarker, originPrompt, chatSubject, startChatOrigin } from './origin.ts'
@@ -585,6 +587,19 @@ function localFallback(c: Chat, at: string, why: string, again: SendOpts[] = [{ 
 }
 
 // ---------- Codex turns ----------
+// Codex's instructions are capped (project_doc_max_bytes, 32 KiB) across the shared AGENTS.md and this
+// thread's own. The thread gets the memory index lines that match its task and that the shared file left
+// out, within what TOTAL_BUDGET leaves (codexbudget.ts). On 2026-11-22 the uncapped total was 42 KB and
+// every Codex turn failed, removing the Claude -> Codex -> cloud -> local fallback.
+function codexSystem(c: Chat, prompt: string) {
+  const base = `${CODEX_NOTE(c.id)}\n\n${systemPrompt(c.context, c.id)}`
+  const row = get<{ t: string }>(`select coalesce(u.title, c.title, '') || ' ' || coalesce(c.first_prompt, '') t from conversations c left join user_state u on u.id = c.id where c.id = ?`, c.id)
+  const shared = agentsMdBytes || (() => { try { return statSync(join(HOME, '.codex', 'AGENTS.md')).size } catch { return 0 } })()
+  const m = threadMemory(`${row?.t ?? ''} ${prompt}`, allMemoryLines(), agentsMdKept, shared, Buffer.byteLength(base, 'utf8'))
+  const total = shared + Buffer.byteLength(base + m.text, 'utf8')
+  if (total > CODEX_LIMIT) console.warn(`[codex] ${c.id.slice(0, 8)}: instructions ${total} bytes, over Codex's ${CODEX_LIMIT}; the turn may be refused`)
+  return base + m.text
+}
 const CODEX_NOTE = (id: string) => `You are Codex, working inside auto-m8 for the user. This chat may have started on Claude Code; you're continuing it with the same tools. Read ~/.codex/AGENTS.md (the user's standing instructions and memory index) and follow it. The ${MCP_SERVER} MCP server is connected with PERCH_CONVERSATION_ID=${id}; tool names in the instructions below like ${mcpTool('follow_up')} mean the ${MCP_SERVER} server's follow_up tool. Claude-only tools (ToolSearch, Agent, Skill, TodoWrite, Monitor) don't exist here: use the shell, the MCP servers you have, and skills under ~/.codex/skills instead.`
 function handoff(c: Chat): string {
   const path = transcriptPath(c.id, c.cwd)
@@ -622,7 +637,7 @@ function sendCodex(c: Chat, opts: SendOpts, model?: string, saved?: RunRecord) {
   const t = codexTurn({
     conversationId: c.id, cwd: c.cwd, mode: c.mode, model, prompt, images: saved ? [] : imageFiles(opts.images), mcpScript: MCP_SCRIPT, node: process.execPath,
     saved, recovery: { turnId, opts, queue: c.codexQueue ?? [], chat: { cwd: c.cwd, mode: c.mode, context: c.context, turbo: c.turbo, engine: c.engine, tier: c.tier } },
-    system: `${CODEX_NOTE(c.id)}\n\n${systemPrompt(c.context, c.id)}`,
+    system: codexSystem(c, opts.prompt),
     env: childEnv(undefined, { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: 'auto-m8 chat (codex)' }),
     message: r => { indexTranscript(recordCodexMessage({ id: c.id, cwd: c.cwd, turnId, ...r })); return codexMessageUuid(turnId, r.itemId) },
     before: r => indexTranscript(recordCodexTurn({ id: c.id, turnId, messageId: opts.messageId, cwd: c.cwd, prompt: opts.prompt, reply: r.text, tools: r.tools })),

@@ -12,6 +12,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSyn
 import { join } from 'node:path'
 import { HOME } from './settings.ts'
 import { MCP_SERVER, mcpTool } from '../shared/brand.ts'
+import { budgetAgentsMd, memoryLines } from './codexbudget.ts'
 
 const MARK = '<!-- written by auto-m8 (server/agentsync.ts) from ~/.claude; delete this line to keep your own edits -->'
 const OLD_MARK = '<!-- written by perch (server/agentsync.ts) from ~/.claude; delete this line to keep your own edits -->'
@@ -19,18 +20,22 @@ const CODEX = join(HOME, '.codex'), CLAUDE = join(HOME, '.claude')
 const memoryDirs = () => { const p = join(CLAUDE, 'projects'); return existsSync(p) ? readdirSync(p).map(d => join(p, d, 'memory')).filter(d => existsSync(join(d, 'MEMORY.md'))) : [] }
 const read = (f: string) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
 
+// The memory index outgrew Codex's 32 KiB instruction limit (42 KB on 2026-11-22), which failed every
+// Codex turn. CLAUDE.md always goes in; memory lines go in newest first within GLOBAL_BUDGET, and each
+// Codex turn adds the lines matching its own task (chat.ts, codexMemoryFor).
+export const memoryHeader = (d: string) => `### Memory in ${d}\nEach line points to one file in that folder with one fact (frontmatter: name, description, metadata.type). Read the file before relying on it; facts may be stale, so verify names, flags and files still exist. To remember something new, write a new file in the same format there and add a one-line pointer to its MEMORY.md.`
+export const allMemoryLines = () => memoryLines(memoryDirs().map(dir => ({ dir, text: read(join(dir, 'MEMORY.md')) })))
+export let agentsMdKept = new Set<string>(), agentsMdBytes = 0
 function agentsMd(): string {
-  const mem = memoryDirs().map(d => `### Memory in ${d}\nEach line points to one file in that folder with one fact (frontmatter: name, description, metadata.type). Read the file before relying on it; facts may be stale, so verify names, flags and files still exist. To remember something new, write a new file in the same format there and add a one-line pointer to its MEMORY.md.\n\n${read(join(d, 'MEMORY.md')).trim()}`).join('\n\n')
-  return `${MARK}
+  const r = budgetAgentsMd(`${MARK}
 # Standing instructions (shared with Claude Code)
 
 These are the user's own instructions, written for Claude Code and shared with every agent. Where they name Claude-only tools (ToolSearch, Skill, Agent, TodoWrite, Monitor, the auto-m8 tools as ${mcpTool('*')}), use your equivalent: the shell, the MCP servers you have (auto-m8's tools are on the \`${MCP_SERVER}\` server), and skills in ~/.codex/skills.
 
-${read(join(CLAUDE, 'CLAUDE.md')).trim()}
-
-## Memory
-${mem || '(none yet)'}
-`
+${read(join(CLAUDE, 'CLAUDE.md')).trim()}`, memoryHeader, allMemoryLines())
+  agentsMdKept = new Set(r.kept.map(l => l.line)); agentsMdBytes = Buffer.byteLength(r.text, 'utf8')
+  if (r.dropped) console.warn(`[agentsync] ~/.codex/AGENTS.md: kept ${r.kept.length} of ${r.kept.length + r.dropped} memory lines to stay under Codex's instruction limit (${agentsMdBytes} bytes); each Codex turn adds the lines that match its task`)
+  return r.text
 }
 
 function syncAgentsMd() {
