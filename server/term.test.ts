@@ -2,6 +2,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 process.env.SHELL = '/bin/zsh' // prefill uses bracketed paste, which macOS's bash 3.2 (the CI runner's default) doesn't do
+// A clean zsh: the developer's own .zshrc (an oh-my-zsh "update?" prompt, a slow theme) would take over the test shell.
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+process.env.ZDOTDIR = mkdtempSync(join(tmpdir(), 'term-test-zdot-'))
 import { closeTerm, createTerm, plainText, readTerm, sendTerm, termEvents, waitTerm } from './term.ts'
 
 test('plainText drops escape codes and applies carriage-return overwrites', () => {
