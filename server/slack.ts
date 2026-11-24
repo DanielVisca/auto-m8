@@ -9,6 +9,7 @@ import { basename, extname } from 'node:path'
 import { ephemeral } from './chat.ts'
 import { all, db, get, run } from './db.ts'
 import { HOME, settings } from './settings.ts'
+import { McpAuthError, needsAuthIn, startMcpLogin } from './mcplogin.ts'
 
 db.exec(`create table if not exists slack_drafts (
   id text primary key, conversation_id text, channel_id text not null, channel_name text, thread_ts text,
@@ -43,15 +44,27 @@ export function createDraft(a: { conversation_id?: string; channel_id: string; c
 }
 
 // A one-off Claude run allowed exactly one Slack tool. Returns its final text.
+// Slack reaches Claude two ways: the claude.ai connector and the Slack plugin; either may be the one
+// connected. If the session starts with no Slack connected and one needing OAuth, stop there and
+// start that authorization (it opens the browser) rather than let the model report it as text.
+const SLACK_PREFIXES = ['mcp__claude_ai_Slack__', 'mcp__plugin_slack_slack__']
 function slackCall(tool: string | string[], prompt: string): Promise<string> {
-  const allowed = (Array.isArray(tool) ? tool : [tool]).map(t => `mcp__claude_ai_Slack__${t}`).join(',')
+  const allowed = (Array.isArray(tool) ? tool : [tool]).flatMap(t => SLACK_PREFIXES.map(p => p + t)).join(',')
   return new Promise((resolve, reject) => {
-    let out = ''
-    ephemeral(['-p', prompt, '--output-format', 'stream-json', '--verbose', '--model', 'sonnet', '--no-session-persistence', '--permission-mode', 'dontAsk', '--allowedTools', allowed],
+    let out = '', stop: (() => void) | undefined, failed = false
+    stop = ephemeral(['-p', prompt, '--output-format', 'stream-json', '--verbose', '--model', 'sonnet', '--no-session-persistence', '--permission-mode', 'dontAsk', '--allowedTools', allowed],
       settings.chat.cwd, ev => {
+        if (failed) return
+        const pending = needsAuthIn(ev, /slack/i)
+        if (pending.length && !ev.mcp_servers.some((s: any) => /slack/i.test(String(s.name)) && s.status === 'connected')) {
+          failed = true
+          startMcpLogin(pending[0])
+          stop?.()
+          return reject(new McpAuthError(pending[0], 'Slack'))
+        }
         if (ev.type === 'result') out = String(ev.result ?? '')
         if (ev.type === 'perch_done') ev.code ? reject(new Error(ev.error || 'The Slack call failed.')) : resolve(out)
-      })
+      }) as any
   })
 }
 const json = (s: string) => { try { return JSON.parse(s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1)) } catch { return null } }

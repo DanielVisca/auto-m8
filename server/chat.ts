@@ -172,7 +172,7 @@ function baseArgs(mode: string, context: boolean, id?: string, turbo = false) {
     args.push('--allowedTools', ...['mcp_access', 'search_conversations', 'get_conversation', 'recent_activity', 'search_notes', 'search_skills', 'use_skill', 'open_prs', 'link_conversations', 'follow_up', 'get_evidence', 'draft_slack_message', 'report_missing_capability', 'delegate', 'delegate_send', 'delegate_status', 'worktrees', 'send_to_conversation', 'board', 'watch', 'terminal', 'canvas', ...(settings.browser.enabled ? ['browser'] : [])].map(t => `mcp__perch__${t}`))
   }
   // Agents never post to Slack: they draft, and you send (see draft_slack_message).
-  args.push('--disallowedTools', 'mcp__claude_ai_Slack__slack_send_message', 'mcp__claude_ai_Slack__slack_schedule_message', 'mcp__claude_ai_Slack__slack_send_message_draft')
+  args.push('--disallowedTools', 'mcp__claude_ai_Slack__slack_send_message', 'mcp__claude_ai_Slack__slack_schedule_message', 'mcp__claude_ai_Slack__slack_send_message_draft', 'mcp__plugin_slack_slack__slack_send_message', 'mcp__plugin_slack_slack__slack_schedule_message', 'mcp__plugin_slack_slack__slack_send_message_draft')
   const system = systemPrompt(context, id, turbo)
   if (system) args.push('--append-system-prompt', system)
   return args

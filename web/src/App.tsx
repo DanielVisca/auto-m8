@@ -386,7 +386,8 @@ function Toasts({ zen }: { zen?: boolean }) {
   // Zen keeps quiet about things perch is already fixing on its own.
   const list = useToasts().filter(t => !zen || !/retrying|reconnect/i.test(`${t.message} ${t.action ?? ''}`))
   if (!list.length) return null
-  return <div className="toasts">{list.map(t => <div key={t.id} className={`toast ${t.kind}`}><b>{t.message}</b>{t.action && <span>{t.action}</span>}</div>)}</div>
+  return <div className="toasts">{list.map(t => <div key={t.id} className={`toast ${t.kind}`}><b>{t.message}</b>{t.action && <span>{t.action}</span>}
+    {t.authorize && <button className="small" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => post('/api/mcp/login', { server: t.authorize })}>Open sign-in again</button>}</div>)}</div>
 }
 
 function Nav({ view, setView }: { view: View; setView: (v: View) => void }) {

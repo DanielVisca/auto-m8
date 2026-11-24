@@ -14,7 +14,8 @@ import { localStatus, pull as pullModel } from './local.ts'
 import { usageNow } from './usage.ts'
 import { overageNow } from './overage.ts'
 import { billingStatus, clearCaps } from './account.ts'
-import { mcpAccess } from './mcpaccess.ts'
+import { mcpAccess, resetMcpRows } from './mcpaccess.ts'
+import { mcpLogins, onMcpLogin, startMcpLogin, submitMcpCode } from './mcplogin.ts'
 import { cloudBlockers, describe as describeRuntimes, needsFrom } from './runtimes.ts'
 import { codexDefaultModel, codexModels, codexReady } from './codex.ts'
 import { syncAgents } from './agentsync.ts'
@@ -791,6 +792,15 @@ route('POST', '/api/claude/login', async (_m, req) => {
   const c = b.conversationId ? get<Row>('select source from conversations where id = ?', b.conversationId) : undefined
   return startLogin(loginChanged, settings.sources.find(s => s.id === c?.source)?.configDir)
 })
+// MCP servers that need OAuth (e.g. the Slack plugin): authorize from auto-m8, no /mcp in a terminal.
+onMcpLogin.add(s => { if (s.state === 'done') resetMcpRows(); broadcast('mcp-login') })
+route('POST', '/api/mcp/login', async (_m, req) => {
+  const server = String((await body(req)).server ?? '')
+  if (!/^[\w:. -]{1,80}$/.test(server)) throw new Error('Which MCP server?')
+  return startMcpLogin(server)
+})
+route('POST', '/api/mcp/login/code', async (_m, req) => { const b = await body(req); return submitMcpCode(String(b.server ?? ''), String(b.code ?? '')) })
+route('GET', '/api/mcp/login', async (_m, _req, _res, q) => mcpLogins.get(q?.get('server') ?? '') ?? { state: 'idle' })
 route('POST', '/api/claude/login/code', async (_m, req) => submitCode(String((await body(req)).code ?? '')))
 route('DELETE', '/api/claude/login', () => { cancelLogin(); broadcast('status'); return { ok: true } })
 route('POST', '/api/status/refresh', async () => { await Promise.all([refreshBasics(), refreshMcp()]); broadcast('status'); return { ok: true } })
@@ -1087,7 +1097,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     } catch (e: any) {
       // One plain sentence for the user, and a record that perch can act on.
       const f = recordError(`${req.method} ${url.pathname.replace(/\/[0-9a-f-]{8,}|\/task:[^/]+/g, '/:id')}`, e)
-      if (!res.headersSent) json(res, 500, { error: f.message, action: f.action, retrying: f.status === 'retrying' })
+      // A server that needs OAuth: start its sign-in now (the browser opens), the toast can reopen it.
+      if (f.authorize) try { startMcpLogin(f.authorize) } catch {}
+      if (!res.headersSent) json(res, 500, { error: f.message, action: f.action, retrying: f.status === 'retrying', authorize: f.authorize })
     }
     return
   }

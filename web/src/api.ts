@@ -77,7 +77,7 @@ export const api = {
       try { r = await attempt() } catch (e2) { unreachable(); throw e2 }
     }
     const data = await r.json().catch(() => ({ error: `auto-m8 answered ${r.status}` }))
-    if (!r.ok && (data as any)?.error) toast((data as any).error, { action: (data as any).action })
+    if (!r.ok && (data as any)?.error) toast((data as any).error, { action: (data as any).action, authorize: (data as any).authorize })
     return data as T
   },
 }
@@ -106,7 +106,7 @@ function deliver(q: Queued): Promise<any> {
         if (r.status < 502) { // answered (even with an error): it is no longer ours to retry
           const data = await r.json().catch(() => ({ error: `auto-m8 answered ${r.status}` }))
           writeOutbox(readOutbox().filter(x => x.key !== q.key))
-          if (!r.ok && data?.error) toast(data.error, { action: data.action })
+          if (!r.ok && data?.error) toast(data.error, { action: data.action, authorize: data.authorize })
           else if (told) toast('Queued message sent.', { kind: 'ok', ms: 3000 })
           return data
         }
@@ -141,15 +141,33 @@ if (typeof window !== 'undefined') {
 }
 
 // ---------- telling the user what went wrong, simply ----------
-export type Toast = { id: number; message: string; action?: string; kind: 'error' | 'ok' | 'info' }
+// authorize: an MCP server that needs OAuth. auto-m8 already opened its sign-in; the toast offers to
+// open it again and says when it went through.
+export type Toast = { id: number; message: string; action?: string; kind: 'error' | 'ok' | 'info'; authorize?: string }
 const toastSubs = new Set<(t: Toast[]) => void>()
 let toasts: Toast[] = []
-export function toast(message: string, opts: { action?: string; kind?: Toast['kind']; ms?: number } = {}) {
-  const t = { id: Date.now() + Math.random(), message, action: opts.action, kind: opts.kind ?? 'error' }
+export function toast(message: string, opts: { action?: string; kind?: Toast['kind']; ms?: number; authorize?: string } = {}) {
+  const t = { id: Date.now() + Math.random(), message, action: opts.action, kind: opts.kind ?? 'error', authorize: opts.authorize }
   if (toasts.some(x => x.message === message)) return
   toasts = [...toasts.slice(-3), t]
   toastSubs.forEach(f => f(toasts))
-  setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id); toastSubs.forEach(f => f(toasts)) }, opts.ms ?? 7000)
+  if (opts.authorize) watchMcpLogin(opts.authorize)
+  setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id); toastSubs.forEach(f => f(toasts)) }, opts.ms ?? (opts.authorize ? 30_000 : 7000))
+}
+const watching = new Set<string>()
+function watchMcpLogin(server: string) {
+  if (watching.has(server)) return
+  watching.add(server)
+  const label = server.replace(/^claude\.ai /, '').replace(/^plugin:([^:]+):.*$/, '$1').replace(/^./, c => c.toUpperCase())
+  const off = onTopic('mcp-login', async () => {
+    const st = await fetch(`/api/mcp/login?server=${encodeURIComponent(server)}`).then(r => r.json()).catch(() => null)
+    if (st?.state !== 'done' && st?.state !== 'failed') return
+    off(); watching.delete(server)
+    toasts = toasts.filter(x => x.authorize !== server); toastSubs.forEach(f => f(toasts))
+    if (st.state === 'done') toast(`${label} is authorized.`, { kind: 'ok', action: 'Try that again: it works now.', ms: 8000 })
+    else toast(`${label} sign-in didn’t finish.`, { action: String(st.error ?? '').slice(0, 160) || 'Try again from the button.', authorize: server })
+  })
+  setTimeout(() => { off(); watching.delete(server) }, 10 * 60_000)
 }
 export function useToasts() {
   const [list, setList] = useState<Toast[]>(toasts)
@@ -169,7 +187,7 @@ if (typeof window !== 'undefined') {
 }
 
 // One EventSource for the whole app; components subscribe to the topics they care about.
-type Topic = 'conversations' | 'layouts' | 'chats' | 'terms' | 'status' | 'settings' | 'home' | 'autopilot' | 'folders' | 'errors' | 'autoresearch' | 'prflow' | 'canvas' | 'canvasdata' | 'prs' | 'evolve' | 'browser' | 'shadow' | 'race' | 'product-research'
+type Topic = 'conversations' | 'layouts' | 'chats' | 'terms' | 'status' | 'settings' | 'home' | 'autopilot' | 'folders' | 'errors' | 'autoresearch' | 'prflow' | 'canvas' | 'canvasdata' | 'prs' | 'evolve' | 'browser' | 'shadow' | 'race' | 'product-research' | 'mcp-login'
 const subs = new Map<Topic, Set<() => void>>()
 let es: EventSource | null = null, dropped = false
 function ensureEvents() {

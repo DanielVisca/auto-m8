@@ -38,6 +38,7 @@ function cursorServers(): Row[] {
   try { const f = join(HOME, '.cursor/mcp.json'); return existsSync(f) ? Object.keys(JSON.parse(readFileSync(f, 'utf8')).mcpServers ?? {}).map(server => ({ server, state: 'configured' })) : [] } catch { return [] }
 }
 
+export const resetMcpRows = () => { cache = null }
 let cache: { at: number; text: Promise<{ claude: Row[]; codex: Row[]; cursor: Row[] }> } | null = null
 export async function mcpRows() {
   if (!cache || Date.now() - cache.at > 60_000) cache = { at: Date.now(), text: Promise.all([run('claude', ['mcp', 'list']), codexBin() ? run(codexBin()!, ['mcp', 'list']) : Promise.resolve('')]).then(([c, x]) => ({ claude: parseClaude(c), codex: parseCodex(x), cursor: cursorServers() })) }

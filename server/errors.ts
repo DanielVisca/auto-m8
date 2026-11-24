@@ -11,12 +11,31 @@ db.exec(`create table if not exists errors (
 
 // setup: a connection that isn't set up yet (no Claude, no GitHub login, no PostHog key). The setup checklist
 // on Home shows those, so they stay out of Health instead of piling up there on a fresh install.
-export type Friendly = { message: string; action: string; status: 'retrying' | 'needs-you' | 'open'; transient: boolean; setup?: boolean }
+// authorize: an MCP server (as `claude mcp` names it) that needs OAuth; the UI offers to authorize it.
+export type Friendly = { message: string; action: string; status: 'retrying' | 'needs-you' | 'open'; transient: boolean; setup?: boolean; authorize?: string }
+
+// A readable name: "plugin:slack:slack" → "Slack", "claude.ai Slack" → "Slack".
+export const serverLabel = (s: string) => {
+  const base = s.replace(/^claude\.ai /, '').replace(/^plugin:([^:]+):.*$/, '$1')
+  return base.charAt(0).toUpperCase() + base.slice(1)
+}
+
+// Server name from an error text like "The Slack MCP server (plugin:slack:slack) needs authorization"
+// or "plugin:slack:slack: ... Needs authentication".
+export function serverNeedingAuth(text: string): string | null {
+  if (!/needs?[ -](authori[sz]ation|authenticat|auth\b)|needs-auth|not authenticated/i.test(text)) return null
+  return text.match(/\bplugin:[\w-]+:[\w-]+/)?.[0]
+    ?? text.match(/needs ([\w:.-]+) authorized/)?.[1]
+    ?? text.match(/\bclaude\.ai [\w ]+?(?= (?:MCP|connector|server|needs)\b)/)?.[0]
+    ?? null
+}
 
 // What a raw error means for the user. Order matters: the first match wins.
 export function friendly(e: unknown, what = 'That'): Friendly {
   const raw = String((e as any)?.message ?? e)
   const m = (re: RegExp) => re.test(raw)
+  const mcp = serverNeedingAuth(raw)
+  if (mcp) return { message: `${serverLabel(mcp)} needs you to authorize it.`, action: `auto-m8 opened ${serverLabel(mcp)}'s sign-in in your browser. Approve it there, then try again.`, status: 'needs-you', transient: false, authorize: mcp }
   if (m(/No PostHog personal API key/)) return { message: `${what} needs your PostHog key.`, action: 'Add it in Settings → Connections.', status: 'needs-you', transient: false, setup: true }
   if (m(/does not support personal API key/)) return { message: `PostHog only allows ${what.toLowerCase()} from its web app, not with a personal API key.`, action: 'auto-m8 used a different way where it can; otherwise do this one in PostHog.', status: 'needs-you', transient: false }
   if (m(/PostHog 401|authentication_failed|invalid.*(api )?key/i)) return { message: 'PostHog rejected your key.', action: 'Create a new personal API key and save it in Settings.', status: 'needs-you', transient: false }
@@ -41,7 +60,7 @@ export function friendly(e: unknown, what = 'That'): Friendly {
 
 // Failures that aren't bugs in perch's code: they fix themselves (network, rate limits, an expired
 // login) or come from outside perch (another tool spending the shared GitHub budget). Self-fix skips them.
-export const notPerchBug = (text: string) => /rate.?limit|connect|timed? ?out|ENOTFOUND|ECONNRESET|OAuth|internet|githubstatus|isn.t running|503|502|504|other tools on your GitHub account/i.test(text)
+export const notPerchBug = (text: string) => /rate.?limit|connect|timed? ?out|ENOTFOUND|ECONNRESET|OAuth|authori[sz]|internet|githubstatus|isn.t running|503|502|504|other tools on your GitHub account/i.test(text)
 
 const keyOf = (source: string, raw: string) => `${source}:${raw.replace(/[0-9a-f]{8,}|\d+/gi, '#').slice(0, 120)}`
 export const onError = new Set<() => void>()
