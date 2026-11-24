@@ -166,7 +166,11 @@ const readable = (s: any) => String(s ?? '').replace(/<!--[\s\S]*?-->/g, '').rep
 const previewCache = new Map<string, { at: number; data: any }>()
 export async function preview(url: string) {
   const hit = previewCache.get(url)
-  if (hit && Date.now() - hit.at < 180_000) return hit.data
+  if (hit && Date.now() - hit.at < 300_000) return withConversations(hit.data)
+  // GitHub's budget spent or GitHub unreachable: the last preview beats an error card.
+  try { return withConversations(await readPreview(url)) } catch (e) { if (hit) return withConversations(hit.data); throw e }
+}
+async function readPreview(url: string) {
   const pr = parse(url)
   const query = `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
     title body state isDraft reviewDecision additions deletions changedFiles headRefName baseRefName updatedAt author{login}
@@ -192,8 +196,12 @@ export async function preview(url: string) {
       .filter((r: any) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body?.trim()) || r.state === 'APPROVED')
       .map((r: any) => ({ author: r.author?.login, state: r.state, body: String(r.body ?? '').slice(0, 1500), at: r.submittedAt })),
   }
-  // Conversations about this PR, from every source perch indexes; fresh each time (cheap, local).
   previewCache.set(url, { at: Date.now(), data })
+  return data
+}
+// Conversations about this PR, from every source perch indexes; fresh each time (cheap, local).
+function withConversations(data: any) {
+  const url = data.url
   return { ...data, conversations: all<any>(`select c.id, coalesce(u.title, c.title, c.first_prompt) title, c.source, c.origin, c.status, c.updated_at
     from conversation_prs cp join conversations c on c.id = cp.conversation_id left join user_state u on u.id = c.id
     where cp.url = ? and coalesce(u.state, '') != 'hidden' order by c.updated_at desc limit 8`, url) }

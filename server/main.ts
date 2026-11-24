@@ -918,7 +918,8 @@ route('POST', '/api/prs/section', async (_m, req) => { const b = await body(req)
 route('POST', '/api/prs/resort', async () => { resortSections(); return { ok: true } })
 // Just enough to draw a PR link as a pill (title, state); cached 10 min since titles rarely change.
 route('GET', '/api/origins', async (_m, _r, _s, q) => ({ status: originSyncStatus(), results: searchOrigins(q.get('q') ?? '', Number(q.get('limit')) || 50), chain: q.get('subject') ? originChain(q.get('subject')!) : undefined }))
-route('GET', '/api/pr/brief', async (_m, _r, _s, q) => { const { prState } = await import('./ghpr.ts'); const p = await prState(String(q.get('url') ?? ''), 600_000); return { url: p.url, title: p.title, state: p.state, repo: p.repo, number: p.number, author: p.author } })
+// Title, state and author for a PR pill: batched, cached for an hour, perch's PR index when GitHub is out of reach.
+route('GET', '/api/pr/brief', async (_m, _r, _s, q) => { const { prBrief } = await import('./ghpr.ts'); return prBrief(String(q.get('url') ?? ''), u => get<any>('select title, state, draft from prs where url = ?', u)) })
 // A bare "#135188" in a reply: the one PR perch knows with that number (none or several: no link).
 route('GET', '/api/pr/resolve', (_m, _r, _s, q) => { const n = Number(q.get('n')); if (!Number.isInteger(n) || n < 1) return { url: null }; const r = all<{ url: string }>('select url from prs where number = ? limit 2', n); return { url: r.length === 1 ? r[0].url : null } })
 route('GET', '/api/pr/preview', (_m, _r, _s, q) => prPreview(String(q.get('url') ?? '')))

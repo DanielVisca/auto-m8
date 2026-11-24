@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { all, get } from './db.ts'
 import { originChain, originFor, originatedPrs, prSubject } from './origin.ts'
-import { prBatch, ghExec } from './gh.ts'
+import { prBatch, ghExec, ghLimited, ghOffline, ghPressure } from './gh.ts'
 import { preview, prWorkers, snoozed } from './pr.ts'
 import { areaOf } from './prflow.ts'
 import { presence, refreshPresence, scoutPresence } from './presence.ts'
@@ -66,12 +66,16 @@ let cache: { at: number; data: any } | null = null
 let inflight: Promise<any> | null = null
 
 export async function prSidebar(fresh = false) {
-  if (cache && !fresh && Date.now() - cache.at < 120_000) return withLive(cache.data)
+  // With GitHub's budget mostly spent (or paused until its reset, or GitHub unreachable) the last
+  // list is served for longer instead of each sidebar poll spending more of it or failing again.
+  const maxAge = ghLimited('graphql') || ghOffline() ? Infinity : ghPressure() ? 600_000 : 120_000
+  if (cache && (!fresh || maxAge === Infinity) && Date.now() - cache.at < maxAge) return withLive(cache.data)
   inflight ??= fetchAll()
     .then(data => { cache = { at: Date.now(), data }; void refreshPresence(presenceUrls()); return data })
     // A failed refresh keeps the last good list. Without this, a background refresh that
     // failed (nobody awaiting it) was an unhandled rejection, and that ends the server.
-    .catch(e => { recordError('pr-sidebar', e, 'Reading your PRs from GitHub'); if (cache) return cache.data; throw e })
+    // A skipped call (budget paused until its reset) with a list in hand isn't news: the GitHub budget line says it once.
+    .catch(e => { if (!(e?.rateLimited && cache)) recordError('pr-sidebar', e, 'Reading your PRs from GitHub'); if (cache) return cache.data; throw e })
     .finally(() => { inflight = null })
   // Serve the last answer at once while a refresh runs; wait only the first time.
   return withLive(cache && !fresh ? cache.data : await inflight)

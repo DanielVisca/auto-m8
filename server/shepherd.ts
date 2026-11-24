@@ -56,6 +56,7 @@ export type Snapshot = {
   threads: { resolved: boolean; last: Item | null }[]
   comments: Item[]
   reviews: (Item & { state: string })[]
+  fingerprint?: string // the cheap per-PR fingerprint (changedSnapshots) this read matches
 }
 export type Watch = { seen_comment: number; seen_thread: number; seen_review: number; handled_ci: string | null; handled_stamp: string | null }
 
@@ -223,7 +224,7 @@ const item = (n: any): Item | null => n ? { id: Number(n.databaseId ?? 0), autho
 // partial results and splits a failing chunk. It throws only if nothing at all came back.
 export async function snapshots(urls: string[]): Promise<Map<string, Snapshot>> {
   const { prs, failed } = await prBatch(urls, url => `
-      state isDraft headRefOid reviewDecision body mergedAt mergeCommit { oid } labels(first: 20) { nodes { name } }
+      updatedAt state isDraft headRefOid reviewDecision body mergedAt mergeCommit { oid } labels(first: 20) { nodes { name } }
       commits(last: 1) { nodes { commit { committedDate statusCheckRollup { id state contexts(first: 100) { ${checkContextFields(parse(url).number)} } } } } }
       comments(last: 30) { nodes { databaseId author { login } body createdAt } }
       reviews(last: 20) { nodes { databaseId author { login } body state submittedAt } }
@@ -237,7 +238,7 @@ export async function snapshots(urls: string[]): Promise<Map<string, Snapshot>> 
     catch (e) { recordError('PR shepherd', e, `Reading all checks on ${url}`); continue }
     const checks = summarizeChecks(rollup?.state, contexts)
     out.set(url, {
-      state: p.state, isDraft: p.isDraft, head: p.headRefOid, rollup: rollup?.state ?? null,
+      state: p.state, isDraft: p.isDraft, head: p.headRefOid, rollup: rollup?.state ?? null, fingerprint: fingerprintOf(p),
       headAt: Date.parse(p.commits.nodes[0]?.commit?.committedDate ?? '') || null,
       failing: checks.failing, ciFailure: checks.checks === 'failing',
       planState: String((contexts as any[]).find(c => c?.context === 'perch/plan')?.state ?? '').toLowerCase() || null,
@@ -371,6 +372,7 @@ async function planCheck(url: string, w: any, pr: Snapshot) {
       ? `Waiting for ${waiting.map(u => `#${u.split('/').pop()}`).join(', ')} to be live and checked in production`
       : 'Prerequisites are live and passed their production checks'
     await ghExec(['api', '-X', 'POST', `repos/${p.slug}/statuses/${pr.head}`, '-f', `state=${state}`, '-f', 'context=perch/plan', '-f', `description=${description.slice(0, 140)}`, '--silent'])
+    stale.add(url)
     run('update shepherd_watch set plan_status = ? where url = ?', `${pr.head}:${state}`, url)
   }
   if (state === 'success' && !w.receipt_at) {
@@ -380,6 +382,7 @@ async function planCheck(url: string, w: any, pr: Snapshot) {
     })
     const body = `Prerequisites for this PR are live in production:\n${lines.join('\n')}\n\nThe check results are in each PR's comments.\n\n${signature({ PERCH_AGENT: 'auto-m8 shepherd', PERCH_CONVERSATION_ID: w.conversation_id ?? undefined })}`
     const { stdout } = await ghExec(['api', '-X', 'POST', `repos/${p.slug}/issues/${p.number}/comments`, '-f', `body=${body}`, '--jq', '.id'])
+    stale.add(url)
     run('update shepherd_watch set receipt_at = ?, seen_comment = max(seen_comment, ?) where url = ?', Date.now(), Number(stdout.trim()) || 0, url)
   }
 }
@@ -590,6 +593,7 @@ async function draftTick(url: string, pr: Snapshot) {
     return
   }
   await ghExec(['pr', 'ready', String(p.number), '-R', p.slug])
+  stale.add(url)
   resolveKey(`draft:${url}`, 'marked ready')
   run('update shepherd_watch set outcome = ? where url = ?', `marked ready: ${call.reason}`, url)
 }
@@ -607,6 +611,49 @@ async function tickOne(w: any, pr: Snapshot, isRunning: (id: string) => boolean)
   await maybeMerge(w.url, w, pr, isRunning)
 }
 
+// Every tick used to re-read every watched PR in full (comments, reviews, threads, all checks):
+// about 2,300 GraphQL calls an hour for ~75 PRs, half of GitHub's budget, when most of those PRs
+// hadn't changed. Now a tick first asks GitHub for a small fingerprint of each PR (one cheap call
+// per 50 PRs) and re-reads in full only the PRs whose fingerprint moved, that
+// the shepherd itself just wrote to, or whose last full read is older than FULL_READ_MS (RUNNING_READ_MS
+// while CI runs).
+const FULL_READ_MS = 15 * 60_000
+const RUNNING_READ_MS = 5 * 60_000
+const FINGERPRINT = `updatedAt state isDraft headRefOid reviewDecision mergedAt
+  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 1) { totalCount } } } } }`
+const lastRead = new Map<string, { at: number; fp: string; snap: Snapshot }>()
+const stale = new Set<string>() // the shepherd wrote to these PRs (status, comment, ready): read them again
+export const resetSnapshotCache = () => { lastRead.clear(); stale.clear() }
+export const fingerprintOf = (p: any) => {
+  const r = p?.commits?.nodes?.[0]?.commit?.statusCheckRollup
+  return [p?.updatedAt, p?.state, p?.isDraft, p?.headRefOid, p?.reviewDecision, p?.mergedAt, r?.state ?? '', r?.contexts?.totalCount ?? ''].join('|')
+}
+export async function changedSnapshots(urls: string[], now = Date.now()): Promise<Map<string, Snapshot>> {
+  const fps = new Map<string, string>()
+  if (lastRead.size) {
+    const { prs } = await prBatch(urls.filter(u => lastRead.has(u)), FINGERPRINT, { size: 50, timeout: 30_000 })
+    for (const [u, p] of prs) fps.set(u, fingerprintOf(p))
+  }
+  // Spread the periodic full reads over the window instead of re-reading every PR on the same tick.
+  const jitter = (u: string) => [...u].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % (5 * 60_000)
+  const need = urls.filter(u => {
+    const c = lastRead.get(u)
+    // Running CI: a new failure flips the rollup to FAILURE and new jobs move the count (both in the
+    // fingerprint), so a running PR needs a full read only every few minutes on top of those.
+    const running = c?.snap.rollup === 'PENDING' || c?.snap.rollup === 'EXPECTED'
+    return !c || stale.has(u) || !fps.has(u) || fps.get(u) !== c.fp || now - c.at > (running ? RUNNING_READ_MS : FULL_READ_MS + jitter(u))
+  })
+  const fresh = need.length ? await snapshots(need) : new Map<string, Snapshot>()
+  const out = new Map<string, Snapshot>()
+  for (const u of urls) {
+    const f = fresh.get(u)
+    if (f) { lastRead.set(u, { at: now, fp: f.fingerprint ?? fps.get(u) ?? '', snap: f }); stale.delete(u); out.set(u, f) }
+    else if (!need.includes(u)) out.set(u, lastRead.get(u)!.snap)
+  }
+  for (const u of lastRead.keys()) if (!urls.includes(u)) lastRead.delete(u)
+  return out
+}
+
 export async function tickShepherd(isRunning: (id: string) => boolean) {
   if (running.has('tick') || isPaused()) return
   running.add('tick')
@@ -616,7 +663,7 @@ export async function tickShepherd(isRunning: (id: string) => boolean) {
     revive()
     const rows = all<any>(`select * from shepherd_watch where enabled = 1 and paused_reason is null`)
     if (!rows.length) return
-    const snaps = await snapshots(rows.map(r => r.url))
+    const snaps = await changedSnapshots(rows.map(r => r.url))
     for (const w of rows) {
       const pr = snaps.get(w.url)
       if (!pr) continue

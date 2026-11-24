@@ -219,8 +219,8 @@ export function checkContextFields(pullRequestNumber?: number) {
 }
 
 type CheckContext = { name?: string; conclusion?: string | null; status?: string; completedAt?: string | null; isRequired?: boolean; context?: string; state?: string }
-type CheckPage = { nodes: CheckContext[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } }
-type CheckRollup = { id: string; contexts: CheckPage }
+type CheckPage = { nodes: CheckContext[]; totalCount?: number; pageInfo: { hasNextPage: boolean; endCursor: string | null } }
+type CheckRollup = { id: string; state?: string | null; contexts: CheckPage }
 type CheckSummary = { checks: 'passing' | 'failing' | 'running' | 'cancelled' | 'none'; failing: string[]; pending: string[]; optionalCancelled: string[] }
 
 export function summarizeChecks(rollup: string | null | undefined, contexts: CheckContext[]): CheckSummary {
@@ -246,8 +246,32 @@ export function summarizeChecks(rollup: string | null | undefined, contexts: Che
 
 // Follow the rollup's node ID, not the PR branch: a push between pages must not mix two heads.
 // A missing/error page is not an empty page; callers must not use it to claim CI is green.
+//
+// PostHog PRs carry 100+ checks, so every read of one cost a second GraphQL call for page two, on
+// every shepherd tick and board read (about a third of perch's hourly budget). Once the rollup is
+// settled (SUCCESS / FAILURE / ERROR) its contexts don't change until a push or re-run, and either of
+// those changes the rollup's id, state or count: so the full list is kept per rollup and reused.
+const settledChecks = new Map<string, { at: number; nodes: CheckContext[] }>()
+const SETTLED = new Set(['SUCCESS', 'FAILURE', 'ERROR'])
+const SETTLED_TTL = 2 * 3600_000 // keyed by rollup id/state/count with every check finished: only a safety net
+export const clearCheckCache = () => settledChecks.clear()
 export async function checkContexts(rollup: CheckRollup | null | undefined, pullRequestNumber?: number): Promise<CheckContext[]> {
   if (!rollup) return []
+  if (!rollup.contexts.pageInfo.hasNextPage) return [...rollup.contexts.nodes]
+  const state = String(rollup.state ?? '')
+  const key = SETTLED.has(state) && rollup.id ? `${rollup.id}|${state}|${rollup.contexts.totalCount ?? ''}|${pullRequestNumber ?? ''}` : ''
+  const hit = key ? settledChecks.get(key) : undefined
+  if (hit && Date.now() - hit.at < SETTLED_TTL) return [...hit.nodes]
+  const nodes = await allContexts(rollup, pullRequestNumber)
+  // A red rollup can still have checks running; only a list with every check finished is final.
+  const done = nodes.every(n => n.name !== undefined ? n.status === 'COMPLETED' || !!n.completedAt : !/^(PENDING|EXPECTED)$/.test(String(n.state ?? '')))
+  if (key && done) {
+    settledChecks.set(key, { at: Date.now(), nodes })
+    if (settledChecks.size > 500) for (const [k, v] of settledChecks) if (Date.now() - v.at >= SETTLED_TTL || settledChecks.size > 400) settledChecks.delete(k)
+  }
+  return [...nodes]
+}
+async function allContexts(rollup: CheckRollup, pullRequestNumber?: number): Promise<CheckContext[]> {
   let page = rollup.contexts
   const nodes = [...page.nodes]
   const seen = new Set<string>()

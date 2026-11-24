@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { chats, send, subscribe } from './chat.ts'
 import { all, get, run } from './db.ts'
 import { ghPressure } from './gh.ts'
-import { parsePr, pool, prLine, prState, type PrState } from './ghpr.ts'
+import { parsePr, prLine, prStates, type PrState } from './ghpr.ts'
 import { scorePrs, todaysArm } from './learn.ts'
 import { liveSessions } from './presence.ts'
 import { titleFor } from './relay.ts'
@@ -58,7 +58,7 @@ export function watch(input: { owner: string; targets: string[]; events?: string
          on conflict(owner, target) do update set active = 1, events = excluded.events, idle_minutes = coalesce(excluded.idle_minutes, idle_minutes)`,
       owner, target, kind, events, input.idle_minutes ?? null, Date.now())
     if (kind === 'conv') follow(target)
-    else pollPr(target).catch(() => {})
+    else prStates([target], 120_000).then(m => { const s = m.get(parsePr(target)?.url ?? target); if (s && !(s instanceof Error)) pollPr(target, s) }).catch(() => {})
     added.push(target)
   }
   changed()
@@ -132,8 +132,7 @@ function pollConvs() {
 }
 
 // PRs: live from gh, diffed against the last snapshot each watcher saw.
-async function pollPr(url: string) {
-  const s = await prState(url, 120_000)
+function pollPr(url: string, s: PrState) {
   const stage = row<{ stage: string }>('select stage from shepherd_watch where url = ?', url)?.stage ?? null
   for (const w of watchersOf(url)) {
     const prev = w.snapshot ? JSON.parse(w.snapshot) : null
@@ -170,7 +169,13 @@ async function pollPrs() {
   polling = true
   try {
     const urls = all<{ target: string }>(`select distinct target from watches where kind = 'pr' and active = 1`).map(r => r.target)
-    await pool(urls, 6, u => pollPr(u).catch(e => console.error('orchestra pr', u, e.message)))
+    // One batched read for every watched PR (prStates), not one GraphQL call each.
+    const states = await prStates(urls, 120_000)
+    for (const u of urls) {
+      const s = states.get(parsePr(u)?.url ?? u)
+      if (!s || s instanceof Error) { console.error('orchestra pr', u, s?.message ?? 'not read'); continue }
+      try { pollPr(u, s) } catch (e: any) { console.error('orchestra pr', u, e.message) }
+    }
   } finally { polling = false }
 }
 
@@ -242,7 +247,8 @@ export async function board(owner: string, opts: { scope?: 'mine' | 'all'; hours
     return { at: c?.updated_at ?? 0, line: `- perch://${id} "${titleFor(id)}" | ${c?.source ?? 'perch'} | ${state} | active ${c?.updated_at ? ago(c.updated_at) : '?'}${extra ? ` | ${extra}` : ''}\n  ${lastAgentLine(id) || '(no transcript)'}` }
   }).sort((a, b) => b.at - a.at).map((x, i) => opts.scope === 'all' && i >= 20 && !/needs you|RUNNING/.test(x.line) ? x.line.split('\n')[0] : x.line)
   const stages = new Map(rows<{ url: string; stage: string; outcome: string }>('select url, stage, outcome from shepherd_watch').map(r => [r.url, r]))
-  const prs = await pool([...prUrls], 6, u => prState(u).then(s => ({ s }), e => ({ u, e: String(e.message ?? e).slice(0, 160) })))
+  const states = await prStates([...prUrls])
+  const prs = [...prUrls].map(u => { const s = states.get(u); return s && !(s instanceof Error) ? { s } : { u, e: String(s?.message ?? 'not read').slice(0, 160) } })
   // Most in need of action first: red CI, changes requested, open threads, approved (ready to land), the rest; merged/closed last.
   const rank = (x: any) => !x.s ? 0 : x.s.state === 'merged' || x.s.state === 'closed' ? 9 : x.s.checks === 'failing' ? 1 : x.s.changesBy.length ? 2 : x.s.unresolved ? 3 : x.s.approvedBy.length ? 4 : x.s.state === 'draft' ? 6 : 5
   const since = Date.now() - (opts.hours ?? 24) * 3600_000

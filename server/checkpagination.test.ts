@@ -7,8 +7,9 @@ import { test } from 'node:test'
 const bin = mkdtempSync(join(tmpdir(), 'perch-checks-'))
 const calls = join(bin, 'calls')
 process.env.PATH = `${bin}:${process.env.PATH}`
-const { snapshots, detect } = await import('./shepherd.ts')
-const { prState, prLine } = await import('./ghpr.ts')
+const { snapshots, detect, changedSnapshots, resetSnapshotCache } = await import('./shepherd.ts')
+const { prState, prStates, prLine, prBrief, clearBriefs } = await import('./ghpr.ts')
+const { clearCheckCache } = await import('./gh.ts')
 const { preview } = await import('./pr.ts')
 const { diffPr } = await import('./orchestra.ts')
 const url = 'https://github.com/PostHog/posthog/pull/135915'
@@ -17,6 +18,7 @@ const failing = ['Test Rust (logs-ingestion)', 'Rust Tests Pass']
 
 function fixture(options: { singlePage?: boolean; brokenPage?: boolean; noNames?: boolean; nodes?: object[]; rollup?: string } = {}) {
   writeFileSync(calls, '')
+  clearCheckCache(); resetSnapshotCache(); clearBriefs()
   const nodes = options.nodes ?? Array.from({ length: options.singlePage ? 3 : 205 }, (_, i) => ({
     name: i === 153 ? failing[0] : i === 204 ? failing[1] : `check-${i}`, conclusion: !options.noNames && (i === 153 || i === 204) ? 'FAILURE' : 'SUCCESS', status: 'COMPLETED',
   }))
@@ -30,7 +32,7 @@ const after = q.match(/after:\\s*"([^\"]+)"/)
 const offset = after ? Number(after[1]) : 0
 const contexts = { totalCount: nodes.length, nodes: nodes.slice(offset, offset + 100), pageInfo: { hasNextPage: offset + 100 < nodes.length, endCursor: String(offset + 100) } }
 const rollup = { id: 'rollup-original-head', state: ${JSON.stringify(options.rollup ?? 'FAILURE')}, contexts }
-const p = { title:'retry', number:135915, state:'OPEN', isDraft:false, headRefOid:'original-head', headRefName:'fix/retry', baseRefName:'master', reviewDecision:'APPROVED', author:{login:'author'}, body:'', labels:{nodes:[]}, commits:{nodes:[{commit:{oid:'original-head', committedDate:'2026-11-14T04:00:00Z', statusCheckRollup:rollup}}]}, comments:{totalCount:0,nodes:[]}, reviews:{nodes:[]}, latestReviews:{nodes:[]}, reviewThreads:{nodes:[]}, files:{nodes:[]} }
+const p = { updatedAt:'2026-11-14T04:00:00Z', title:'retry', number:135915, state:'OPEN', isDraft:false, headRefOid:'original-head', headRefName:'fix/retry', baseRefName:'master', reviewDecision:'APPROVED', author:{login:'author'}, body:'', labels:{nodes:[]}, commits:{nodes:[{commit:{oid:'original-head', committedDate:'2026-11-14T04:00:00Z', statusCheckRollup:rollup}}]}, comments:{totalCount:0,nodes:[]}, reviews:{nodes:[]}, latestReviews:{nodes:[]}, reviewThreads:{nodes:[]}, files:{nodes:[]} }
 if (after && ${!!options.brokenPage}) { console.log(JSON.stringify({data:{node:null},errors:[{message:'page unavailable'}]})); process.exit(1) }
 console.log(JSON.stringify({ data: after ? {node:rollup} : q.includes('p0:') ? {p0:{pullRequest:p},p1:{pullRequest:{...p,commits:{nodes:[]}}}} : {repository:{pullRequest:p}} }))
 `
@@ -120,4 +122,81 @@ test('optional cancellations do not hide true failures or genuine pending checks
   assert.deepEqual(p.failing, ['Unit tests', 'Timeout'])
   assert.deepEqual(p.pending, ['Still running', 'External pending'])
   assert.deepEqual(diffPr(before, p, p).map(x => x[0]), ['ci_red'])
+})
+
+const queries = () => readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).map(q => JSON.parse(q) as string)
+
+test('a settled rollup reads its second page of checks once, not on every read', async () => {
+  fixture()
+  await prState(url, 0); await prState(url, 0)
+  await snapshots([url])
+  assert.equal(queries().filter(q => q.includes('after:')).length, 2, 'two pages beyond the first, read once')
+})
+
+test('a running rollup is never served from the check cache', async () => {
+  fixture({ rollup: 'PENDING' })
+  await prState(url, 0); await prState(url, 0)
+  assert.equal(queries().filter(q => q.includes('after:')).length, 4)
+})
+
+test('a red rollup with checks still running is not cached', async () => {
+  fixture({ nodes: [...Array.from({ length: 100 }, (_, i) => completed(`check-${i}`)), completed('Unit', 'FAILURE'), { name: 'slow', status: 'IN_PROGRESS', conclusion: null }] })
+  await prState(url, 0); await prState(url, 0)
+  assert.equal(queries().filter(q => q.includes('after:')).length, 2)
+})
+
+test('the shepherd re-reads a PR in full only when its fingerprint moves', async () => {
+  fixture()
+  const t = Date.now()
+  const first = await changedSnapshots([url], t)
+  assert.deepEqual(first.get(url)!.failing, failing)
+  writeFileSync(calls, '')
+  const again = await changedSnapshots([url], t + 60_000)
+  assert.deepEqual(again.get(url)!.failing, failing, 'unchanged PR served from the last read')
+  const q = queries()
+  assert.equal(q.length, 1, 'one fingerprint call, no full read')
+  assert.doesNotMatch(q[0], /reviewThreads/)
+  writeFileSync(calls, '')
+  await changedSnapshots([url], t + 40 * 60_000)
+  assert.ok(queries().some(x => x.includes('reviewThreads')), 'a full read once FULL_READ_MS has passed')
+})
+
+test('watches and the board read many PRs in one call', async () => {
+  fixture({ singlePage: true })
+  const other = url.replace('135915', '135916')
+  const m = await prStates([url, other], 0)
+  assert.equal((m.get(url) as any).title, 'retry')
+  assert.ok(m.get(other) instanceof Object)
+  assert.equal(queries().length, 1)
+})
+
+test('PR pills asking at once share one light call, and an hour-old answer is reused', async () => {
+  fixture({ singlePage: true })
+  const other = url.replace('135915', '135916')
+  const [a, b] = await Promise.all([prBrief(url), prBrief(other)])
+  assert.equal(a.title, 'retry'); assert.equal(a.author, 'author'); assert.equal(b.state, 'open')
+  await prBrief(url)
+  const q = queries()
+  assert.equal(q.length, 1)
+  assert.doesNotMatch(q[0], /statusCheckRollup/)
+})
+
+test('a PR pill falls back to perch\'s own index when GitHub refuses', async () => {
+  fixture({ singlePage: true })
+  writeFileSync(join(bin, 'gh'), `#!${process.execPath}\nconsole.error('gh: API rate limit already exceeded for user ID 1.'); process.exit(1)\n`)
+  const b = await prBrief(url.replace('135915', '135999'), () => ({ title: 'from the index', state: 'OPEN', draft: 1 }))
+  assert.equal(b.title, 'from the index'); assert.equal(b.state, 'draft')
+  const { clearGhRateLimits } = await import('./gh.ts'); clearGhRateLimits()
+})
+
+test('a PR with CI running is re-read every few minutes, not every tick', async () => {
+  fixture({ rollup: 'PENDING' })
+  const t = Date.now()
+  await changedSnapshots([url], t)
+  writeFileSync(calls, '')
+  await changedSnapshots([url], t + 60_000)
+  assert.equal(queries().length, 1, 'fingerprint only')
+  writeFileSync(calls, '')
+  await changedSnapshots([url], t + 6 * 60_000)
+  assert.ok(queries().some(x => x.includes('reviewThreads')))
 })
