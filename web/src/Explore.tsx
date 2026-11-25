@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, post, sendChat, shell, shortPath, toast } from './api'
 import { MiniChat } from './Mini'
 import { Markdown } from './Chat'
-import { DataSection, RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
+import { DataSection, keep, RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
 import './explore.css'
 
 type Evidence = { file: string; line: number; text: string; github?: string | null; local?: string }
@@ -476,7 +476,7 @@ function Section({ id, title, summary, hint, children }: { id: string; title: st
 }
 
 function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced, onFocus, onAsk, onRemove }: { repo: string; id: string; workspace: string[]; org: string | null; onRuntime: (r: Runtime | null) => void; milestones?: Commit[]; introduced?: Ev; onFocus: (id: string) => void; onAsk: () => void; onRemove: () => void }) {
-  const [d, setD] = useState<any>(null)
+  const [d, setD] = useState<any>(() => keep(`/api/explore/node?${qs({ repo, id })}`).v ?? null)
   const [more, setMore] = useState<Record<string, boolean>>({})
   const [open, setOpen] = useState<string | null>(null)
   const [runs, setRuns] = useState('')
@@ -484,8 +484,8 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
   // "What is this": the team's own words now, a short AI summary when it's ready (cached per version of the folder).
   const [sum, setSum] = useState<any>(null)
   // Usage side note: only for PostHog app products with traffic; nothing otherwise.
-  const [use, setUse] = useState<any>(null)
-  useEffect(() => { let gone = false; setUse(null); api.get(`/api/explore/usage?${qs({ repo, id })}`).then(x => !gone && setUse(x)).catch(() => {}); return () => { gone = true } }, [repo, id])
+  const [use, setUse] = useState<any>(() => keep(`/api/explore/usage?${qs({ repo, id })}`).v ?? null)
+  useEffect(() => { let gone = false; const k = keep(`/api/explore/usage?${qs({ repo, id })}`); setUse(k.v ?? null); k.p.then(x => !gone && setUse(x)).catch(() => {}); return () => { gone = true } }, [repo, id])
   useEffect(() => {
     let gone = false, tries = 0, t: ReturnType<typeof setTimeout>
     setSum(null)
@@ -494,7 +494,7 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
     return () => { gone = true; clearTimeout(t) }
   }, [repo, id])
   // Ignore an answer for a concept you've already clicked away from (a slow cold load could overwrite the newer one).
-  useEffect(() => { let gone = false; setD(null); api.get(`/api/explore/node?${qs({ repo, id })}`).then(x => !gone && setD(x)).catch(e => !gone && setD({ error: String(e?.message ?? e) })); return () => { gone = true } }, [repo, id])
+  useEffect(() => { let gone = false; const k = keep(`/api/explore/node?${qs({ repo, id })}`); setD(k.v ?? null); k.p.then(x => !gone && setD(x)).catch(e => !gone && setD({ error: String(e?.message ?? e) })); return () => { gone = true } }, [repo, id])
   if (!d) return <div className="card small muted"><i className="spin" /> Loading {id}…</div>
   if (d.error) return <div className="card bad small">{d.error}</div>
   const openLocal = (file: string, line?: number) => post('/api/explore/open', { repo, file, line }).catch(e => toast(String(e?.message ?? e), { kind: 'error' }))

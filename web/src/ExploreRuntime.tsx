@@ -3,6 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ago, api, post, shortPath, toast } from './api'
 
+// Explore answers outlive the page: a slow request (Argo CD, Grafana, ClickHouse) keeps going when you switch to a
+// chat, and its answer is waiting when you come back. Past the TTL the old answer stays on screen while a fresh one loads.
+const kept = new Map<string, { at: number; p: Promise<any>; v?: any }>()
+export function keep<T = any>(url: string, ttl = 15 * 60_000): { p: Promise<T>; v?: T } {
+  const k = kept.get(url)
+  if (k && (k.v === undefined || Date.now() - k.at < ttl)) return k
+  const e: { at: number; p: Promise<T>; v?: T } = { at: Date.now(), p: null as any, v: k?.v }
+  e.p = api.get<T>(url).then(v => { if ((v as any)?.error) kept.delete(url); else { e.v = v; e.at = Date.now() } return v }, err => { kept.delete(url); throw err })
+  kept.set(url, e)
+  return e
+}
+
 export type Repo = { path: string; name: string; remote: string | null; org: string | null; lastCommit: string | null; lastFetch: string | null; shallow: boolean; branch: string | null; behindOrigin: number | null }
 const DAY = 864e5
 const staleDays = (r: Repo) => r.lastFetch ? Math.floor((Date.now() - Date.parse(r.lastFetch)) / DAY) : null
@@ -121,15 +133,16 @@ export type Runtime = { concept: string; tokens: string[]; argoError: string | n
 
 // Where a concept runs: the deployments, whose code they run, and live numbers from two metric sources side by side.
 export function WhereItRuns({ concept, repos, org, onLoaded, bare, onSummary }: { concept: string; repos: string[]; org: string | null; onLoaded?: (r: Runtime | null) => void; bare?: boolean; onSummary?: (s: string) => void }) {
-  const [r, setR] = useState<Runtime | { error: string } | null>(null)
+  const url = `/api/explore/runtime?concept=${encodeURIComponent(concept)}&repos=${encodeURIComponent(repos.join(','))}&org=${encodeURIComponent(org ?? '')}`
+  const [r, setR] = useState<Runtime | { error: string } | null>(() => keep<Runtime>(url).v ?? null)
   const [showInfra, setShowInfra] = useState(false)
   useEffect(() => {
-    setR(null); onLoaded?.(null)
+    const k = keep<Runtime>(url)
+    setR(k.v ?? null); onLoaded?.(k.v ?? null)
     let gone = false
-    api.get<Runtime>(`/api/explore/runtime?concept=${encodeURIComponent(concept)}&repos=${encodeURIComponent(repos.join(','))}&org=${encodeURIComponent(org ?? '')}`)
-      .then(x => { if (!gone) { setR(x); onLoaded?.(x) } }).catch(e => !gone && setR({ error: String(e?.message ?? e) }))
+    k.p.then(x => { if (!gone) { setR(x); onLoaded?.(x) } }).catch(e => !gone && setR({ error: String(e?.message ?? e) }))
     return () => { gone = true }
-  }, [concept, repos.join(',')]) // eslint-disable-line
+  }, [url]) // eslint-disable-line
   useEffect(() => {
     if (!r) return onSummary?.('checking Argo CD…')
     if ('error' in r) return onSummary?.('error')
@@ -169,15 +182,16 @@ const bytes = (n: number | null | undefined) => n == null ? '—' : n >= 1e12 ? 
 
 // Datastores and tiers: which ClickHouse clusters and tables hold this concept's data, how big, how full, on what hardware.
 export function DataSection({ concept, repos, bare, onSummary }: { concept: string; repos: string[]; bare?: boolean; onSummary?: (s: string) => void }) {
-  const [r, setR] = useState<DataRes | { error: string } | null>(null)
+  const url = `/api/explore/data?concept=${encodeURIComponent(concept)}&repos=${encodeURIComponent(repos.join(','))}`
+  const [r, setR] = useState<DataRes | { error: string } | null>(() => keep<DataRes>(url).v ?? null)
   const [all, setAll] = useState(false)
   useEffect(() => {
-    setR(null)
+    const k = keep<DataRes>(url)
+    setR(k.v ?? null)
     let gone = false
-    api.get<DataRes>(`/api/explore/data?concept=${encodeURIComponent(concept)}&repos=${encodeURIComponent(repos.join(','))}`)
-      .then(x => { if (!gone) setR(x) }).catch(e => !gone && setR({ error: String(e?.message ?? e) }))
+    k.p.then(x => { if (!gone) setR(x) }).catch(e => !gone && setR({ error: String(e?.message ?? e) }))
     return () => { gone = true }
-  }, [concept, repos.join(',')]) // eslint-disable-line
+  }, [url])
   useEffect(() => {
     onSummary?.(!r ? 'asking ClickHouse…' : 'error' in r ? 'error' : !r.tables.length ? 'no ClickHouse tables'
       : `${r.tables.length} table${r.tables.length === 1 ? '' : 's'}${r.clusters.length ? ` · ${r.clusters.slice(0, 2).map(c => `${c.name}${c.disk.max != null ? ` ${pct(c.disk.max)} full` : ''}`).join(', ')}` : ''}`)
