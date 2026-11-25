@@ -1084,6 +1084,22 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
             const files = [...e.clipboardData.items].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean) as File[]
             if (files.length) { e.preventDefault(); takeFiles(files); return }
             const t = e.clipboardData.getData('text/plain')
+            // A copied chat message carries its attachments as markup: turn them back into chips.
+            const copied = copiedMessage(t)
+            if (copied) {
+              e.preventDefault()
+              for (const f of copied.files) setShared(s => s.some(x => x.file?.path === f.path) ? s : [...s, f.kind === 'image'
+                ? { key: f.path, title: f.name, summary: 'image', context: '', thumb: `/api/files/raw?path=${encodeURIComponent(f.path)}`, file: f }
+                : { key: f.path, title: f.name, summary: 'file', context: '', file: f }])
+              if (copied.text) {
+                const el = e.currentTarget, a = el.selectionStart ?? text.length, b = el.selectionEnd ?? a
+                const next = text.slice(0, a) + copied.text + text.slice(b)
+                if (isLong(next)) { takeLongText(copied.text); return }
+                setText(next); setCaret(a + copied.text.length)
+                requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = a + copied.text.length })
+              }
+              return
+            }
             if (isLong(t)) { e.preventDefault(); takeLongText(t); return }
             if (/^\s*https?:\/\/\S+\s*$/.test(t) && take(e.clipboardData)) e.preventDefault()
           }}
@@ -1311,6 +1327,28 @@ function PlusMenu({ onAutoresearch, onResearch, onSkill, onLink }: { onAutoresea
 export const handedFiles: File[] = []
 type Shared = { key?: string; url?: string; title: string; summary: string; context: string; loading?: boolean; failed?: boolean; thumb?: string
   file?: { path: string; name: string; kind: 'image' | 'file'; media_type?: string; bytes?: number; lines?: number | null } }
+// A message copied out of a chat: its <attached-images>/<attached-files> blocks, the "🖼 1 image
+// attached" footer and "[Image: source: …]" markers become attachments again instead of raw markup.
+const IMG_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+export function copiedMessage(t: string): { text: string; files: NonNullable<Shared['file']>[] } | null {
+  if (!/<attached-(images|files)>/.test(t)) return null
+  const files: NonNullable<Shared['file']>[] = []
+  const name = (p: string) => (p.split('/').pop() ?? p).replace(/^[0-9a-f]{8}-/, '')
+  let rest = t.replace(/<attached-images>([\s\S]*?)<\/attached-images>\s*/g, (_m, inner: string) => {
+    for (const l of inner.match(/^- (.+)$/gm) ?? []) {
+      const path = l.slice(2).trim(), ext = path.split('.').pop()?.toLowerCase() ?? ''
+      files.push({ path, name: name(path), kind: 'image', media_type: IMG_TYPES[ext] ?? 'image/png' })
+    }
+    return ''
+  })
+  rest = rest.replace(/<attached-files>([\s\S]*?)<\/attached-files>\s*/g, (_m, inner: string) => {
+    for (const l of inner.match(/^- (\/\S+)/gm) ?? []) { const path = l.slice(2).trim(); files.push({ path, name: name(path), kind: 'file' }) }
+    return ''
+  })
+  rest = rest.replace(/^\s*🖼\uFE0F? ?\d+ images? attached\s*$/gmu, '').replace(/^\s*\[Image: source: [^\]]*\]\s*$/gm, '')
+    .replace(/^\(see the attached (?:image|file|\d+ attachments)\)$/m, '')
+  return { text: rest.replace(/\n{3,}/g, '\n\n').trim(), files }
+}
 // Long enough that it would bury the message: becomes an attached file instead.
 export const isLong = (t: string) => t.length > 2000 || t.split('\n').length > 40
 export const sniff = (t: string) => /^\s*[[{]/.test(t) && (() => { try { JSON.parse(t); return true } catch { return false } })() ? 'json' : /^(diff --git|--- a\/)/m.test(t) ? 'diff' : /^#{1,3} |\n```/.test(t) ? 'md' : 'txt'
