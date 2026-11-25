@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('perch', {
   popout: url => ipcRenderer.invoke('popout', url),
   pin: on => ipcRenderer.invoke('pin', on),
   isPinned: () => ipcRenderer.invoke('is-pinned'),
+  pickFile: start => ipcRenderer.invoke('pick-file', start),
   badge: text => ipcRenderer.invoke('badge', text),
   preset: name => ipcRenderer.invoke('preset', name),
   buttons: on => ipcRenderer.invoke('buttons', on),

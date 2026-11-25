@@ -152,3 +152,20 @@
 .wh-page i { display: block; height: 3px; border-radius: 2px; background: var(--line); }
 .wh-page i:last-child { width: 60%; }
 .wh .chip.final { color: #2e9d5b; }
+.wh-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.wh-preview { position: relative; height: 150px; overflow: hidden; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.wh-preview::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
+.wh-preview img { width: 100%; max-height: 80px; object-fit: cover; border-radius: 4px; flex: none; background: var(--bg3); }
+.wh-preview-text > * { margin: 0 0 6px; }
+.wh-preview-text h1, .wh-preview-text h2, .wh-preview-text h3, .wh-preview-text h4 { font-size: 12px; color: var(--fg); }
+.wh-preview-text ul, .wh-preview-text ol { padding-left: 16px; }
+.wh-preview-text pre, .wh-preview-text code { font-size: 10.5px; white-space: pre-wrap; }
+.wh-preview-text table { border-collapse: collapse; font-size: 10.5px; }
+.wh-preview-text td, .wh-preview-text th { border: 1px solid var(--line); padding: 1px 4px; }
+.wh-finder { position: relative; margin-bottom: 10px; }
+.wh-drop { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 360px; overflow: auto; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.35); padding: 6px; }
+.wh-drop-places { display: flex; gap: 6px; flex-wrap: wrap; padding: 2px 4px 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.wh-drop-places .chip { cursor: pointer; }
+.wh-drop-head { padding: 4px 6px; }
+.wh-drop-row { all: unset; box-sizing: border-box; display: flex; gap: 8px; align-items: center; width: 100%; padding: 5px 8px; border-radius: 6px; cursor: pointer; min-width: 0; }
+.wh-drop-row.sel { background: var(--bg3); }

@@ -1,6 +1,6 @@
 // The floating window. All the work happens in the perch server; this only owns the window:
 // always-on-top, a global show/hide shortcut, size presets, and remembering where you left it.
-const { app, BrowserWindow, Menu, globalShortcut, ipcMain, nativeTheme, screen, shell, systemPreferences } = require('electron')
+const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell, systemPreferences } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
 const { existsSync, readFileSync, openSync } = require('node:fs')
 const { join } = require('node:path')
@@ -410,6 +410,11 @@ ipcMain.handle('board-thumb', (_e, url) => {
 })
 ipcMain.handle('pin', (_e, on) => { win.setAlwaysOnTop(!!on, 'floating'); return win.isAlwaysOnTop() })
 ipcMain.handle('is-pinned', () => win.isAlwaysOnTop())
+// Writing's Browse…: the native Finder sheet, markdown and text files only. Returns the path or null.
+ipcMain.handle('pick-file', async (_e, start) => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], defaultPath: typeof start === 'string' && start ? start : undefined, filters: [{ name: 'Markdown and text', extensions: ['md', 'markdown', 'mdx', 'txt'] }] })
+  return r.canceled ? null : r.filePaths[0] ?? null
+})
 // Big decisions waiting on you show on the dock icon, so you see them without opening perch.
 ipcMain.handle('badge', (_e, text) => { try { app.dock?.setBadge(String(text ?? '')) } catch {} })
 ipcMain.handle('preset', (_e, name) => { win.setBounds(presetBounds(name), true); saveBounds() })
