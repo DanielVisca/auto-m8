@@ -10,6 +10,7 @@ import { toast } from './api'
 import { ProjectView, type Decision, type Project } from './Decisions'
 import { Setup } from './Setup'
 import { NeedsMe, type NeedsData } from './NeedsMe'
+import { handedFiles } from './Chat'
 
 type Pick = { id?: string; pr?: string; title: string; why: string }
 type Brief = { greeting: string; mode: 'drive' | 'create'; pickup: Pick[]; dropping: Pick[]; groups: { label: string; ids: string[]; why: string }[]; fromNotes: string[]; created_at: number; error?: string }
@@ -58,6 +59,9 @@ export function Home({ onOpen, onStart, onBoard, settings, onTerminal }: { onOpe
       <h1 className="start-hello">{greeting()}</h1>
       <div className="start-box">
         <textarea autoFocus rows={2} value={text} placeholder="What are we working on?" onChange={e => setText(e.target.value)}
+          onPaste={e => { const f = [...e.clipboardData.items].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean) as File[]; if (f.length) { e.preventDefault(); handedFiles.push(...f); onStart(text.trim() || undefined) } }}
+          onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
+          onDrop={e => { const f = [...(e.dataTransfer.files ?? [])]; if (f.length) { e.preventDefault(); handedFiles.push(...f); onStart(text.trim() || undefined) } }}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
         <button className="primary" onClick={submit}>{text.trim() ? 'Start' : 'New chat'}</button>
       </div>

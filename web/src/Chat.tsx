@@ -852,11 +852,19 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
   const research = (q: string) => window.dispatchEvent(new CustomEvent('perch-research', { detail: q }))
   const [opt, setOpt] = useState<{ brief: string; direction: string; iterations: number; target: string } | null>(null)
   const [shared, setShared] = useState<Shared[]>([])
+  // Attached images: click a thumbnail to see it large above the box, keep typing, step through them.
+  const [viewKey, setViewKey] = useState<string | null>(null)
+  const [viewBig, setViewBig] = useState(false)
+  const images = shared.filter(x => x.thumb)
+  const viewAt = images.findIndex(x => x.key === viewKey)
+  const viewing = viewAt >= 0 ? images[viewAt] : null
+  const step = (d: number) => images.length && setViewKey(images[(viewAt + d + images.length) % images.length].key!)
   // Files, images and long pastes: uploaded at once, sent as attachments with the message.
   const attach = async (f: Blob, name: string, kind: 'image' | 'file', label: string, text?: string) => {
     const key = Math.random().toString(36).slice(2)
     const thumb = kind === 'image' ? URL.createObjectURL(f) : undefined
     setShared(s => [...s, { key, title: name, summary: label, context: '', loading: true, thumb, file: { path: '', name, kind, media_type: f.type } }])
+    if (thumb) setViewKey(k => k ?? key)
     try {
       const r = await post<any>('/api/attachments', text != null ? { name, text } : { name, base64: await toBase64(f) })
       if (r.error) throw new Error(r.error)
@@ -869,6 +877,8 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
       else attach(f, f.name, 'file', `${f.size > 1e6 ? `${(f.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1024))} KB`}`)
     }
   }
+  // Images pasted or dropped on Home's box arrive here once the new chat opens.
+  useEffect(() => { if (!id && handedFiles.length) takeFiles(handedFiles.splice(0)) }, []) // eslint-disable-line
   const takeLongText = (t: string) => attach(new Blob([t], { type: 'text/plain' }), `pasted-${new Date().toTimeString().slice(0, 8).replace(/:/g, '')}.${sniff(t)}`, 'file', `${t.split('\n').length} lines`, t)
   const [dragOver, setDragOver] = useState(false)
   const ta = useRef<HTMLTextAreaElement>(null)
@@ -978,11 +988,30 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
       )}
       {preBlock && !shownInThread && <BlockerCard blocker={preBlock} convId={id} compact={compact} />}
       {dragOver && <div className="drop-hint">Drop images, files, links, PRs or text to share them with the agent</div>}
+      {viewing && (
+        <div className={`attach-viewer${viewBig ? ' big' : ''}`} tabIndex={-1}
+          onKeyDown={e => { if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1) } else if (e.key === 'ArrowRight') { e.preventDefault(); step(1) } else if (e.key === 'Escape') { e.preventDefault(); setViewKey(null); ta.current?.focus() } }}>
+          <div className="attach-viewer-bar">
+            <span className="muted">{images.length > 1 ? `${viewAt + 1} of ${images.length} · ` : ''}{viewing.title}</span>
+            <span className="attach-viewer-tools">
+              {images.length > 1 && <><button onClick={() => step(-1)} title="Previous image (Alt+←)">‹</button><button onClick={() => step(1)} title="Next image (Alt+→)">›</button></>}
+              <button onClick={() => setViewBig(b => !b)} title={viewBig ? 'Smaller' : 'Larger'}>{viewBig ? '⤡' : '⤢'}</button>
+              <button onClick={() => { setViewKey(null); ta.current?.focus() }} title="Close preview (Esc)">×</button>
+            </span>
+          </div>
+          <div className="attach-viewer-img">
+            {images.length > 1 && <button className="attach-viewer-nav prev" onClick={() => step(-1)} aria-label="Previous image">‹</button>}
+            <img src={viewing.thumb} alt={viewing.title} onClick={() => setViewBig(b => !b)} />
+            {images.length > 1 && <button className="attach-viewer-nav next" onClick={() => step(1)} aria-label="Next image">›</button>}
+          </div>
+        </div>
+      )}
       {shared.length > 0 && (
         <div className="chips">
-          {shared.map((x, i) => <span key={x.key ?? i} className={`chip shared${x.thumb ? ' has-thumb' : ''}${x.failed ? ' failed' : ''}`} title={x.file?.path || x.summary}>
+          {shared.map((x, i) => <span key={x.key ?? i} className={`chip shared${x.thumb ? ' has-thumb' : ''}${x.failed ? ' failed' : ''}${x.thumb && x.key === viewKey ? ' viewing' : ''}`} title={x.thumb ? 'Click to preview' : x.file?.path || x.summary}
+            onClick={x.thumb ? () => setViewKey(k => k === x.key ? null : x.key!) : undefined}>
             {x.thumb ? <img src={x.thumb} alt="" /> : x.loading ? '…' : x.file ? '📄' : x.url?.includes('/pull/') ? '⇅' : '🔗'} {x.title.slice(0, 56)}<span className="muted"> {x.loading && x.file ? 'attaching…' : x.summary}</span>
-            <button onClick={() => { if (x.thumb) URL.revokeObjectURL(x.thumb); setShared(shared.filter((_, j) => j !== i)) }} title="Remove">×</button></span>)}
+            <button onClick={e => { e.stopPropagation(); if (x.key === viewKey) setViewKey(null); if (x.thumb) URL.revokeObjectURL(x.thumb); setShared(shared.filter((_, j) => j !== i)) }} title="Remove">×</button></span>)}
         </div>
       )}
       {!dismissed && suggestions.length > 0 && (
@@ -1023,6 +1052,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
             if (/^\s*https?:\/\/\S+\s*$/.test(t) && take(e.clipboardData)) e.preventDefault()
           }}
           onKeyDown={e => {
+            if (viewing && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); step(e.key === 'ArrowLeft' ? -1 : 1); return }
             if (slashItems.length) {
               if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIndex(i => (i + 1) % slashItems.length); return }
               if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIndex(i => (i - 1 + slashItems.length) % slashItems.length); return }
@@ -1241,6 +1271,8 @@ function PlusMenu({ onAutoresearch, onResearch, onSkill, onLink }: { onAutoresea
   )
 }
 
+// Files from Home's start box, handed to the new chat it opens.
+export const handedFiles: File[] = []
 type Shared = { key?: string; url?: string; title: string; summary: string; context: string; loading?: boolean; failed?: boolean; thumb?: string
   file?: { path: string; name: string; kind: 'image' | 'file'; media_type?: string; bytes?: number; lines?: number | null } }
 // Long enough that it would bury the message: becomes an attached file instead.
