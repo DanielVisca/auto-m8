@@ -67,7 +67,16 @@ export function availability(hours = 24) {
   const outages = rows.filter(r => r.kind === 'outage' && r.cause !== 'mac-asleep')
   const boots = rows.filter(r => r.kind === 'boot')
   const byCause: Record<string, number> = {}
-  for (const b of boots) { const k = b.cause.replace(/:.*/, '').replace(/ from another process.*/, ' (agent or script kill)'); byCause[k] = (byCause[k] ?? 0) + 1 }
+  // Plain causes: "SIGTERM: <commit>" is scripts/restart.sh shipping new code; "from another process" is an agent killing it.
+  const plain = (c: string) => /from another process/.test(c) ? 'killed by an agent or script' : /^SIGTERM:/.test(c) ? 'restarted to load new code' : c.replace(/:.*/, '')
+  for (const b of boots) { const k = plain(b.cause); byCause[k] = (byCause[k] ?? 0) + 1 }
+  // One bucket per hour, oldest first, for the uptime strip. Straight from SQL so the 400-row cap above doesn't clip it.
+  const start = Math.floor(since / 3600_000) * 3600_000
+  const hourly = Array.from({ length: hours + 1 }, (_, i) => ({ at: start + i * 3600_000, outages: 0, downMs: 0, restarts: 0 }))
+  for (const r of all<any>(`select cast((at - ?) / 3600000 as integer) h, kind, count(*) n, sum(ms) ms from availability where at >= ? and (kind = 'boot' or (kind = 'outage' and cause != 'mac-asleep')) group by 1, 2`, start, since)) {
+    const b = hourly[r.h]; if (!b) continue
+    if (r.kind === 'boot') b.restarts = r.n; else { b.outages = r.n; b.downMs = r.ms }
+  }
   return {
     hours,
     outages: outages.length,
@@ -77,6 +86,7 @@ export function availability(hours = 24) {
     stalls: rows.filter(r => r.kind === 'stall').length,
     bootMs: boots.length ? Math.round(boots.reduce((s, r) => s + r.ms, 0) / boots.length) : null,
     recent: rows.filter(r => r.kind === 'outage' || r.kind === 'boot').slice(0, 15),
+    hourly,
   }
 }
 

@@ -497,6 +497,20 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .health-row:first-of-type { border-top: none; }
 .health-row .dot { margin-top: 6px; }
 .health-row pre { max-height: 160px; }
+.health-verdict { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); margin: 4px 0 8px; }
+.health-verdict .dot { width: 10px; height: 10px; margin-top: 5px; }
+.health-verdict.bad { border-color: var(--bad); }
+.health-section { border-top: 1px solid var(--line); padding: 10px 0 4px; margin-top: 6px; }
+.health-section-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.health-hours { display: flex; align-items: flex-end; gap: 2px; height: 34px; margin-top: 8px; }
+.health-hours span { flex: 1; background: var(--line); border-radius: 2px; min-height: 2px; }
+.health-hours span.down { background: var(--bad); }
+.health-hours-axis { display: flex; justify-content: space-between; }
+.health-group > summary { display: flex; gap: 8px; align-items: center; padding: 6px 0; cursor: pointer; list-style: none; }
+.health-group > summary::-webkit-details-marker { display: none; }
+.health-group > summary::before { content: '▸'; color: var(--muted); font-size: 10px; }
+.health-group[open] > summary::before { content: '▾'; }
+.health-group > .health-row { padding-left: 18px; }
 
 .dim-line { opacity: .55; }
 .line.wrap .grow, .line .grow.small { overflow-wrap: anywhere; }

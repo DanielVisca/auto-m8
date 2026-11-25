@@ -87,5 +87,5 @@ export async function withRetry<T>(fn: () => Promise<T>, tries = 4): Promise<T> 
   throw last
 }
 
-export const recentErrors = () => all<any>(`select * from errors where last_at > ? order by status = 'resolved', last_at desc limit 50`, Date.now() - 7 * 86400_000)
+export const recentErrors = () => all<any>(`select * from errors where last_at > ? order by status = 'resolved', last_at desc limit 200`, Date.now() - 7 * 86400_000)
 export const recurring = () => all<any>(`select * from errors where status != 'resolved' and count >= 3 and last_at > ?`, Date.now() - 86400_000)

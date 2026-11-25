@@ -346,43 +346,113 @@ function SearchLearning() {
 
 // Availability: each time the app couldn't reach perch, and why (server/uptime.ts).
 const dur = (ms: number) => ms < 60_000 ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s` : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+const times = (n: number) => n === 1 ? 'once' : `${n.toLocaleString()} times`
 function Availability() {
   const { data } = useLive<any>('/api/availability?hours=24', ['errors' as any], undefined, 60_000)
   if (!data) return null
-  const causes = Object.entries(data.byCause ?? {}).sort((a: any, b: any) => b[1] - a[1])
+  const causes = Object.entries(data.byCause ?? {}).sort((a: any, b: any) => b[1] - a[1]) as [string, number][]
+  const hourly: any[] = data.hourly ?? []
+  const peak = Math.max(1, ...hourly.map(h => h.downMs))
   return (
-    <div className="availability">
-      <div><b>Availability, last 24h:</b> <span className={data.outages ? 'bad' : 'ok-text'}>{data.outages ? `${data.outages} gap${data.outages > 1 ? 's' : ''} you could have seen, ${dur(data.downMs)} in total` : 'no gaps'}</span>
-        <span className="muted small"> · {data.restarts} restart{data.restarts === 1 ? '' : 's'}{data.bootMs != null ? `, ${dur(data.bootMs)} to start` : ''} · {data.stalls} freeze{data.stalls === 1 ? '' : 's'} over 2s</span></div>
-      {!!causes.length && <div className="muted small">Restarts by cause: {causes.map(([k, n]) => `${k} ×${n}`).join(' · ')}</div>}
-      {!!data.recent?.length && <details><summary className="muted small">recent</summary>
+    <div className="health-section">
+      <div className="health-section-head"><b>auto-m8 itself</b><span className="muted small">last 24h</span></div>
+      <div>{data.outages
+        ? <>This window lost its connection to auto-m8 <b className="bad">{times(data.outages)}</b>, <b>{dur(data.downMs)}</b> in total.</>
+        : <span className="ok-text">This window never lost its connection to auto-m8.</span>}</div>
+      {data.restarts > 0 && <div className="muted small">
+        auto-m8 restarted {times(data.restarts)}{data.bootMs != null ? `, about ${dur(data.bootMs)} each` : ''}: {causes.map(([k, n]) => `${n} ${k}`).join(', ')}.
+        {data.stalls > 0 && ` It also froze for over 2s ${times(data.stalls)}.`}
+      </div>}
+      {hourly.length > 0 && data.outages > 0 && <div className="health-hours" title="Time unreachable per hour">
+        {hourly.map(h => <span key={h.at} title={`${new Date(h.at).toLocaleTimeString([], { hour: 'numeric' })}: ${h.outages ? `${h.outages} gaps, ${dur(h.downMs)}` : 'no gaps'}${h.restarts ? ` · ${h.restarts} restarts` : ''}`}
+          style={{ height: `${h.downMs ? Math.max(12, (h.downMs / peak) * 100) : 4}%` }} className={h.downMs ? 'down' : ''} />)}
+      </div>}
+      {hourly.length > 0 && data.outages > 0 && <div className="health-hours-axis muted small"><span>24h ago</span><span>now</span></div>}
+      {!!data.recent?.length && <details><summary className="muted small">each gap and restart</summary>
         {data.recent.map((r: any, i: number) => <div key={i} className="small"><span className="muted">{new Date(r.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span> {r.kind === 'outage' ? `unreachable ${dur(r.ms)}: ${r.cause}` : `restarted (ready in ${dur(r.ms)})`}{r.detail || (r.kind === 'boot' && r.cause) ? <span className="muted"> · {r.kind === 'boot' ? r.cause : r.detail}</span> : null}</div>)}
       </details>}
     </div>
   )
 }
 
-// Health: what broke recently, in plain words, and what perch did about it.
+// Who has to act on an error decides where it goes: you (needs-you), nobody because it's outside
+// auto-m8 and retried (retrying), or auto-m8's own code (open). Then grouped so 40 rows read as 6.
+const serviceOf = (e: any) => /GitHub/i.test(e.message) ? 'GitHub' : /PostHog/i.test(e.message) ? 'PostHog' : /Claude/i.test(e.message) ? 'Claude' : 'Network'
+const areaOf = (e: any) => {
+  const s = String(e.source)
+  return /explore/.test(s) ? 'Architecture explorer' : /\/pr|pr-sidebar|PR insights|prs\//i.test(s) ? 'PR views' : /slack/.test(s) ? 'Slack drafts'
+    : /needs/.test(s) ? 'Needs me' : /UI page/.test(s) ? 'Interface' : /files/.test(s) ? 'Files' : /board/.test(s) ? 'Boards' : /background/.test(s) ? 'Background jobs' : s
+}
+const plainMsg = (m: string) => m.replace(/^That failed: /, '').replace(/^Part of the page failed: /, '')
+function groupBy(list: any[], key: (e: any) => string) {
+  const m = new Map<string, any[]>()
+  for (const e of list) { const k = key(e); m.set(k, [...(m.get(k) ?? []), e]) }
+  return [...m.entries()].map(([name, items]) => ({ name, items, count: items.reduce((s, e) => s + (e.count ?? 1), 0), last: Math.max(...items.map(e => e.last_at)) }))
+    .sort((a, b) => b.last - a.last)
+}
+
+function ErrorRow({ e, reload }: { e: any; reload: () => void }) {
+  return (
+    <div className="health-row">
+      <div className="grow">
+        <div>{plainMsg(e.message)} <span className="muted small">{e.count > 1 ? `${e.count}× · ` : ''}{ago(e.last_at)} ago · {e.source}</span></div>
+        <details><summary className="muted small">details</summary><pre className="small">{e.detail}</pre></details>
+      </div>
+      {e.status !== 'resolved' && <button className="link small" onClick={async () => { await post(`/api/errors/${encodeURIComponent(e.key)}/resolve`); reload() }}>dismiss</button>}
+    </div>
+  )
+}
+
+function ErrorGroup({ g, dot, reload, open }: { g: { name: string; items: any[]; count: number; last: number }; dot: string; reload: () => void; open?: boolean }) {
+  return (
+    <details className="health-group" open={open}>
+      <summary>
+        <span className={`dot ${dot}`} /><b>{g.name}</b>
+        <span className="muted small grow">{times(g.count)} · last {ago(g.last)} ago{g.items.length > 1 ? ` · ${g.items.length} kinds` : ''}</span>
+        <button className="link small" onClick={async ev => { ev.preventDefault(); await Promise.all(g.items.map(e => post(`/api/errors/${encodeURIComponent(e.key)}/resolve`))); reload() }}>dismiss all</button>
+      </summary>
+      {g.items.map(e => <ErrorRow key={e.key} e={e} reload={reload} />)}
+    </details>
+  )
+}
+
+// Health: one answer first (does anything need you?), then auto-m8's uptime, then the rest grouped by who acts.
 function Health() {
   const { data, reload } = useLive<{ errors: any[] }>('/api/errors', ['errors' as any])
   const list = data?.errors ?? []
-  const open = list.filter(e => e.status !== 'resolved')
+  const needs = list.filter(e => e.status === 'needs-you')
+  const outside = list.filter(e => e.status === 'retrying')
+  const bugs = list.filter(e => e.status === 'open')
+  const fixed = list.filter(e => e.status === 'resolved')
   return (
     <section className="card">
-      <div className="card-head"><h3>Health</h3><span className={`small ${open.length ? 'bad' : 'ok-text'}`}>{open.length ? `${open.length} open` : 'all good'}</span></div>
-      <Availability />
-      {!list.length && <div className="muted small">Nothing has gone wrong this week. When something does, it shows here in plain words with what auto-m8 did about it.</div>}
-      {list.slice(0, 12).map(e => (
-        <div key={e.key} className="health-row">
-          <span className={`dot ${e.status === 'resolved' ? 'ok' : e.status === 'retrying' ? 'pending' : 'bad'}`} />
-          <div className="grow">
-            <div><b>{e.message}</b> <span className="muted small">{e.count > 1 ? `${e.count}× · ` : ''}{ago(e.last_at)} ago · {e.source}</span></div>
-            <div className="muted small">{e.status === 'resolved' ? 'Resolved: it worked again afterwards.' : e.action}</div>
-            <details><summary className="muted small">details</summary><pre className="small">{e.detail}</pre></details>
-          </div>
-          {e.status !== 'resolved' && <button className="link small" onClick={async () => { await post(`/api/errors/${encodeURIComponent(e.key)}/resolve`); reload() }}>dismiss</button>}
+      <div className="card-head"><h3>Health</h3></div>
+      <div className={`health-verdict ${needs.length ? 'bad' : 'ok'}`}>
+        <span className={`dot ${needs.length ? 'bad' : 'ok'}`} />
+        <div>
+          <b>{needs.length ? `${needs.length} thing${needs.length > 1 ? 's' : ''} need${needs.length > 1 ? '' : 's'} you` : 'Nothing needs you'}</b>
+          <div className="muted small">{needs.length ? 'Each says what to do. ' : ''}auto-m8 handles the rest on its own{outside.length || bugs.length ? ': ' : '.'}
+            {[outside.length && `${groupBy(outside, serviceOf).length} outside service${groupBy(outside, serviceOf).length > 1 ? 's' : ''} it's retrying`, bugs.length && `${bugs.length} bug${bugs.length > 1 ? 's' : ''} in its own code, logged`].filter(Boolean).join(', ')}{outside.length || bugs.length ? '.' : ''}</div>
         </div>
-      ))}
+      </div>
+      {needs.map(e => <div key={e.key} className="health-row"><span className="dot bad" /><div className="grow"><div><b>{e.message}</b></div><div className="small">{e.action}</div></div>
+        <button className="link small" onClick={async () => { await post(`/api/errors/${encodeURIComponent(e.key)}/resolve`); reload() }}>done</button></div>)}
+
+      <Availability />
+
+      {outside.length > 0 && <div className="health-section">
+        <div className="health-section-head"><b>Trouble outside auto-m8</b><span className="muted small">retried automatically, nothing to do</span></div>
+        {groupBy(outside, serviceOf).map(g => <ErrorGroup key={g.name} g={g} dot="pending" reload={reload} />)}
+      </div>}
+
+      {bugs.length > 0 && <div className="health-section">
+        <div className="health-section-head"><b>Bugs in auto-m8</b><span className="muted small">logged; ones that keep happening go to self-fix</span></div>
+        {groupBy(bugs, areaOf).map(g => <ErrorGroup key={g.name} g={g} dot="warn" reload={reload} />)}
+      </div>}
+
+      {!list.length && <div className="muted small">Nothing has gone wrong this week.</div>}
+      {fixed.length > 0 && <details className="health-group"><summary><span className="dot ok" /><span className="muted small grow">{fixed.length} fixed themselves or were dismissed this week</span></summary>
+        {fixed.map(e => <ErrorRow key={e.key} e={e} reload={reload} />)}</details>}
     </section>
   )
 }
