@@ -63,7 +63,8 @@ import { taskOutput } from './taskOutput.ts'
 import { isPaused, overview as pauseOverview, pauseAll, resumeAll } from './pause.ts'
 import { deleteRoutine, fire, listRoutines, saveRoutine, startScheduler } from './routines.ts'
 import { DATA_DIR, settings, updateSettings } from './settings.ts'
-import { exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
+import { clickhouseDisks, connectors as exploreConnectors, listRepos, prewarmRuntime, whereItRuns } from './explorer-runtime.ts'
+import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
 import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
 import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, sendTerm, termEvents, terms, typedInto, waitTerm } from './term.ts'
@@ -922,6 +923,15 @@ route('GET', '/api/explore/timeline', (_m, _r, _s, q) => exploreTimeline(String(
 route('GET', '/api/explore/node', (_m, _r, _s, q) => exploreNode(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
 route('POST', '/api/explore/dream', async (_m, req) => { const b = await body(req); return exploreDream(String(b.repo ?? ''), b.focus ?? null, Array.isArray(b.ops) ? b.ops : []) })
 route('POST', '/api/explore/open', async (_m, req) => { const b = await body(req); return exploreOpen(String(b.repo ?? ''), String(b.file ?? ''), Number(b.line) || undefined) })
+route('GET', '/api/explore/repos', () => listRepos())
+route('GET', '/api/explore/connectors', (_m, _r, _s, q) => exploreConnectors(q.get('fresh') === '1'))
+route('GET', '/api/explore/clickhouse', () => clickhouseDisks())
+route('GET', '/api/explore/runtime', async (_m, _r, _s, q) => {
+  const repos = await Promise.all(String(q.get('repos') ?? '').split(',').filter(Boolean).map(r => checkRepo(r)))
+  const charts = repos.find(r => existsSync(join(r, 'apps')) && /charts/.test(r)) ?? null
+  return whereItRuns(String(q.get('concept') ?? ''), { repos, charts, org: q.get('org') })
+})
+setTimeout(() => { if (!process.env.PERCH_NO_AGENT_SYNC) prewarmRuntime() }, 30_000).unref()
 route('POST', '/api/explore/dream/save', async (_m, req) => { const b = await body(req); return saveDream(b as any) })
 route('GET', '/api/pr/journey', (_m, _r, _s, q) => journey(String(q.get('url') ?? ''), q.get('fresh') === '1'))
 route('POST', '/api/pr/queue', async (_m, req) => { const b = await body(req); return queuePr(String(b.pr ?? ''), b.on !== false) })

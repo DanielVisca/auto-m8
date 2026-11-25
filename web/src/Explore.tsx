@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, post, sendChat, shortPath, toast } from './api'
 import { MiniChat } from './Mini'
+import { RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
 import './explore.css'
 
 type Evidence = { file: string; line: number; text: string; github?: string | null; local?: string }
@@ -47,6 +48,14 @@ function layout(nodes: Node[]) {
 export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onOpenChat: (id: string) => void }) {
   const [repo, setRepo] = useState(() => initialRepo || recentRepos()[0] || '')
   const [repoInput, setRepoInput] = useState(repo)
+  const repos = useRepos()
+  // A workspace: the repo you map plus related ones (deploy charts, infra, services) used to tell where its code runs.
+  const wsKey = (r: string) => `perch.explore.ws.${r}`
+  const [ws, setWs] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(wsKey(repo)) ?? '[]') } catch { return [] } })
+  useEffect(() => { try { setWs(JSON.parse(localStorage.getItem(wsKey(repo)) ?? '[]')) } catch { setWs([]) } }, [repo])
+  const saveWs = (next: string[]) => { setWs(next); localStorage.setItem(wsKey(repo), JSON.stringify(next)) }
+  const [sources, setSources] = useState(false)
+  const [runtime, setRuntime] = useState<Runtime | null>(null)
   const [focus, setFocus] = useState(() => localStorage.getItem('perch.explore.focus') ?? '')
   const [focusInput, setFocusInput] = useState(focus)
   const [hubs, setHubs] = useState(false)
@@ -149,6 +158,15 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
       for (const e of g.edges.filter(e => e.from === id || e.to === id).sort((a, b) => b.weight - a.weight).slice(0, 6))
         lines.push(`  ${e.from} → ${e.to} (${e.kind}, ${e.weight} file${e.weight === 1 ? '' : 's'}), e.g. ${e.evidence[0] ? `${e.evidence[0].file}:${e.evidence[0].line} \`${e.evidence[0].text.slice(0, 140)}\`` : ''}`)
     }
+    if (runtime && sel.length === 1) {
+      lines.push(`Live (from Argo CD and Grafana, just now) for ${runtime.concept}:`)
+      for (const d of runtime.deployments.filter(d => d.origin !== 'third-party').slice(0, 4)) {
+        lines.push(`  ${d.base} (${d.origin}): ${d.apps.map(a => `${a.region} ${a.health ?? ''}${a.code?.[0] ? ` runs ${a.code[0].repo.split('/').pop()}@${a.code[0].sha.slice(0, 10)}` : ''}`).join('; ')}`)
+        const f = d.facts.filter(x => x.source.endsWith('VictoriaMetrics') && x.value != null).map(x => `${x.label} ${Math.round(Number(x.value) * 100) / 100}`)
+        if (f.length) lines.push(`    ${f.join(', ')} (query in Grafana: ${d.facts[0]?.query ?? ''})`)
+      }
+    }
+    if (ws.length) lines.push(`Related repos in this workspace: ${ws.join(', ')}.`)
     if (dreamRes) lines.push(`Dream in progress: ${dreamRes.summary}`)
     lines.push('This map comes from imports and foreign keys only, so it can miss runtime links (Celery tasks, Kafka topics, HTTP calls, signals). Verify what you say against the code in this repo and cite file:line; say when you are unsure instead of guessing.')
     return lines.join('\n')
@@ -187,15 +205,23 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   return (
     <div className="explore">
       <div className="explore-bar">
-        <input className="explore-repo" list="explore-repos" value={repoInput} placeholder="Repo path, e.g. ~/Development/posthog" onChange={e => setRepoInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setRepo(repoInput.trim()) }} />
-        <datalist id="explore-repos">{recentRepos().map(r => <option key={r} value={r} />)}</datalist>
+        <div className="explore-repo"><RepoPicker value={repo} repos={repos} placeholder="Pick a repo: type to search, or paste a path" onPick={p => { setRepoInput(p); setRepo(p); setActive(null); setSelected([]) }} /></div>
         <input className="explore-focus" list="explore-names" value={focusInput} placeholder="Focus on a concept: dashboard, insight, alert…" onChange={e => setFocusInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setRepo(repoInput.trim()); setFocus(focusInput.trim()); setActive(null); setSelected([]) } }} />
         <datalist id="explore-names">{g?.names.slice(0, 2000).map(n => <option key={n} value={n} />)}</datalist>
         <button onClick={() => { setRepo(repoInput.trim()); setFocus(focusInput.trim()); setActive(null); setSelected([]) }}>Map</button>
         <label className="small"><input type="checkbox" checked={hubs} onChange={e => setHubs(e.target.checked)} /> show shared foundations</label>
         <label className="small"><input type="checkbox" checked={allLinks} onChange={e => setAllLinks(e.target.checked)} /> all links</label>
+        <button className={sources ? 'primary' : ''} onClick={() => setSources(!sources)} title="What the explorer can read beyond code: Argo CD, Grafana, AWS…">Sources</button>
         <button className={dreaming ? 'primary' : ''} onClick={() => { setDreaming(!dreaming); if (dreaming) setOps([]) }} title="Sketch a change: remove or add concepts and see what breaks">{dreaming ? 'Leave dream mode' : 'Dream mode'}</button>
       </div>
+      {repo && (
+        <div className="explore-ws small">
+          <span className="muted" title="Related repos: used to tell which deployments run your code, and to give the chat more context">Workspace:</span>
+          <span className="chip on">{repos.find(r => r.path === repo)?.name ?? repo.split('/').pop()}</span>
+          {ws.map(w => <span key={w} className="chip">{w.split('/').pop()} <button className="link" title="Remove from workspace" onClick={() => saveWs(ws.filter(x => x !== w))}>×</button></span>)}
+          <div className="ex-ws-add"><RepoPicker compact value="" repos={repos} exclude={[repo, ...ws]} placeholder="+ add a related repo (charts, infra, a service…)" onPick={p => saveWs([...ws, p])} /></div>
+        </div>
+      )}
       {!repo && <div className="card muted">Pick a git repo to map. Everything on the map comes from its files and history: each concept, link, date and author can be traced to a file or commit.</div>}
       {err && <div className="card bad">{err}</div>}
       {g && (
@@ -205,6 +231,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
               {g.focus ? <>Left: what {focusNames.join(', ') || g.focus} is built on · Right: what's built on it · Middle: links both ways</> : <>The {g.nodes.length} most connected of {g.total} modules. Focus on one to see what it's built on.</>}
               {' · '}<span className="lg-fk">━</span> foreign key <span className="lg-imp">┅</span> import · {shortPath(g.repo)} @ {g.sha.slice(0, 8)}
               {loading && <> · <i className="spin" /> mapping…</>}
+              {(() => { const me = repos.find(r => r.path === g.repo); return me?.behindOrigin && me.behindOrigin > 50 ? <div className="warn">⚠ This checkout is on branch {me.branch} and {me.behindOrigin.toLocaleString()} commits behind main, so the map shows an older system. Pull or switch to main for today's.</div> : null })()}
             </div>
             <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="explore-svg"
               onPointerDown={e => { if (e.target === svg.current) { const p = svgPoint(e); drag.current = { x: p.x, y: p.y, x2: p.x, y2: p.y } } }}
@@ -269,12 +296,15 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
             <TimelineBar tl={tl} steps={steps} step={step} setStep={s => { setPlaying(false); setStep(s) }} playing={playing} setPlaying={setPlaying} at={at} />
           </div>
           <aside className="explore-side">
+            <div className="explore-side-top">
+            {sources && <SourcesPanel onClose={() => setSources(false)} onOpenTerm={id => { location.hash = `#term/${encodeURIComponent(id)}` }} />}
             {dreaming && <DreamPanel g={g} ops={ops} setOps={setOps} res={dreamRes} active={active} onSave={saveDream} />}
-            {active ? <NodePanel repo={g.repo} id={active} milestones={tl?.milestones[active]} introduced={events.find(e => e.kind === 'concept' && e.id === active)}
+            {active ? <NodePanel repo={g.repo} id={active} workspace={[g.repo, ...ws]} org={g.remote?.owner ?? null} onRuntime={setRuntime} milestones={tl?.milestones[active]} introduced={events.find(e => e.kind === 'concept' && e.id === active)}
               onFocus={id => { setFocus(id); setFocusInput(id); setActive(null); setSelected([]) }}
               onAsk={() => send(`Explain ${active}: what it is responsible for, how its data is stored, and why it depends on the modules it does. Start from the docs and models listed.`)}
               onRemove={() => { setDreaming(true); setOps(o => [...o, { op: 'remove', id: active }]) }} />
               : !dreaming && <div className="card muted small">Click a concept to see what it is, what it's built on, what's built on it, and where that's written. Shift-click or drag a box to select several, then ask about them below. Press play on the timeline to watch the system grow.</div>}
+            </div>
             <div className="explore-chat card">
               <div className="explore-chat-head small">
                 <b>Ask</b>
@@ -322,7 +352,7 @@ function TimelineBar({ tl, steps, step, setStep, playing, setPlaying, at }: { tl
   )
 }
 
-function NodePanel({ repo, id, milestones, introduced, onFocus, onAsk, onRemove }: { repo: string; id: string; milestones?: Commit[]; introduced?: Ev; onFocus: (id: string) => void; onAsk: () => void; onRemove: () => void }) {
+function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced, onFocus, onAsk, onRemove }: { repo: string; id: string; workspace: string[]; org: string | null; onRuntime: (r: Runtime | null) => void; milestones?: Commit[]; introduced?: Ev; onFocus: (id: string) => void; onAsk: () => void; onRemove: () => void }) {
   const [d, setD] = useState<any>(null)
   const [more, setMore] = useState<Record<string, boolean>>({})
   const [open, setOpen] = useState<string | null>(null)
@@ -364,6 +394,7 @@ function NodePanel({ repo, id, milestones, introduced, onFocus, onAsk, onRemove 
         {d.tree && <a className="small" href={d.tree} target="_blank" rel="noreferrer">GitHub ↗</a>}
       </div>
       {introduced && <div className="small ex-sec">First seen <b>{introduced.date.slice(0, 10)}</b>{introduced.approx ? ' ≈' : ''} by {introduced.commit.author}{introduced.commit.url && <> · <a href={introduced.commit.url} target="_blank" rel="noreferrer">{introduced.commit.pr ? `#${introduced.commit.pr}` : introduced.commit.sha.slice(0, 8)}</a></>} <span className="muted">{introduced.commit.subject}</span><div className="tiny muted">{introduced.source}</div></div>}
+      <WhereItRuns concept={d.concept.id} repos={workspace} org={org} onLoaded={onRuntime} />
       {d.docs.length > 0 && <div className="ex-sec"><h5>Read first</h5>{d.docs.map((x: any) => <div key={x.file} className="small"><Loc x={x} /></div>)}</div>}
       {d.models.length > 0 && (
         <div className="ex-sec"><h5>Data models <span className="muted">{d.models.length}</span></h5>
