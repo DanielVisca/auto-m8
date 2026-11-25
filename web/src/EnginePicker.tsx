@@ -120,7 +120,7 @@ export function EnginePicker({ value, onChange, local, title, className }: { val
       <button ref={ref} type="button" className={`engine-pick ${className ?? ''}`} title={title} onClick={() => setOpen(o => !o)}>
         {cur && <span className={`tier-bars t-${cur.tier}`}>{TIER[cur.tier].bars}</span>}{label}{dot && <span className={`usage-dot ${heat(dot.p)}`} title={dot.t} />} ▾
       </button>
-      <Popover anchor={ref} open={open} onClose={() => { setOpen(false); setQ('') }} align="start" width={290}>
+      <Popover anchor={ref} open={open} onClose={() => { setOpen(false); setQ('') }} align="start">
         <div className="engine-menu" onKeyDown={onKey}>
           <input autoFocus className="engine-q" placeholder="Type to filter…" value={q} onChange={e => setQ(e.target.value)} />
           {rows.map((r, i) => r.kind === 'head' ? <div key={`h${i}`}><div className="engine-head"><span>{r.label}</span>{r.group && <Usage w={groupUsage(r.group)} />}</div>{r.group && (o => o && <div className={`engine-overage ${o.heat}`} title={o.title}>{o.text}</div>)(groupOverage(r.group))}</div>

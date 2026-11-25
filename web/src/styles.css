@@ -1283,7 +1283,9 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 
 /* ---------- model menu ---------- */
 .engine-pick { cursor: pointer; background: none; border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
-.engine-menu { width: 290px; padding: 4px; display: flex; flex-direction: column; }
+.engine-menu { width: max-content; min-width: 290px; max-width: min(400px, calc(100vw - 16px)); padding: 4px; display: flex; flex-direction: column; }
+/* The model menu sizes to its rows; only the list scrolls, and only vertically. */
+.popover:has(> .engine-menu) { overflow-x: hidden; }
 .engine-q { margin: 2px 2px 4px; font-size: 12px; padding: 4px 6px; }
 .engine-head { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 6px 8px 2px; }
 .engine-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
@@ -1296,7 +1298,7 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .engine-star.on { color: #e0a800; }
 .tier-bars { font-size: 9px; letter-spacing: -1px; flex: none; margin-right: 3px; }
 .tier-bars.t-frontier { color: #b45bd6; } .tier-bars.t-workhorse { color: #3b82c4; } .tier-bars.t-fast { color: #3aa77a; }
-.engine-legend { padding: 6px 8px 3px; border-top: 1px solid var(--line); margin-top: 4px; font-size: 10px; }
+.engine-legend { contain: inline-size; padding: 6px 8px 3px; border-top: 1px solid var(--line); margin-top: 4px; font-size: 10px; }
 .engine-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .usage-chips { display: inline-flex; gap: 4px; text-transform: none; letter-spacing: 0; }
 .usage-chip { font-size: 10px; padding: 0 5px; border-radius: 8px; background: color-mix(in srgb, var(--muted) 14%, transparent); color: var(--muted); }

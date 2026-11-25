@@ -29,7 +29,8 @@ export function Popover({ anchor, open, onClose, children, align = 'end', width 
       const h = Math.min(content + 2, room)
       // Whatever happens, the box stays inside the window.
       const top = Math.max(m, Math.min(down ? a.bottom + 4 : a.top - 4 - h, vh - h - m))
-      setStyle({ left, top, width: width ? w : undefined, maxHeight: room, height: h })
+      // Scroll only when it doesn't fit: a scrollbar left over from a short first measurement otherwise sticks.
+      setStyle({ left, top, width: width ? w : undefined, maxHeight: room, height: h, overflowY: content + 2 > room ? 'auto' : 'hidden' })
     }
     place()
     const ro = new ResizeObserver(place)
