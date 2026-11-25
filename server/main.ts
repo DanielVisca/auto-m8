@@ -67,6 +67,7 @@ import { DATA_DIR, settings, updateSettings } from './settings.ts'
 import { clickhouseDisks, connectors as exploreConnectors, dataFor as exploreData, listRepos, prewarmRuntime, whereItRuns } from './explorer-runtime.ts'
 import { summaryFor as exploreSummary, warmSummaries } from './explorer-summary.ts'
 import { usageFor as exploreUsage } from './explorer-usage.ts'
+import { setSwrDir, swr } from './swr.ts'
 import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
 import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
@@ -985,27 +986,30 @@ route('GET', '/api/pr/page', (_m, _r, _s, q) => prPage(String(q.get('url') ?? ''
 route('GET', '/api/prs/plan', (_m, _r, _s, q) => mergePlan(String(q.get('urls') ?? '').split(',').filter(Boolean)))
 // Architecture explorer: a deterministic map of a repo (modules, imports, foreign keys, history) to explore and chat about.
 setExploreDir(DATA_DIR)
+setSwrDir(join(DATA_DIR, 'swr'))
 route('GET', '/api/explore/graph', (_m, _r, _s, q) => exploreGraph(String(q.get('repo') ?? ''), q.get('focus'), q.get('hubs') === '1'))
 route('GET', '/api/explore/timeline', (_m, _r, _s, q) => exploreTimeline(String(q.get('repo') ?? ''), q.get('focus')))
 route('GET', '/api/explore/node', (_m, _r, _s, q) => exploreNode(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
 route('POST', '/api/explore/dream', async (_m, req) => { const b = await body(req); return exploreDream(String(b.repo ?? ''), b.focus ?? null, Array.isArray(b.ops) ? b.ops : []) })
 route('POST', '/api/explore/open', async (_m, req) => { const b = await body(req); return exploreOpen(String(b.repo ?? ''), String(b.file ?? ''), Number(b.line) || undefined) })
-route('GET', '/api/explore/usage', (_m, _r, _s, q) => exploreUsage(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
+// These lookups call argocd, Grafana, PostHog or git in every repo and can take tens of seconds: served
+// stale-while-revalidate so none of them holds one of the window's 6 connections (see swr.ts).
+route('GET', '/api/explore/usage', (_m, _r, _s, q) => swr(`usage:${q.get('repo')}:${q.get('id')}`, 30 * 60_000, () => exploreUsage(String(q.get('repo') ?? ''), String(q.get('id') ?? ''))))
 route('GET', '/api/explore/summary', (_m, _r, _s, q) => exploreSummary(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
 route('POST', '/api/explore/summary/warm', async (_m, req) => { const b = await body(req); return warmSummaries(String(b.repo ?? ''), Array.isArray(b.ids) ? b.ids.map(String) : []) })
-route('GET', '/api/explore/repos', () => listRepos())
+route('GET', '/api/explore/repos', () => swr('repos', 60_000, () => listRepos(), { deadline: 3000 }))
 route('GET', '/api/explore/connectors', (_m, _r, _s, q) => exploreConnectors(q.get('fresh') === '1'))
 route('GET', '/api/explore/clickhouse', () => clickhouseDisks())
-route('GET', '/api/explore/runtime', async (_m, _r, _s, q) => {
+route('GET', '/api/explore/runtime', (_m, _r, _s, q) => swr(`runtime:${q.get('concept')}:${q.get('repos')}:${q.get('org')}`, 120_000, async () => {
   const repos = await Promise.all(String(q.get('repos') ?? '').split(',').filter(Boolean).map(r => checkRepo(r)))
   const charts = repos.find(r => existsSync(join(r, 'apps')) && /charts/.test(r)) ?? null
   return whereItRuns(String(q.get('concept') ?? ''), { repos, charts, org: q.get('org') })
-})
+}))
 // Datastores and tiers: the ClickHouse clusters and tables that hold a concept's data, their size, disk and instance type.
-route('GET', '/api/explore/data', async (_m, _r, _s, q) => {
+route('GET', '/api/explore/data', (_m, _r, _s, q) => swr(`data:${q.get('concept')}:${q.get('repos')}`, 120_000, async () => {
   const repos = await Promise.all(String(q.get('repos') ?? '').split(',').filter(Boolean).map(r => checkRepo(r)))
   return exploreData(String(q.get('concept') ?? ''), repos)
-})
+}))
 setTimeout(() => { if (!process.env.PERCH_NO_AGENT_SYNC) prewarmRuntime() }, 30_000).unref()
 route('POST', '/api/explore/dream/save', async (_m, req) => { const b = await body(req); return saveDream(b as any) })
 route('GET', '/api/pr/journey', (_m, _r, _s, q) => journey(String(q.get('url') ?? ''), q.get('fresh') === '1'))

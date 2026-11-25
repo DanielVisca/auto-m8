@@ -6,11 +6,20 @@ import { ago, api, post, shortPath, toast } from './api'
 // Explore answers outlive the page: a slow request (Argo CD, Grafana, ClickHouse) keeps going when you switch to a
 // chat, and its answer is waiting when you come back. Past the TTL the old answer stays on screen while a fresh one loads.
 const kept = new Map<string, { at: number; p: Promise<any>; v?: any }>()
+// Slow lookups answer { pending: true } instead of holding one of the window's 6 connections (server/swr.ts):
+// ask again, a little slower each time, until the answer is there. Each ask returns at once.
+async function untilReady<T>(url: string): Promise<T> {
+  for (let i = 0; ; i++) {
+    const v = await api.get<any>(url)
+    if (!v || v.pending !== true || i >= 60) return v
+    await new Promise(r => setTimeout(r, Math.min(600 + i * 400, 4000)))
+  }
+}
 export function keep<T = any>(url: string, ttl = 15 * 60_000): { p: Promise<T>; v?: T } {
   const k = kept.get(url)
   if (k && (k.v === undefined || Date.now() - k.at < ttl)) return k
   const e: { at: number; p: Promise<T>; v?: T } = { at: Date.now(), p: null as any, v: k?.v }
-  e.p = api.get<T>(url).then(v => { if ((v as any)?.error) kept.delete(url); else { e.v = v; e.at = Date.now() } return v }, err => { kept.delete(url); throw err })
+  e.p = untilReady<T>(url).then(v => { if ((v as any)?.error) kept.delete(url); else { e.v = v; e.at = Date.now() } return v }, err => { kept.delete(url); throw err })
   kept.set(url, e)
   return e
 }
@@ -21,7 +30,7 @@ const staleDays = (r: Repo) => r.lastFetch ? Math.floor((Date.now() - Date.parse
 
 export function useRepos() {
   const [repos, setRepos] = useState<Repo[]>([])
-  useEffect(() => { api.get<Repo[]>('/api/explore/repos').then(setRepos).catch(() => {}) }, [])
+  useEffect(() => { const k = keep<Repo[]>('/api/explore/repos', 60_000); if (Array.isArray(k.v)) setRepos(k.v); k.p.then(r => Array.isArray(r) && setRepos(r)).catch(() => {}) }, [])
   return repos
 }
 
