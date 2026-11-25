@@ -1436,9 +1436,9 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 /* Composer image preview: docked above the box, so typing continues while you look. */
 .chip.shared.has-thumb { cursor: zoom-in; }
 .chip.shared.viewing { border-color: var(--accent); }
-.attach-viewer { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); margin: 0 0 6px; outline: none; display: flex; flex-direction: column; }
+.attach-viewer { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); margin: 0 0 6px; outline: none; display: flex; flex-direction: column; width: fit-content; min-width: 220px; max-width: 100%; align-self: flex-start; box-sizing: border-box; }
 .attach-viewer-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 10px; font-size: 12px; border-bottom: 1px solid var(--line); }
-.attach-viewer-bar > .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-viewer-bar > .muted { flex: 1; min-width: 0; contain: inline-size; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-viewer-tools { display: flex; gap: 2px; flex-shrink: 0; }
 .attach-viewer-tools button { background: none; border: 0; color: var(--fg); font-size: 15px; padding: 2px 7px; border-radius: 4px; cursor: pointer; }
 .attach-viewer-tools button:hover { background: var(--line); }
