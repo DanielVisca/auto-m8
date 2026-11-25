@@ -38,7 +38,7 @@ if (typeof window !== 'undefined') ((window as any).requestIdleCallback ?? ((f: 
 import { Paused, PauseBar, usePause } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'
-import { LayoutTree, topLeftOf, useLayout, useLayoutColors, useLayoutEscape, type Run } from './Layout'
+import { LayoutTree, topLeftOf, UiAsk, UiDraftBar, useLayout, useLayoutColors, useLayoutEscape, type Run } from './Layout'
 
 type View =
   | { kind: 'chat'; id: string | null }
@@ -293,7 +293,7 @@ export function App() {
           <div className="body"><main className="main">{main}</main></div>
         </> : <SimpleHome onOpen={openById} onAdvanced={() => setSimple(false)} />}
         <Handoff current={hashFor(view)} onGo={goHash} />
-        <Toasts zen={zen} /><AskCard /><FileViewer />
+        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar />
       </div>
     )
   }
@@ -313,7 +313,7 @@ export function App() {
         <Handoff current={hashFor(view)} onGo={goHash} />
         <div className="body">{listOpen ? sidebar : <main className="main">{main}</main>}</div>
         {menu.target && <ContextMenu target={menu.target} onClose={menu.close} onOpenTerminal={openInClaude} />}
-        <Toasts zen={zen} /><AskCard /><FileViewer /><CarryDialog />
+        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar /><CarryDialog />
       </div>
     )
   }
@@ -366,7 +366,7 @@ export function App() {
         <Handoff current={hashFor(view)} onGo={goHash} />
         <div className="body"><LayoutTree node={layout.layout} slots={slots} run={run} corner={corner} /></div>
         {menu.target && <ContextMenu target={menu.target} onClose={menu.close} onOpenTerminal={openInClaude} />}
-        <Toasts zen={zen} /><AskCard /><FileViewer /><CarryDialog />
+        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar /><CarryDialog />
       </div>
     )
   }
@@ -393,7 +393,7 @@ export function App() {
         {showPrSide && <aside className="detail-col" style={{ width: details.width }}><PrSide url={view.id!} onOpen={openById} /></aside>}
       </div>
       {menu.target && <ContextMenu target={menu.target} onClose={menu.close} onOpenTerminal={openInClaude} />}
-      <Toasts zen={zen} /><AskCard /><FileViewer /><CarryDialog />
+      <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar /><CarryDialog />
     </div>
   )
 }

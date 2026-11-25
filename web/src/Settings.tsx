@@ -6,7 +6,7 @@ import { ClaudeBillingCard } from './ClaudeAccounts'
 import { PrSpendCard, SpendCard } from './Spend'
 import { useBrowser } from './BrowserView'
 import { Kits } from './Kits'
-import { useLayout } from './Layout'
+import { askForUi, useLayout, type LayoutVersion } from './Layout'
 
 // The agent browser (server/browser.ts): a dedicated Chrome profile perch drives, one window per chat.
 const POLICIES = [['trusted', 'trusted: no confirmations'], ['allow', 'allow: confirm irreversible actions'], ['read', 'read only'], ['deny', 'deny']] as const
@@ -640,23 +640,15 @@ function LayoutPicker() {
     if (r?.error) return setMsg(r.error)
     setAs(''); await pick(name); setMsg(`Copied to ${l.dir}/${name}.json. Edit that file and the window follows.`)
   }
-  // Ask an agent for a UI change in plain words: it works in the layouts folder (AGENTS.md there
-  // says how), copies a shipped layout before changing it, and the window redraws when it saves.
   const ask = async () => {
-    const want = change.trim()
-    if (!want) return
-    const shipped = l.layouts.find(x => x.name === l.active)?.shipped
-    const prompt = `Change how auto-m8 looks: ${want}\n\nWork only in this layouts folder (${l.dir}) and follow its AGENTS.md. The active layout is "${l.active}"${shipped ? ', which ships with auto-m8 and can\'t be edited: copy it to a new file, make the change there, and switch to it by setting the active layout' : ` (${l.dir}/${l.active}.json)`}. If the change needs something a layout can't do yet, say exactly what is missing instead of editing app code.`
-    try {
-      const r = await sendChat<{ id: string }>({ prompt, cwd: l.dir, noRoute: true })
-      setChange(''); setMsg('Asked. The window redraws when the agent saves the layout.')
-      if (r?.id) window.dispatchEvent(new CustomEvent('perch-open', { detail: r.id }))
-    } catch (e: any) { setMsg(String(e?.message ?? e)) }
+    if (!change.trim()) return
+    try { await askForUi(change.trim(), l); setChange(''); setMsg('Asked an agent. Keep or Undo it from the bar at the bottom of the window.') } catch (e: any) { setMsg(String(e?.message ?? e)) }
   }
   return <>
     <div className="field">Ask for a change
       <input value={change} placeholder="e.g. put Needs me above the chat list, make the accent green" style={{ flex: 1, minWidth: 260 }} onChange={e => setChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && change.trim()) ask() }} />
       <button className="small" disabled={!change.trim()} onClick={ask}>Ask</button>
+      <span className="muted small">or ⌘⇧U anywhere</span>
     </div>
     <div className="field">Layout
       <div className="seg">{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => pick(x.name)} title={x.shipped ? 'Shipped with auto-m8: copy it to change it' : `${l.dir}/${x.name}.json`}>{x.name}</button>)}</div>
@@ -668,6 +660,66 @@ function LayoutPicker() {
     </div>
     {l.error && <div className="bad small">{l.error}. auto-m8 is showing the last version that worked.</div>}
     {msg && <div className="muted small">{msg}</div>}
+    <LayoutGallery />
+    <LayoutVersions />
   </>
+}
+
+// The gallery: built-in layouts, yours, and ones other people shared on GitHub (topic auto-m8-layout,
+// server/layout.ts). Trying a shared one asks an agent to add it, as a draft you Keep or Undo.
+type Shared = { repo: string; name: string; description: string; stars: number; url: string; preview: string }
+function LayoutGallery() {
+  const l = useLayout()
+  const [open, setOpen] = useState(false)
+  const { data: g } = useLive<{ items: Shared[]; problem: string | null; topic: string }>(open ? '/api/layouts/gallery' : null, [])
+  const [msg, setMsg] = useState<string | null>(null)
+  if (!l) return null
+  const tryIt = async (x: Shared) => {
+    try {
+      await askForUi(`Add the shared layout ${x.repo}`, l, `Add the layout shared at ${x.url} (GitHub repo ${x.repo}) and switch to it, following "Layouts other people made" in AGENTS.md. Read its RECIPE.md and every file first.`)
+      setMsg(`Asked an agent to add ${x.repo}. Keep or Undo it from the bar at the bottom.`)
+    } catch (e: any) { setMsg(String(e?.message ?? e)) }
+  }
+  return <div className="field" style={{ alignItems: 'flex-start' }}>Gallery
+    <div style={{ flex: 1 }}>
+      {!open ? <button className="small" onClick={() => setOpen(true)}>Browse layouts</button> : <>
+        <div className="muted small" style={{ margin: '2px 0 6px' }}>Built in and yours</div>
+        <div className="seg" style={{ flexWrap: 'wrap' }}>{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => api.send('PUT', '/api/layouts/active', { name: x.name })}>{x.name}{x.shipped ? '' : ' ·  yours'}</button>)}</div>
+        <div className="muted small" style={{ margin: '10px 0 6px' }}>Shared by others <a href={`https://github.com/topics/${g?.topic ?? 'auto-m8-layout'}`} target="_blank" rel="noreferrer">on GitHub</a></div>
+        {!g ? <div className="muted small">Loading…</div> : g.problem && !g.items.length ? <div className="bad small">{g.problem}</div> : !g.items.length
+          ? <div className="muted small">Nobody has shared one yet. Make yours with ⌘⇧U, then ask an agent to “share my layout”: it writes the recipe and preview and shows you the repo before publishing.</div>
+          : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+            {g.items.map(x => <div key={x.repo} style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+              <img src={x.preview} alt="" style={{ width: '100%', aspectRatio: '16/10', objectFit: 'cover', background: 'var(--bg)', display: 'block' }} onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden' }} />
+              <div style={{ padding: 8 }} className="small">
+                <div><b>{x.name}</b> <span className="muted">★ {x.stars}</span></div>
+                <div className="muted" style={{ minHeight: 30 }}>{x.description}</div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}><button className="small" onClick={() => tryIt(x)}>Try it</button><a className="small" href={x.url} target="_blank" rel="noreferrer">{x.repo}</a></div>
+              </div>
+            </div>)}
+          </div>}
+        {msg && <div className="muted small" style={{ marginTop: 6 }}>{msg}</div>}
+      </>}
+    </div>
+  </div>
+}
+
+// Every change to the layouts folder is kept as a version (server/layout.ts); restore any of them.
+// Restoring saves what's there now first, so it can be undone the same way.
+function LayoutVersions() {
+  const { data } = useLive<LayoutVersion[]>('/api/layouts/versions', ['layouts'])
+  const [all, setAll] = useState(false)
+  if (!data?.length) return null
+  const shown = all ? data : data.slice(0, 6)
+  return <div className="field" style={{ alignItems: 'flex-start' }}>Versions
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+      {shown.map((v, i) => <div key={v.id} className="small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span className="muted" style={{ width: 70 }}>{ago(v.at)}</span>
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.label}>{v.label} <span className="muted">· {v.active}</span></span>
+        {i === 0 ? <span className="muted">now</span> : <button className="small" onClick={() => post('/api/layouts/restore', { id: v.id })}>Restore</button>}
+      </div>)}
+      {data.length > 6 && <button className="small link" onClick={() => setAll(a => !a)}>{all ? 'Fewer' : `All ${data.length}`}</button>}
+    </div>
+  </div>
 }
 

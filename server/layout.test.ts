@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, problemWith, readTile, SHIPPED, tilePath } from './layout.ts'
+import { cloneLayout, LAYOUT_DIR, listLayouts, listVersions, loadLayout, problemWith, readTile, restoreVersion, SHIPPED, snapshot, tilePath } from './layout.ts'
 
 const main = { id: 'main', type: 'block', content: { view: 'main' } }
 const row = (...children: any[]) => ({ id: 'root', type: 'row', children })
@@ -64,4 +64,26 @@ test('tiles are read only from inside the folder', () => {
   writeFileSync(join(LAYOUT_DIR, 'tiles', 'hi.html'), '<b>hi</b>')
   assert.equal(readTile('tiles/hi.html'), '<b>hi</b>')
   assert.equal(readTile('../settings.json'), null)
+})
+
+test('versions: a change is kept once, and restoring brings the files and active layout back', () => {
+  mkdirSync(join(LAYOUT_DIR, 'tiles'), { recursive: true })
+  const f = join(LAYOUT_DIR, 'ver.json')
+  writeFileSync(f, JSON.stringify(row(main)))
+  const a = snapshot('first', 'ver')!
+  assert.equal(snapshot('same again', 'ver'), a, 'nothing changed, so no new version')
+  writeFileSync(f, JSON.stringify(row({ id: 'side', type: 'block', content: { view: 'sidebar' } }, main)))
+  writeFileSync(join(LAYOUT_DIR, 'tiles', 'new.html'), '<b>hi</b>')
+  const b = snapshot('second', 'default')!
+  assert.notEqual(a, b)
+  assert.equal(listVersions()[0].id, b)
+  const r = restoreVersion(a, 'default')
+  assert.deepEqual(r, { active: 'ver' })
+  assert.equal(JSON.parse(readFileSync(f, 'utf8')).children.length, 1)
+  assert.equal(existsSync(join(LAYOUT_DIR, 'tiles', 'new.html')), false, 'a tile added after the version is gone')
+  assert.ok(listVersions().some(v => v.id === b), 'what was there before the restore is still a version')
+  writeFileSync(f, JSON.stringify(row(main, { id: 'd', type: 'block', content: { view: 'details' } })))
+  restoreVersion(a, 'ver')
+  assert.equal(listVersions()[0].label, 'Before restoring a version', 'an unsaved state is kept before restoring over it')
+  assert.deepEqual(restoreVersion('../x', 'default'), { error: 'no such version' })
 })

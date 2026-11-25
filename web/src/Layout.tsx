@@ -2,7 +2,7 @@
 // (sidebar, main, details) and tiles. The shipped "default" layout keeps App.tsx's hand-built
 // window, with its drag-to-resize columns; every other layout comes through here.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { api, onTopic, post, useLive } from './api'
+import { api, onTopic, post, sendChat, useLive } from './api'
 import { inlineDoc, tileTheme } from './tileBridge'
 
 export type LayoutNode = {
@@ -17,7 +17,63 @@ export type LayoutNode = {
   content?: { view: 'sidebar' | 'main' | 'details' } | { tile: string; vars?: Record<string, string | number | boolean> }
 }
 export type Layout = LayoutNode & { theme?: 'system' | 'light' | 'dark'; colors?: Record<string, string> }
-export type LayoutState = { name: string; active: string; layout: Layout; shipped: boolean; error: string | null; layouts: { name: string; shipped: boolean }[]; dir: string }
+export type LayoutDraft = { before: string; text: string; at: number; changed: boolean }
+export type LayoutState = { name: string; active: string; layout: Layout; shipped: boolean; error: string | null; layouts: { name: string; shipped: boolean }[]; dir: string; draft: LayoutDraft | null }
+export type LayoutVersion = { id: string; at: number; label: string; active: string; files: number }
+
+// Asks an agent to change the UI in plain words. The server saves a version first, so the change is a
+// draft until it's kept, and Undo puts the window back. Returns the agent's chat id.
+export async function askForUi(text: string, l: LayoutState, brief?: string): Promise<string | null> {
+  const r = await post<any>('/api/layouts/ask', { text })
+  if (r?.error) throw new Error(r.error)
+  const shipped = l.layouts.find(x => x.name === l.active)?.shipped
+  const prompt = `Change how auto-m8 looks: ${text}\n\nWork only in this layouts folder (${l.dir}) and follow its AGENTS.md. The active layout is "${l.active}"${shipped ? ", which ships with auto-m8 and can't be edited: copy it to a new file, make the change there, and switch to it by setting the active layout" : ` (${l.dir}/${l.active}.json)`}. auto-m8 saved a version before you started and shows the person Keep and Undo, so just make the change; don't ask first. If it needs something a layout can't do yet, say exactly what is missing instead of editing app code.`
+  const c = await sendChat<{ id: string }>({ prompt: brief ? `${brief}\n\nWork only in this layouts folder (${l.dir}) and follow its AGENTS.md. auto-m8 saved a version before you started and shows the person Keep and Undo.` : prompt, cwd: l.dir, noRoute: true })
+  if (c?.id) try { localStorage.setItem('perch.layout.askChat', c.id) } catch {}
+  return c?.id ?? null
+}
+
+// ⌘⇧U: a small box to ask for a UI change. Type, press Enter, keep working; the Keep/Undo bar
+// below shows up when the window has changed.
+export function UiAsk() {
+  const l = useLayout()
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    const f = (e: KeyboardEvent) => { if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 'u') { e.preventDefault(); setOpen(o => !o); setErr(null) } }
+    const ev = () => { setOpen(true); setErr(null) }
+    addEventListener('keydown', f); addEventListener('perch-ui-ask', ev)
+    return () => { removeEventListener('keydown', f); removeEventListener('perch-ui-ask', ev) }
+  }, [])
+  if (!open || !l) return null
+  const go = async () => {
+    if (!text.trim()) return
+    try { await askForUi(text.trim(), l); setText(''); setOpen(false) } catch (e: any) { setErr(String(e?.message ?? e)) }
+  }
+  return <div className="ui-ask-scrim" onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false) }}>
+    <div className="ui-ask">
+      <input autoFocus value={text} placeholder="Change the UI… e.g. sidebar on the right, warmer colours, a clock above details" onChange={e => setText(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') go(); if (e.key === 'Escape') setOpen(false) }} />
+      <div className="muted small">{err ? <span className="bad">{err}</span> : <>Enter asks an agent. You can Keep or Undo it after. Versions are in Settings → Layout. ⌘⇧U closes.</>}</div>
+    </div>
+  </div>
+}
+
+// While a change asked for in words is in flight or waiting: what it is, and Keep / Undo.
+export function UiDraftBar() {
+  const l = useLayout()
+  const d = l?.draft
+  if (!d) return null
+  const chat = (() => { try { return localStorage.getItem('perch.layout.askChat') } catch { return null } })()
+  const openChat = () => chat && window.dispatchEvent(new CustomEvent('perch-open', { detail: chat }))
+  return <div className="ui-draft-bar">
+    <span className="ui-draft-text">{d.changed ? 'UI changed' : 'Changing the UI'}: <b>{d.text}</b></span>
+    {chat && <button className="small" onClick={openChat}>Chat</button>}
+    {d.changed && <button className="small" onClick={() => post('/api/layouts/keep', {})}>Keep</button>}
+    <button className="small" onClick={() => post('/api/layouts/undo', {})} title="Put the window back as it was before you asked">{d.changed ? 'Undo' : 'Cancel'}</button>
+  </div>
+}
 
 export function useLayout() {
   return useLive<LayoutState>('/api/layouts', ['layouts']).data

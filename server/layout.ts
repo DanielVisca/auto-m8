@@ -10,8 +10,9 @@
 // - ⌘⌥⇧Escape (or POST /api/layouts/reset) always goes back to the shipped default.
 // - AGENTS.md in the folder is rewritten on every start, so an agent asked to "move the PR list to
 //   the right" edits these files from one source of truth.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
-import { basename, join, normalize, resolve } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { basename, join, normalize, relative, resolve } from 'node:path'
 import { DATA_DIR } from './settings.ts'
 
 export const LAYOUT_DIR = join(DATA_DIR, 'layouts')
@@ -181,10 +182,86 @@ export function watchLayouts(onChange: () => void) {
   let soon: NodeJS.Timeout | undefined
   try {
     watch(LAYOUT_DIR, { recursive: true }, (_e, file) => {
-      if (file && (String(file).endsWith('.error') || String(file) === 'AGENTS.md')) return
+      const f = String(file ?? '')
+      if (f.endsWith('.error') || f === 'AGENTS.md' || f.startsWith('.history') || f.startsWith('.state')) return
       clearTimeout(soon); soon = setTimeout(onChange, 150)
     })
   } catch {}
+}
+
+// Versions. Every change to the folder (an agent's edit, a hand edit, a copy) is kept as a snapshot
+// in .history/<id>/: the layout files and tiles as they were, plus which layout was active. Restoring
+// one first snapshots what's there now, so a restore can be undone too. The newest 60 are kept.
+export const HISTORY_DIR = join(LAYOUT_DIR, '.history')
+const KEEP = 60
+export type Version = { id: string; at: number; label: string; active: string; files: number }
+
+function ownFiles(dir = LAYOUT_DIR): string[] {
+  if (!existsSync(dir)) return []
+  const out: string[] = []
+  for (const f of readdirSync(dir)) {
+    if (f.startsWith('.') || f.endsWith('.error') || f === 'AGENTS.md' || f === 'AGENTS.local.md') continue
+    const full = join(dir, f)
+    if (statSync(full).isDirectory()) { if (relative(LAYOUT_DIR, full) === 'tiles' || full.startsWith(join(LAYOUT_DIR, 'tiles') + '/')) out.push(...ownFiles(full)) }
+    else if (f.endsWith('.json') || f.endsWith('.html')) out.push(relative(LAYOUT_DIR, full))
+  }
+  return out.sort()
+}
+function fingerprint(base: string, files: string[], active: string) {
+  const h = createHash('sha1').update(active)
+  for (const f of files) h.update('\0' + f + '\0').update(readFileSync(join(base, f)))
+  return h.digest('hex')
+}
+
+export function listVersions(): Version[] {
+  if (!existsSync(HISTORY_DIR)) return []
+  return readdirSync(HISTORY_DIR).filter(d => /^\d+$/.test(d)).sort((a, b) => Number(b) - Number(a)).flatMap(id => {
+    try { const m = JSON.parse(readFileSync(join(HISTORY_DIR, id, 'meta.json'), 'utf8')); return [{ id, at: m.at, label: m.label, active: m.active, files: m.files?.length ?? 0 }] } catch { return [] }
+  })
+}
+
+// Saves the folder as a version, unless nothing changed since the last one. Returns its id.
+export function snapshot(label: string, active: string): string | null {
+  const files = ownFiles()
+  const fp = fingerprint(LAYOUT_DIR, files, active)
+  const last = listVersions()[0]
+  if (last) { try { if (JSON.parse(readFileSync(join(HISTORY_DIR, last.id, 'meta.json'), 'utf8')).fp === fp) return last.id } catch {} }
+  let id = String(Date.now())
+  while (existsSync(join(HISTORY_DIR, id))) id = String(Number(id) + 1)
+  const dir = join(HISTORY_DIR, id)
+  mkdirSync(dir, { recursive: true })
+  for (const f of files) { mkdirSync(join(dir, f, '..'), { recursive: true }); cpSync(join(LAYOUT_DIR, f), join(dir, f)) }
+  writeFileSync(join(dir, 'meta.json'), JSON.stringify({ at: Date.now(), label: label.slice(0, 200), active, files, fp }) + '\n')
+  for (const old of listVersions().slice(KEEP)) rmSync(join(HISTORY_DIR, old.id), { recursive: true, force: true })
+  return id
+}
+
+// Puts the folder back as it was at a version. Returns the layout that was active then.
+export function restoreVersion(id: string, activeNow: string): { active: string } | { error: string } {
+  if (!/^\d+$/.test(id) || !existsSync(join(HISTORY_DIR, id, 'meta.json'))) return { error: 'no such version' }
+  const meta = JSON.parse(readFileSync(join(HISTORY_DIR, id, 'meta.json'), 'utf8'))
+  snapshot('Before restoring a version', activeNow)
+  for (const f of ownFiles()) rmSync(join(LAYOUT_DIR, f), { force: true })
+  for (const f of meta.files as string[]) { const dest = join(LAYOUT_DIR, f); mkdirSync(join(dest, '..'), { recursive: true }); cpSync(join(HISTORY_DIR, id, f), dest) }
+  return { active: meta.active }
+}
+
+// The gallery: layouts other people shared. Like herdr.dev/layouts, a shared layout is a public GitHub
+// repo with the topic auto-m8-layout, holding <name>.json, any tiles/, a RECIPE.md (the brief an
+// agent can rebuild it from) and a preview.png. Read with GitHub's public search, cached 10 minutes.
+export const GALLERY_TOPIC = 'auto-m8-layout'
+export type Shared = { repo: string; name: string; description: string; stars: number; url: string; preview: string; updated: string }
+let gallery: { at: number; items: Shared[]; problem: string | null } | null = null
+export async function sharedLayouts(): Promise<{ items: Shared[]; problem: string | null; topic: string }> {
+  if (gallery && Date.now() - gallery.at < 10 * 60_000) return { items: gallery.items, problem: gallery.problem, topic: GALLERY_TOPIC }
+  try {
+    const r = await fetch(`https://api.github.com/search/repositories?q=topic:${GALLERY_TOPIC}&sort=stars&per_page=50`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'auto-m8' }, signal: AbortSignal.timeout(8000) })
+    if (!r.ok) throw new Error(`GitHub search answered ${r.status}`)
+    const j: any = await r.json()
+    const items: Shared[] = (j.items ?? []).map((x: any) => ({ repo: x.full_name, name: x.name, description: x.description ?? '', stars: x.stargazers_count ?? 0, url: x.html_url, updated: x.pushed_at, preview: `https://raw.githubusercontent.com/${x.full_name}/${x.default_branch}/preview.png` }))
+    gallery = { at: Date.now(), items, problem: null }
+  } catch (e: any) { gallery = { at: Date.now() - 9 * 60_000, items: gallery?.items ?? [], problem: String(e?.message ?? e) } }
+  return { items: gallery.items, problem: gallery.problem, topic: GALLERY_TOPIC }
 }
 
 export function writeGuide() {
@@ -211,6 +288,12 @@ or "make it warmer", do it by editing a layout here.
 | \`<name>.json\` | one whole window (yours) |
 | \`<name>.error\` | why \`<name>.json\` didn't load; auto-m8 keeps the last good version meanwhile |
 | \`tiles/*.html\` | tiles that layouts put in blocks |
+| \`.history/\` | every earlier version of this folder; written by auto-m8, don't edit |
+
+Every change here is saved as a version, so nothing you do is lost: the person can
+restore any version in Settings → Layout. When they ask for a change in words (⌘⇧U),
+auto-m8 saves a version first and shows them Keep / Undo, so make the change directly
+rather than asking for permission.
 
 Shipped layouts (${Object.keys(SHIPPED).map(n => '`' + n + '`').join(', ')}) live in auto-m8's code and can't be
 edited. To change one, clone it, then edit the clone:
@@ -225,6 +308,26 @@ Or use Settings → Appearance → Layout. **Escape hatch:** ⌘⌥⇧Escape, or
 
 After every edit, check: \`cat <name>.error\` (no file means it loaded) or
 \`curl -s localhost:4777/api/layouts\` (\`error\` is null when fine).
+
+## Layouts other people made (the gallery)
+
+Settings → Layout → Gallery lists public GitHub repos with the topic
+\`auto-m8-layout\`. Each holds \`<name>.json\`, any \`tiles/\` it uses, a
+\`RECIPE.md\` (the brief to build it from scratch) and a \`preview.png\`.
+Asked to add one:
+
+1. Read the recipe and every file before writing anything. Tell the person if a
+   tile reads data they might not expect.
+2. Copy the layout file here and its tiles into \`tiles/\`. Never overwrite: if a
+   name is taken, rename the new one and the tile paths in it. Leave the recipe
+   and preview out.
+3. If the files don't load on this version (\`<name>.error\`), build it from the
+   recipe instead. Then switch to it. Keep / Undo covers the rest.
+
+To share one, only when the person asks: a public repo with that folder, a
+\`RECIPE.md\` written from the real files (what you see, how it behaves, every
+tile), a screenshot saved as \`preview.png\`, and the topic \`auto-m8-layout\`.
+Publishing is public: show the person the repo name and files and get a yes first.
 
 ## The tree
 

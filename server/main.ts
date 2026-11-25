@@ -69,7 +69,7 @@ import { summaryFor as exploreSummary, warmSummaries } from './explorer-summary.
 import { usageFor as exploreUsage } from './explorer-usage.ts'
 import { setSwrDir, swr } from './swr.ts'
 import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
-import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
+import { cloneLayout, LAYOUT_DIR, listLayouts, listVersions as listLayoutVersions, loadLayout, readTile, restoreVersion as restoreLayoutVersion, sharedLayouts, snapshot as snapshotLayouts, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
 import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, runPending, sendTerm, termEvents, terms, typedInto, waitTerm } from './term.ts'
 import { completePairing, deviceFor, isLoopback, lanHosts, listDevices, revokeDevice, setRemoteOnlyPort, startPairing, UNPAIRED_PAGE } from './remote.ts'
@@ -825,13 +825,54 @@ route('PUT', '/api/settings', async (_m, req) => {
 })
 // The window as files (server/layout.ts): which layout shows, and the tiles layouts put in blocks.
 writeGuide()
-watchLayouts(() => broadcast('layouts'))
-route('GET', '/api/layouts', () => ({ ...loadLayout(settings.ui.layout ?? 'default'), active: settings.ui.layout ?? 'default', layouts: listLayouts(), dir: LAYOUT_DIR }))
+// Every change is kept as a version (layout.ts). A change someone asked for in words is a draft
+// until they keep it: `draft` holds the version from before it, so Undo puts that back.
+let layoutDraft: { before: string; text: string; at: number; changed: boolean } | null = null
+let layoutNextLabel: string | null = null
+const activeLayout = () => settings.ui.layout ?? 'default'
+const keepVersion = (label?: string) => {
+  const id = snapshotLayouts(layoutNextLabel ?? label ?? (layoutDraft ? `Asked: ${layoutDraft.text}` : 'Edited'), activeLayout())
+  layoutNextLabel = null
+  if (layoutDraft && id && id !== layoutDraft.before) layoutDraft.changed = true
+}
+try { keepVersion('When auto-m8 started') } catch {}
+watchLayouts(() => { try { keepVersion() } catch {} broadcast('layouts') })
+route('GET', '/api/layouts', () => ({ ...loadLayout(activeLayout()), active: activeLayout(), layouts: listLayouts(), dir: LAYOUT_DIR, draft: layoutDraft }))
+route('GET', '/api/layouts/versions', () => listLayoutVersions())
+route('GET', '/api/layouts/gallery', () => sharedLayouts())
+// Restores a version: the files and which layout was active.
+const restoreLayout = (id: string) => {
+  const r = restoreLayoutVersion(id, activeLayout())
+  if ('error' in r) return r
+  layoutNextLabel = 'Restored a version'
+  if (loadLayout(r.active).name === r.active) updateSettings({ ui: { ...settings.ui, layout: r.active } })
+  keepVersion(); broadcast('layouts'); broadcast('settings')
+  return { ok: true, active: r.active }
+}
+route('POST', '/api/layouts/restore', async (_m, req) => restoreLayout(String((await body(req)).id ?? '')))
+// Someone asked for a change in words: remember the version before it, so it can be undone in one click.
+route('POST', '/api/layouts/ask', async (_m, req) => {
+  const text = String((await body(req)).text ?? '').trim()
+  if (!text) return { error: 'say what to change' }
+  const before = snapshotLayouts('Before: ' + text, activeLayout())
+  if (!before) return { error: 'could not save a version first' }
+  layoutDraft = { before, text, at: Date.now(), changed: false }
+  broadcast('layouts')
+  return { ok: true, before }
+})
+route('POST', '/api/layouts/keep', () => { layoutDraft = null; broadcast('layouts'); return { ok: true } })
+route('POST', '/api/layouts/undo', () => {
+  if (!layoutDraft) return { error: 'nothing to undo' }
+  const r = restoreLayout(layoutDraft.before)
+  layoutDraft = null; broadcast('layouts')
+  return r
+})
 route('PUT', '/api/layouts/active', async (_m, req) => {
   const name = String((await body(req)).name ?? '')
   const l = loadLayout(name)
   if (l.name !== name) return { error: l.error }
   updateSettings({ ui: { ...settings.ui, layout: name } })
+  try { keepVersion(layoutDraft ? undefined : `Switched to ${name}`) } catch {}
   broadcast('layouts'); broadcast('settings')
   return { ok: true, name }
 })
