@@ -99,6 +99,16 @@ export function apply(s: Live, ev: any): void {
 }
 
 // Registers the tool blocks of loaded history so later results attach to them.
+// A turn replayed to a chat opened mid-turn starts with the prompt, which the saved transcript
+// already has: cut history back to before it. The saved copy of a message with images ends in
+// "🖼 N images attached" (server/transcript.ts userText) and the echo doesn't, so compare without it.
+const echoText = (t: string) => t.replace(/\s*🖼 \d+ images? attached$/, '').trim()
+export function dropReplayedPrompt(history: Item[], prompt: string): Item[] {
+  const want = echoText(prompt)
+  const k = history.map(x => x.kind === 'user' ? echoText(x.text) : null).lastIndexOf(want)
+  return k >= 0 && k >= history.length - 30 ? history.slice(0, k) : history
+}
+
 export function adopt(s: Live, history: Item[]) {
   for (const i of history) if ('uuid' in i && i.uuid) s.seen.add(i.uuid)
   for (const i of history) if (i.kind === 'assistant') for (const b of i.blocks) if (b.type === 'tool') s.tools.set(b.id, b)

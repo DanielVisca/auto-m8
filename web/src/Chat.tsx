@@ -3,7 +3,7 @@ import { marked } from 'marked'
 import { createContext, memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
 import { ago, api, cachedThread, loadThread, baseName, post, sendChat, toast, shortPath, useOutbox, titleOf, useLive, type Conversation, type Item, type Term } from './api'
-import { adopt, apply, emptyLive, toolLabel, toolSummary, type Live } from './stream'
+import { adopt, apply, dropReplayedPrompt, emptyLive, toolLabel, toolSummary, type Live } from './stream'
 import { StateMenu } from './List'
 import { OpenIn } from './OpenIn'
 import { Popover } from './Popover'
@@ -717,7 +717,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
         const ev = JSON.parse(e.data)
         // A replayed in-flight turn may already be partly in the transcript: drop that tail.
         if (ev.type === 'perch_user' && !ev.uuid && live.current.items.length === 0) {
-          setHistory(h => { const k = h.map(x => x.kind === 'user' ? x.text : null).lastIndexOf(ev.text); return k >= 0 && k >= h.length - 30 ? h.slice(0, k) : h })
+          setHistory(h => dropReplayedPrompt(h, String(ev.text ?? '')))
         }
         apply(live.current, ev)
         if (ev.type === 'result') {

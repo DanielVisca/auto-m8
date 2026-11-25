@@ -4,7 +4,8 @@ import { agentSender, QUEUED, stampPrompt, userBody } from '../shared/messageOri
 import { toItems } from './transcript.ts'
 // The browser module has type-only browser imports; load it without pulling its
 // bundler-specific import paths into the server's NodeNext typecheck.
-const { apply, emptyLive } = await import(new URL('../web/src/stream.ts', import.meta.url).href)
+const streamMod = await import(new URL('../web/src/stream.ts', import.meta.url).href)
+const { apply, emptyLive } = streamMod
 
 const relayed = '[perch: sent by an agent from perch://driver-1 "PR monitor". Not typed by the user.]\n\nShip the fix.'
 
@@ -58,4 +59,13 @@ test('subagent hand-backs show as a subagent report, not as the user', () => {
   const saved = toItems(JSON.stringify({ type: 'user', uuid: 'u2', message: { role: 'user', content: report } }))[0]
   assert.equal(saved.kind === 'user' && agentSender(saved.text)?.label, 'subagent report')
   assert.equal(agentSender(report.replace('Another Claude session sent a message:\n', ''))?.label, 'subagent report')
+})
+
+test('a chat opened mid-turn shows a message with an image once, not twice', () => {
+  const { dropReplayedPrompt } = streamMod
+  const prompt = '<attached-images>\n- [Image 1] /tmp/a.png\n</attached-images>\n\n[Image 1]this feels overwhelming'
+  const saved = toItems(JSON.stringify({ type: 'user', uuid: 'u1', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }, { type: 'text', text: prompt }] } }))
+  assert.equal(saved.length, 1)
+  assert.deepEqual(dropReplayedPrompt(saved, prompt), [])
+  assert.equal(dropReplayedPrompt(saved, 'something else').length, 1)
 })
