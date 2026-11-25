@@ -110,3 +110,13 @@
 .doc-menu-row { display: flex; gap: 2px; padding: 2px 4px; }
 .doc-menu-row button { flex: 1; border: none; background: none; color: inherit; padding: 5px 0; border-radius: 6px; }
 .doc-menu-row button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* Side by side: two pages, each with its own bar; the side panels start closed so both pages fit. */
+.writing-split { display: flex; height: 100%; min-height: 0; }
+.writing-split > .writing { flex: 1; min-width: 0; }
+.writing-split.two > .writing + .writing { border-left: 1px solid var(--line); }
+.writing-split.two .writing-page { padding: 28px 28px 30vh; }
+.writing-pick { max-width: 40%; font-weight: 600; }
+.writing-split.two .writing-bar { flex-wrap: wrap; row-gap: 4px; }
+.writing-split.two .writing-bar > b { max-width: none; flex: 1 1 100%; }
+.writing-split.two .writing-bar .writing-pick { max-width: none; flex: 1 1 100%; }

@@ -3,7 +3,7 @@
 // research and evidence agents gather, versions, draft/final, export, on-device grammar and spelling
 // (Harper), an "AI tells" check, an optional Pangram AI-text check, an agent chat beside it, and a
 // "no agent text" mode where agents may only comment and research. Zen hides everything but the page.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Marked } from 'marked'
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, StateEffect, StateField, Transaction, type Extension, type Range } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, drawSelection, placeholder, type DecorationSet, type ViewUpdate } from '@codemirror/view'
@@ -182,7 +182,37 @@ function aiTells(text: string): Diagnostic[] {
 }
 
 // ---------- the editor page ----------
-export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpenChat: (id: string) => void; settings: any; zen: boolean }) {
+// Side by side: your draft on the left, a second page on the right (a blank one to write it out
+// yourself, or any other doc). The pair is remembered per doc, so reopening the draft brings it back.
+export function DocSplit({ id, onOpenChat, settings, zen }: { id: string; onOpenChat: (id: string) => void; settings: any; zen: boolean }) {
+  const [other, setOther] = useState<string | null>(() => local(`perch.writing.pair.${id}`, null))
+  const [busy, setBusy] = useState(false)
+  const { data: list } = useLive<{ docs: Doc[] }>(other ? '/api/docs' : null, ['docs'])
+  const pair = (next: string | null) => { setOther(next); keep(`perch.writing.pair.${id}`, next) }
+  const blank = async (title: string) => {
+    setBusy(true)
+    try { const d = await post<{ id?: string; error?: string }>('/api/docs', { title }); if (d?.id) pair(d.id); else toast(d?.error || 'Could not make a new page', { kind: 'error' }) } finally { setBusy(false) }
+  }
+  const split = async (title: string) => { if (other) pair(null); else await blank(title) }
+  const picker = other && (
+    <select className="small writing-pick" value={other} title="The page on the right" onChange={e => e.target.value === '+' ? blank(`${(list?.docs.find(d => d.id === id)?.title || 'Untitled')} (my version)`) : pair(e.target.value)}>
+      {!list?.docs.some(d => d.id === other) && <option value={other}>This page</option>}
+      {(list?.docs ?? []).filter(d => d.id !== id).map(d => <option key={d.id} value={d.id}>{d.title || 'Untitled'}</option>)}
+      <option value="+">+ New blank page</option>
+    </select>
+  )
+  return (
+    <div className={`writing-split ${other ? 'two' : ''}`}>
+      <DocEditor key={id} id={id} onOpenChat={onOpenChat} settings={settings} zen={zen} paired={!!other} split={!!other} splitBusy={busy} onSplit={split} />
+      {other && <DocEditor key={other} id={other} onOpenChat={onOpenChat} settings={settings} zen={zen} paired extra={picker} onClose={() => pair(null)} />}
+    </div>
+  )
+}
+
+export function DocEditor({ id, onOpenChat, settings, zen, paired, split, splitBusy, onSplit, onClose, extra }: {
+  id: string; onOpenChat: (id: string) => void; settings: any; zen: boolean
+  paired?: boolean; split?: boolean; splitBusy?: boolean; onSplit?: (title: string) => void; onClose?: () => void; extra?: ReactNode
+}) {
   const { data, reload } = useLive<Full>(`/api/docs/${id}`, ['docs'])
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
@@ -209,7 +239,7 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
     if (dictionary.size !== before && view.current) { forceLinting(view.current); harperLinter(opts.current.dialect).then(l => l.importWords(words.words)).catch(() => {}) }
   }, [words])
   const [tab, setTab] = useState<'comments' | 'research' | 'versions' | 'agent' | 'check'>(() => local('perch.writing.tab', 'comments'))
-  const [panel, setPanel] = useState(() => local('perch.writing.panel', true))
+  const [panel, setPanel] = useState(() => !paired && local('perch.writing.panel', true))
   const [selection, setSelection] = useState<{ from: number; to: number; text: string } | null>(null)
   const [activeComment, setActiveComment] = useState<string | null>(null)
   const [grammar, setGrammar] = useState(() => local('perch.writing.grammar', true))
@@ -222,7 +252,8 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
   const opts = useRef({ grammar, tells, dialect })
   opts.current = { grammar, tells, dialect }
   useEffect(() => keep('perch.writing.tab', tab), [tab])
-  useEffect(() => keep('perch.writing.panel', panel), [panel])
+  useEffect(() => { if (!paired) keep('perch.writing.panel', panel) }, [panel]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPanel(paired ? false : local('perch.writing.panel', true)) }, [paired])
   useEffect(() => { keep('perch.writing.grammar', grammar); keep('perch.writing.tells', tells); keep('perch.writing.dialect', dialect); if (view.current) forceLinting(view.current) }, [grammar, tells, dialect])
 
   // A change from elsewhere lands under your cursor: what changed between the base and their text is
@@ -316,7 +347,7 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
       history(), drawSelection(), markdown({ base: markdownLanguage }), syntaxHighlighting(mdStyle), EditorView.lineWrapping, previewMode.of(local('perch.writing.raw', false) ? [] : livePreview),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab,
         { key: 'Mod-s', run: () => { save(); return true } },
-        { key: 'Mod-Alt-m', run: v => { const s = v.state.selection.main; if (!s.empty) { setPanel(true); setTab('comments'); window.dispatchEvent(new Event('perch-doc-comment')) } return true } },
+        { key: 'Mod-Alt-m', run: v => { const s = v.state.selection.main; if (!s.empty) { setPanel(true); setTab('comments'); window.dispatchEvent(new CustomEvent('perch-doc-comment', { detail: id })) } return true } },
         { key: 'Mod-b', run: v => wrap(v, '**') }, { key: 'Mod-i', run: v => wrap(v, '_') }, { key: 'Mod-e', run: v => wrap(v, '`') },
         { key: 'Mod-Shift-x', run: v => wrap(v, '~~') }, { key: 'Mod-k', run: v => link(v) },
         { key: 'Mod-Alt-1', run: v => linePrefix(v, '# ') }, { key: 'Mod-Alt-2', run: v => linePrefix(v, '## ') }, { key: 'Mod-Alt-3', run: v => linePrefix(v, '### ') }, { key: 'Mod-Alt-0', run: v => linePrefix(v, '') }]),
@@ -402,22 +433,24 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
     <div className={`writing ${zen ? 'writing-zen' : ''}`}>
       <div className="writing-main">
         <div className="writing-bar">
-          <b className="ellipsis" title={doc.path}>{doc.title || 'Untitled'}</b>
+          {extra ?? <b className="ellipsis" title={doc.path}>{doc.title || 'Untitled'}</b>}
           <button className={`chip-btn ${doc.status}`} title="Draft or final. Final saves a named version." onClick={async () => { await save(); if (doc.status === 'draft') await post(`/api/docs/${id}/versions`, { label: 'Final' }); setDoc({ status: doc.status === 'draft' ? 'final' : 'draft' }) }}>{doc.status === 'draft' ? '✎ Draft' : '✓ Final'}</button>
           <button className={`chip-btn ${locked ? 'on locked' : ''}`} title={locked ? 'No agent text: agents can comment and research, but every word of the text is yours. Click to let agents edit.' : 'Agents may edit the text. Click for no agent text mode.'}
             onClick={() => setDoc({ agent_text: locked ? 'allowed' : 'blocked' })}>{locked ? '✍ No agent text' : '🤖 Agents may edit'}</button>
           <span className="grow" />
           <span className={`muted small save-${state}`} title="Live: changes from agents, other windows and the file itself merge in as they happen">{state === 'saved' ? '● Live · saved' : state === 'saving' ? 'Saving…' : 'Unsaved'} · {wordCount.toLocaleString()} words</span>
-          <button className="icon" title="Comment on the selection  ⌘⌥M" disabled={!selection} onClick={() => { setPanel(true); setTab('comments'); setTimeout(() => window.dispatchEvent(new Event('perch-doc-comment')), 0) }}>💬</button>
+          <button className="icon" title="Comment on the selection  ⌘⌥M" disabled={!selection} onClick={() => { setPanel(true); setTab('comments'); setTimeout(() => window.dispatchEvent(new CustomEvent('perch-doc-comment', { detail: id })), 0) }}>💬</button>
           <button className={`icon ${raw ? 'on' : ''}`} title={raw ? 'Showing markdown marks. Click for the clean page.' : 'Show markdown marks (#, **, links) everywhere'} onClick={() => { const next = !raw; setRaw(next); keep('perch.writing.raw', next); view.current?.dispatch({ effects: previewMode.reconfigure(next ? [] : livePreview) }) }}>{'</>'}</button>
           <ExportMenu id={id} title={doc.title} path={doc.path} text={textNow} />
           <button className={`icon ${zen ? 'on' : ''}`} title={zen ? 'Leave zen  ⌘⇧F' : 'Zen: just the page'} onClick={() => api.send('PUT', '/api/settings', { focus: { ...(settings?.focus ?? { areas: [] }), active: !zen } })}>◎</button>
           {!zen && <button className={`icon ${panel ? 'on' : ''}`} title="Comments, research, versions, agent" onClick={() => setPanel(!panel)}>▤</button>}
+          {onSplit && <button className={`icon ${split ? 'on' : ''}`} disabled={splitBusy} title={split ? 'Close the page beside this one' : 'Side by side: a blank page beside this one, to write it out yourself'} onClick={() => onSplit(`${doc.title || 'Untitled'} (my version)`)}>◫</button>}
+          {onClose && <button className="icon" title="Close this side" onClick={() => { save(); onClose() }}>✕</button>}
         </div>
         {!doc.exists && <div className="writing-conflict">The file at {doc.path} is missing; typing will create it again.</div>}
         <div className="writing-scroll"><div className="writing-page" ref={host} /></div>
         {menu && view.current && <EditorMenu at={menu} view={view.current} onClose={() => { setMenu(null); view.current?.focus() }}
-          onComment={() => { setPanel(true); setTab('comments'); setTimeout(() => window.dispatchEvent(new Event('perch-doc-comment')), 0) }}
+          onComment={() => { setPanel(true); setTab('comments'); setTimeout(() => window.dispatchEvent(new CustomEvent('perch-doc-comment', { detail: id })), 0) }}
           onAgent={() => { setPanel(true); setTab('agent') }} onCheck={() => { setPanel(true); setTab('check') }} />}
       </div>
       {showPanel && (
@@ -582,7 +615,7 @@ function Comments({ id, comments, selection, active, onActive, onOpenChat }: { i
   const box = useRef<HTMLTextAreaElement>(null)
   const pinned = useRef(selection)
   if (selection) pinned.current = selection
-  useEffect(() => { const f = () => box.current?.focus(); addEventListener('perch-doc-comment', f); return () => removeEventListener('perch-doc-comment', f) }, [])
+  useEffect(() => { const f = (e: Event) => { if ((e as CustomEvent).detail == null || (e as CustomEvent).detail === id) box.current?.focus() }; addEventListener('perch-doc-comment', f); return () => removeEventListener('perch-doc-comment', f) }, [id])
   const add = async () => {
     const s = pinned.current
     if (!draft.trim()) return
