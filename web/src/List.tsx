@@ -105,7 +105,7 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
       onClick={e => (e.metaKey || e.shiftKey ? onSelect(e, c) : onOpen(c))} onContextMenu={e => { e.preventDefault(); onMenu(e, c) }}>
       <div className="row-top">
         <span className={`dot s-${c.effective}`} title={c.effective} />
-        <span className="row-title">{(c as any).self_drive && <span className="row-drive" title="Self drive is on: an agent is driving this chat">🚗 </span>}{c.returned ? '↩ ' : ''}{(c as any).automated ? '🤖 ' : ''}{titleOf(c).replace(/^\[sandbox_prompt:[^\]]*\]\s*/, '')}</span>
+        <span className="row-title">{c.returned ? '↩ ' : ''}{(c as any).automated ? '🤖 ' : ''}{titleOf(c).replace(/^\[sandbox_prompt:[^\]]*\]\s*/, '')}</span>
         <span className="muted small" title={snoozed ? `snoozed until ${new Date(c.snooze_until!).toLocaleString()}` : ''}>{snoozed ? `⏾ ${ago(2 * Date.now() - c.snooze_until!)}` : ago(c.activity_at ?? c.updated_at)}</span>
       </div>
       {c.snippet && <div className="snippet small" dangerouslySetInnerHTML={{ __html: escapeSnippet(c.snippet) }} />}
@@ -121,7 +121,10 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
         {SHOW_LABELS && c.labels?.slice(0, 2).map(l => <span key={l} className="label">#{l}</span>)}
         {c.link_count > 0 && <span className="muted small" title={`Linked to ${c.link_count} other conversation${c.link_count > 1 ? 's' : ''} (same PR, follow-ups, or ones an agent used). Open it to see them.`}>⇄{c.link_count}</span>}
         <span className="grow" />
+        {/* Self drive: in front of the PR pills (inside their group, so it wraps with them), or where they'd be. */}
+        {(c as any).self_drive && !c.prs.length && <span className="row-drive" title="Self drive is on: an agent is driving this chat">🚗</span>}
         {c.prs.length > 0 && <span className="row-prs">
+          {(c as any).self_drive && <span className="row-drive" title="Self drive is on: an agent is driving this chat">🚗</span>}
           {c.prs.slice(0, maxPrs).map(pr => <PrBadge key={pr.url} pr={pr} />)}
           {c.prs.length > maxPrs && <span className="muted small pr-more">+{c.prs.length - maxPrs}</span>}
         </span>}

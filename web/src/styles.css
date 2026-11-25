@@ -110,7 +110,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .row-prs { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 3px 5px; margin-left: auto; min-width: 0; max-width: 100%; }
 /* Conversation rows: the details line (source, folder, branch, links) shows on hover, keyboard focus or the open/selected row.
    Opacity keeps its space, so rows don't jump. PR pills and an overdue promise stay visible. */
-.conv-meta > :where(:not(.pr, .pr-more, .row-prs, .promise.overdue)) { opacity: 0; transition: opacity .12s; }
+.conv-meta > :where(:not(.pr, .pr-more, .row-prs, .row-drive, .promise.overdue)) { opacity: 0; transition: opacity .12s; }
 .row:hover .conv-meta > *, .row:focus-within .conv-meta > *, .row.active .conv-meta > *, .row.selected .conv-meta > * { opacity: 1; }
 @media (hover: none) { .conv-meta > * { opacity: 1 !important; } }
 .snippet { padding-left: 14px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
