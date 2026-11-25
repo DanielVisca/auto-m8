@@ -105,3 +105,8 @@
 .exh-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 .ctx > button.exh-danger, button.exh-danger { color: var(--bad); }
 .exh-danger-row { gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+/* Hub tiles: a 16:9 art area split 2x2, so each preview keeps 16:9 too. */
+.exh-tile-art { height: auto; aspect-ratio: 16 / 9; }
+.exh-art-shots { grid-template-rows: 1fr 1fr; }
+.exh-art-shots img { height: 100%; min-height: 0; }
+.exh-art-quad > *, .exh-art-shots > * { min-height: 0; min-width: 0; }
