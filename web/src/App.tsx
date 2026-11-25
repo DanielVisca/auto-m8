@@ -17,7 +17,7 @@ import { Search } from './Search'
 import { Compare } from './Compare'
 import { AskCard } from './Autopilot'
 import { Boundary } from './Boundary'
-import { Splitter, useColumnWidth } from './Splitter'
+import { EdgeHandle, Splitter, useColumnWidth } from './Splitter'
 import { toast, useToasts } from './api'
 import { Chat } from './Chat'
 import { Details } from './Details'
@@ -386,7 +386,8 @@ export function App() {
       <Handoff current={hashFor(view)} onGo={goHash} />
       <div className="body">
         {listOpen && !zenWriting && sidebar}
-        {listOpen && !zenWriting && <Splitter side="left" width={side.width} onWidth={side.setWidth} onReset={side.reset} />}
+        {listOpen && !zenWriting && <Splitter side="left" width={side.width} onWidth={side.setWidth} onReset={side.reset} onCollapse={() => setListOpen(false)} />}
+        {!listOpen && !zenWriting && <EdgeHandle side="left" onOpen={() => setListOpen(true)} title="Show sidebar  ⌘\" />}
         <main className="main">
           <div className={`main-top drag ${listOpen && !zenWriting ? '' : 'no-side'}`}>
             {!listOpen && !zenWriting && <button className="icon no-drag" onClick={() => setListOpen(true)} title="Show sidebar  ⌘\">☰</button>}

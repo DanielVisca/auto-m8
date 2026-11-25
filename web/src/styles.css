@@ -514,6 +514,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .splitter.left::after { background: var(--line); } .splitter.right::after { background: var(--line); }
 .splitter.left:hover::after, .splitter.left.on::after, .splitter.right:hover::after, .splitter.right.on::after { background: var(--accent); }
 body.resizing { cursor: col-resize; user-select: none; }
+.edge-handle { position: fixed; top: 50%; transform: translateY(-50%); width: 14px; height: 64px; z-index: 20; cursor: pointer; -webkit-app-region: no-drag; }
+.edge-handle.left { left: 0; } .edge-handle.right { right: 0; }
+.edge-handle::after { content: ''; position: absolute; top: 8px; bottom: 8px; left: 4px; width: 4px; border-radius: 3px; background: var(--line); transition: background .15s, width .15s; }
+.edge-handle.right::after { left: auto; right: 4px; }
+.edge-handle:hover::after { background: var(--accent); width: 6px; }
 body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 
 /* ---------- zen: the same app with the noise taken out ---------- */
