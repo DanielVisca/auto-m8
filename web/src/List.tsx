@@ -319,7 +319,6 @@ function Organised({ selectedId, selected, onOpen, onMenu, onSelect, onSearch }:
   const toggle = (k: string) => { const v = { ...open, [k]: !open[k] }; setOpen(v); try { localStorage.setItem('perch.side.open', JSON.stringify(v)) } catch {} }
   if (!data) return <div className="muted pad small">…</div>
   const row = (c: Conversation) => <Row key={c.id} c={c} active={c.id === selectedId} selected={selected.has(c.id)} onOpen={onOpen} onMenu={onMenu} onSelect={onSelect} />
-  const unread = (cs: Conversation[]) => cs.some(c => (c as any).unread)
   return (
     <>
       {data.pinned?.length > 0 && <div className="section pinned-section"><div className="section-head pinned-head">📌 Pinned <span className="count">{data.pinned.length}</span></div>{data.pinned.map(row)}</div>}
@@ -329,23 +328,6 @@ function Organised({ selectedId, selected, onOpen, onMenu, onSelect, onSearch }:
         <div className="section">
           <button className="section-head toggle" onClick={() => toggle('working')}><span className="dot s-running" /> {data.working.length} agent{data.working.length > 1 ? 's' : ''} working <span className="muted">{open.working ? '▾' : '▸'}</span></button>
           {open.working && data.working.map(row)}
-        </div>
-      )}
-      {data.groups.length > 0 && (
-        <div className="section">
-          <div className="section-head row-flex"><span className="grow">By work</span><button className="link small" onClick={() => onSearch('is:archived')} title="Finished work archives itself: when its PRs merge, or after 3 quiet days. Search finds it.">{data.archived} archived</button></div>
-          {(open.allWork ? data.groups : data.groups.slice(0, 3)).map(g => (
-            <div key={g.key} className="work-group">
-              <button className={`work-head${unread(g.items) ? ' unread' : ''}`} onClick={() => toggle(g.key)} title={g.url ?? g.title}>
-                <span className="muted caret">{open[g.key] ? '▾' : '▸'}</span>
-                <span className="grow ellipsis">{g.title}</span>
-                <span className="muted small">{g.items.length > 1 ? g.items.length : ''}</span>
-                <span className="muted small">{ago(g.last)}</span>
-              </button>
-              {open[g.key] && <div className="work-items">{g.items.map(row)}</div>}
-            </div>
-          ))}
-          {data.groups.length > 3 && <button className="link small work-more" onClick={() => toggle('allWork')}>{open.allWork ? 'Show fewer' : `${data.groups.length - 3} more`}</button>}
         </div>
       )}
       {/* Threads perch's automation started (helpers, shepherds, routines, autopilot fixes): out of the way, one click to drill in. */}
