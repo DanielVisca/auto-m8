@@ -33,7 +33,4 @@ export function WritingList({ onOpen, limit }: { onOpen: (id: string) => void; l
     </div>
   )
 }
-export function WritingPage({ onOpen }: { onOpen: (id: string) => void }) {
-  return <div className="page"><h2>Writing</h2><p className="muted">Long docs with comments, research, versions and an agent beside them.</p><WritingList onOpen={onOpen} /></div>
-}
 

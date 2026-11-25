@@ -1,8 +1,9 @@
-// Explore's landing page: pick what to explore (canvases, competitor products, codebases), then a
+// Explore's landing page: pick what to explore (canvases, competitor products, codebases, writing), then a
 // sortable gallery of each, with an info panel that links back to the chats behind every item.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ago, post, shell, toast, useLive } from './api'
 import type { Repo } from './ExploreRuntime'
+import { useWriting, WritingArt } from './WritingHome'
 import './explorehub.css'
 
 type ChatRef = { id: string; title: string; role: string; at: number }
@@ -113,6 +114,7 @@ export function ExploreHub(nav: Nav) {
   const canvases = useLive<{ boards: Canvas[] }>('/api/explore/canvases', ['canvas']).data?.boards ?? []
   const products = useLive<{ products: Product[] }>('/api/explore/competitors', ['product-research']).data?.products ?? []
   const repos = useCodebases()
+  const writing = useWriting()
   const recent = useMemo(() => { try { return JSON.parse(localStorage.getItem('perch.explore.repos') ?? '[]') as string[] } catch { return [] } }, [])
   useThumbs(canvases)
   const shown = [...canvases].sort((a, b) => (b.opened_at ?? b.updated_at) - (a.opened_at ?? a.updated_at)).slice(0, 4)
@@ -142,6 +144,12 @@ export function ExploreHub(nav: Nav) {
           <b>Codebases</b>
           <span className="muted small">{repos.length} repos on this Mac · {mapped.length} mapped</span>
           <span className="small">Architecture map: what each part is built on, and how it grew.</span>
+        </button>
+        <button className="exh-tile" onClick={() => nav.onSection('writing')}>
+          <div className="exh-tile-art"><WritingArt data={writing} /></div>
+          <b>Writing</b>
+          <span className="muted small">{writing?.docs.length ?? 0} docs · {writing?.shelf?.posts.length ?? 0} drafted posts · {writing?.shelf?.ideas.length ?? 0} ideas{writing?.reviews ? ` · ${writing.reviews} waiting on review` : ''}</span>
+          <span className="small">Write, review, draft and share posts, blogs and write-ups.</span>
         </button>
       </div>
     </div>

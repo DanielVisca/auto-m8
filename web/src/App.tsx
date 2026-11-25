@@ -31,7 +31,7 @@ import { CanvasGallery, CodebaseGallery, CompetitorGallery, CompetitorPage, Expl
 import { Library } from './Library'
 import { List } from './List'
 import { Settings } from './Settings'
-import { WritingPage } from './WritingList'
+import { WritingHome } from './WritingHome'
 const DocEditor = lazy(() => import('./Writing').then(m => ({ default: m.DocSplit })))
 // Fetch and parse the editor's code once the app is idle, so the first doc you open doesn't wait on it.
 // Only the code: Harper (grammar, 20 MB) starts from the docs list or the doc itself.
@@ -238,7 +238,7 @@ export function App() {
       {view.kind === 'insights' && <div className="scroll"><Insights onOpen={openById} /></div>}
       {view.kind === 'paused' && <div className="scroll"><Paused onOpen={openById} /></div>}
       {view.kind === 'doc' && <Suspense fallback={<div className="pad muted">Opening the editor…</div>}><DocEditor key={view.id} id={view.id} onOpenChat={openById} settings={settings} zen={zen} /></Suspense>}
-      {view.kind === 'writing' && <div className="scroll"><WritingPage onOpen={id => setView({ kind: 'doc', id })} /></div>}
+      {view.kind === 'writing' && <div className="scroll"><WritingHome onOpenDoc={id => setView({ kind: 'doc', id })} onStart={startChat} /></div>}
       {view.kind === 'explore' && <div className="scroll">{(() => {
         // Explore's landing picks a section; any other id is a repo for the code map (old links keep working).
         const nav = { onSection: (id: string | null) => setView({ kind: 'explore', id }), onOpenChat: openById, onOpenBoard: (id: string) => setView({ kind: 'board', id: id || null }), onStart: startChat }
@@ -247,6 +247,7 @@ export function App() {
         if (id === 'canvases') return <CanvasGallery {...nav} />
         if (id === 'competitors') return <CompetitorGallery {...nav} />
         if (id === 'codebases') return <CodebaseGallery {...nav} />
+        if (id === 'writing') return <WritingHome onOpenDoc={id => setView({ kind: 'doc', id })} onStart={startChat} onBack={() => nav.onSection(null)} />
         if (id.startsWith('competitor:')) { const [, pid, t] = id.split(':'); return <CompetitorPage key={id} id={pid} tour={t === 'tour'} {...nav} /> }
         return <><button className="link small exh-back" style={{ margin: '6px 12px 0' }} onClick={() => nav.onSection(id === 'code' ? null : 'codebases')}>← {id === 'code' ? 'Explore' : 'Codebases'}</button><Explore key={id} initialRepo={id === 'code' ? undefined : id} onOpenChat={openById} /></>
       })()}</div>}

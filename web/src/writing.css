@@ -127,3 +127,28 @@
 .writing-page .cm-content { caret-color: var(--accent); }
 .writing-page .cm-cursor, .writing-page .cm-dropCursor { border-left: 2px solid var(--accent); margin-left: -1px; }
 .writing-page .cm-cursorLayer { animation-duration: 1.1s; }
+
+/* Writing home */
+.wh-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.wh-head h2 { margin-bottom: 2px; }
+.wh-search { width: 180px; }
+.wh-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 6px; }
+.wh-stat { display: flex; flex-direction: column; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); }
+.wh-stat b { font-size: 22px; }
+.wh-sec { margin-top: 22px; display: flex; flex-direction: column; gap: 4px; }
+.wh-sec h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 15px; }
+.wh-open { margin-bottom: 6px; }
+.wh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.wh-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); min-width: 0; }
+.wh-card:hover { border-color: var(--accent); }
+.wh-card-main { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.wh-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.wh-dest.planned { opacity: .8; }
+.wh-dest:hover { border-color: var(--line); }
+.wh-idea .link { text-align: left; }
+.wh-art { position: relative; width: 100%; height: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; box-sizing: border-box; }
+.wh-page { background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+.exh-tile .wh-page b, .wh-page b { font-size: 10px; font-weight: 600; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wh-page i { display: block; height: 3px; border-radius: 2px; background: var(--line); }
+.wh-page i:last-child { width: 60%; }
+.wh .chip.final { color: #2e9d5b; }
