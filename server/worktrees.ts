@@ -52,7 +52,8 @@ const GENERATED = /^"?(\.codex|\.agents)(\/|"?$)/
 const BROKEN_CHECKOUT_MIN = 1000
 export function classifyStatus(porcelain: string): { work: number; noise: string | null } {
   const lines = porcelain.split('\n').filter(Boolean)
-  const paths = lines.map(l => ({ xy: l.slice(0, 2), path: l.slice(3).split(' -> ').pop()! }))
+  // Lines are "XY path"; our git() trims stdout, which eats the first line's leading space (" M a" -> "M a").
+  const paths = lines.map(l => (l[1] === ' ' && l[2] !== ' ' ? ' ' + l : l)).map(l => ({ xy: l.slice(0, 2), path: l.slice(3).split(' -> ').pop()! }))
   const generated = paths.filter(p => GENERATED.test(p.path)).length
   const rest = paths.filter(p => !GENERATED.test(p.path))
   const deletions = rest.filter(p => p.xy === ' D' || p.xy === 'D ' || p.xy === 'DD').length

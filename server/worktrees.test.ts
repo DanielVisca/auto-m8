@@ -61,6 +61,9 @@ test('generated agent config and half-finished checkouts are not work', () => {
   assert.deepEqual(classifyStatus(' M .codex/config.toml\n?? .codex/agents/\n?? .agents/skills/x/\n'), { work: 0, noise: '3 generated agent config files' })
   const missing = Array.from({ length: 1200 }, (_, i) => ` D frontend/f${i}.ts`).join('\n')
   assert.equal(classifyStatus(missing).work, 0)
+  // git() trims stdout, so the first line can arrive without its leading space.
+  assert.equal(classifyStatus('M .codex/config.toml\n?? .agents/skills/x/').work, 0)
+  assert.equal(classifyStatus('D a.ts').work, 1)
   // A few deletions, or deletions next to an edit, are someone's work.
   assert.equal(classifyStatus(' D a.ts\n D b.ts').work, 2)
   assert.equal(classifyStatus(missing + '\n M real.ts').work, 1201)
