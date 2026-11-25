@@ -101,7 +101,7 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
       <div className="row-meta conv-meta">
         {(c as any).promise && <PromiseMark p={(c as any).promise} />}
         {c.source === 'claude' && (c as any).models?.length
-          ? <ModelStack models={(c as any).models} local={(c as any).local_engine} />
+          ? <ModelStack models={(c as any).models} local={(c as any).local_engine} subs={(c as any).claude_subs} />
           : <Brand id={sourceBrand(c)} size={13} title={c.source === 'posthog-task' && c.origin === 'slack' ? 'Asked in Slack' : SOURCE_LABEL[c.source]} />}
         {(c as any).has_browser && <Brand id="chrome" size={13} title="Has an Agent Chrome window open" />}
         <span className="muted small ellipsis" title={c.source === 'posthog-task' ? '' : `Folder it ran in: ${c.cwd ?? '?'}${c.branch ? `\nBranch: ${c.branch}` : ''}`}>{c.source === 'posthog-task' ? (c.origin ?? 'task') : [(c as any).place, c.branch && !['main', 'master', 'HEAD'].includes(c.branch) ? c.branch : ''].filter(Boolean).join(' · ')}</span>
@@ -368,12 +368,15 @@ export function SideList({ onOpen, onSearch }: { onOpen: (id: string) => void; o
 
 // Models a chat ran on, stacked like the agents on a PR: the one it is on now first and on top.
 const MODEL_NAME: Record<string, string> = { claude: 'Claude', codex: 'Codex (ChatGPT plan)', ollama: 'a local Ollama model' }
-function ModelStack({ models, local }: { models: string[]; local?: string | null }) {
+function ModelStack({ models, local, subs }: { models: string[]; local?: string | null; subs?: { id: string; label: string; current: boolean }[] | null }) {
   const name = (m: string) => MODEL_NAME[m] + (m === 'ollama' && local ? ` (${local})` : '')
-  const title = models.length > 1 ? `On ${name(models[0])} now; also ran on ${models.slice(1).map(name).join(', ')}` : `Ran on ${name(models[0])}`
+  // With several Claude subscriptions, the Claude icon is drawn once per subscription the chat used.
+  const subLine = subs?.length ? `\nClaude subscription${subs.length > 1 ? 's' : ''}: ${subs.map(s => s.label + (s.current && subs.length > 1 ? ' (active)' : '')).join(', ')}` : ''
+  const title = (models.length > 1 ? `On ${name(models[0])} now; also ran on ${models.slice(1).map(name).join(', ')}` : `Ran on ${name(models[0])}`) + subLine
+  const icons = models.flatMap(m => m === 'claude' && subs && subs.length > 1 ? subs.map(s => ({ key: `claude:${s.id}`, m, dim: !s.current })) : [{ key: m, m, dim: false }])
   return (
     <span className="agent-stack model-stack" title={title}>
-      {models.map((m, i) => <span key={m} className="agent-av" style={{ width: 16, height: 16, zIndex: models.length - i }}><Brand id={m} size={11} /></span>)}
+      {icons.map((x, i) => <span key={x.key} className="agent-av" style={{ width: 16, height: 16, zIndex: icons.length - i, opacity: x.dim ? 0.55 : 1 }}><Brand id={x.m} size={11} /></span>)}
     </span>
   )
 }

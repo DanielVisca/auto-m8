@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { chats, runningChats } from './chat.ts'
 import { all, get, refreshMeta, run, tx, userWrites, writes } from './db.ts'
 import { settings } from './settings.ts'
+import { subOf, subs } from './account.ts'
 import { originOwner } from './origin.ts'
 import { hookSignals } from './hookSignals.ts'
 
@@ -137,6 +138,22 @@ function usedModelsBySession() {
   } catch {} // no usage table yet (tests, first boot)
   usedModels = { at: Date.now(), map }
   return map
+}
+
+// Which Claude subscriptions each chat's process ran on (chat_account_span: 'login' is the main
+// one, 'login:<id>' the others), most recent first. Only worth showing with more than one set up.
+function claudeSubsBySession(only?: string) {
+  const map = new Map<string, string[]>()
+  try {
+    for (const r of all<{ id: string; account: string }>(`select id, account, max(from_ts) last from chat_account_span
+        where account like 'login%' ${only ? 'and id = ?' : ''} group by 1, 2 order by last desc`, ...(only ? [only] : [])))
+      (map.get(r.id) ?? map.set(r.id, []).get(r.id)!).push(r.account === 'login' ? 'main' : r.account.slice(6))
+  } catch {} // no table yet (tests, first boot)
+  return map
+}
+function claudeSubsOf(ids: string[] | undefined) {
+  if (!ids?.length || subs().length < 2) return null
+  return ids.map((id, i) => ({ id, label: subOf(id).label, current: i === 0 }))
 }
 
 const baseSql = (models = true) => `
@@ -439,8 +456,8 @@ function build(live: Set<string>): Base {
   const t = performance.now()
   const uw = userWrites, w = writes, dv = dataVersion()
   const rows = all<Row>(baseSql(false))
-  const models = usedModelsBySession()
-  for (const r of rows) { r.used_models = models.get(r.id); hydrate(r, live) }
+  const models = usedModelsBySession(), claudeSubs = claudeSubsBySession()
+  for (const r of rows) { r.used_models = models.get(r.id); r.claude_subs = claudeSubsOf(claudeSubs.get(r.id)); hydrate(r, live) }
   listBuilds++
   return (base = { userWrites: uw, writes: w, dataVersion: dv, live, at: Date.now(), ms: performance.now() - t, rows, byId: new Map(rows.map(r => [r.id, r])), sig: signature(rows) })
 }
@@ -467,6 +484,7 @@ function everyRow(live: Set<string>): Row[] {
 export function detail(id: string) {
   const c = get<Row>(`${baseSql()} where c.id = ?`, id)
   if (!c) return null
+  c.claude_subs = claudeSubsOf(claudeSubsBySession(id).get(id))
   return hydrate(c, new Set(runningChats().filter(x => x.state === 'running').map(x => x.id)))
 }
 
