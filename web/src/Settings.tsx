@@ -153,6 +153,7 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
         <Line ok={st.gh?.ok} label="GitHub" value={st.gh?.ok ? st.gh.account : st.gh?.error ?? 'checking…'} hint="PR status comes from the gh CLI"
           action={!st.gh?.ok && <button onClick={() => onTerminal('gh auth login', 'gh login')}>Log in</button>} />
         <PosthogKey status={st.posthog} settings={settings} save={save} />
+        <PangramKey />
         <Line ok={st.appleNotes?.access === 'granted'} label="Apple Notes"
           value={st.appleNotes?.access === 'granted' ? `${st.appleNotes.count} notes, searchable` : st.appleNotes?.access === 'missing' ? 'Notes isn’t set up on this Mac' : 'Needs Full Disk Access to read your notes (read-only)'}
           action={st.appleNotes?.access === 'needs-access' && <button onClick={() => post('/api/applenotes/grant')} title="Opens Privacy → Full Disk Access. Add node (/opt/homebrew/Cellar/node/…/bin/node), then restart auto-m8.">Grant access</button>} />
@@ -507,6 +508,25 @@ function PosthogKey({ status, settings, save }: { status: any; settings: any; sa
         <input size={6} defaultValue={settings.posthog.projectId || ""} placeholder="from key" onBlur={e => { const n = Number(e.target.value) || null; if (n !== (settings.posthog.projectId || null)) save({ posthog: { ...settings.posthog, projectId: n } }) }} />
       </div>
       <div className="muted small full">Create one at <a href={`${settings.posthog.host}/settings/user-api-keys`} target="_blank" rel="noreferrer">PostHog → Personal API keys</a> with read access to tasks, users and LLM skills (and scouts to run them). Stored in the macOS keychain, never in a file.</div>
+    </div>
+  )
+}
+
+// Pangram: the AI-text check in the writing editor. Opt-in, your own key, kept in the keychain.
+function PangramKey() {
+  const { data, reload } = useLive<{ configured: boolean }>('/api/writing/pangram')
+  const [key, setKey] = useState('')
+  const [msg, setMsg] = useState('')
+  return (
+    <div className="line wrap">
+      <span className={`dot ${data?.configured ? 'ok' : 'pending'}`} />
+      <span className="line-label">Pangram</span>
+      <span className="grow ellipsis">{data?.configured ? 'Key saved · AI-text check on in the writing editor' : 'Optional: an API key turns on the AI-text check in the writing editor'}</span>
+      <input type="password" placeholder={data?.configured ? 'replace key…' : 'Pangram API key'} value={key} onChange={e => setKey(e.target.value)} />
+      <button disabled={!key} onClick={async () => { setMsg('Checking…'); const r = await post('/api/writing/pangram', { key }); setKey(''); setMsg(r.error ?? r.note ?? 'Saved'); reload() }}>Save</button>
+      {data?.configured && <button className="link small" onClick={async () => { await post('/api/writing/pangram', { clear: true }); setMsg(''); reload() }}>remove</button>}
+      {msg && <span className="muted small">{msg}</span>}
+      <div className="muted small full">Get one at <a href="https://www.pangram.com" target="_blank" rel="noreferrer">pangram.com</a> (paid API). Text is sent to Pangram only when you press Check on a doc. Stored in the macOS keychain, never in a file.</div>
     </div>
   )
 }

@@ -520,7 +520,7 @@ function CheckPanel({ id, grammar, setGrammar, tells, setTells, dialect, setDial
       <div className="section-head">AI-text check</div>
       <div className="muted small">Pangram is the detector with the lowest false-positive rates in independent tests. Nothing is perfect: treat its verdict as a signal, not proof. Checking sends this doc's text to Pangram with your key.</div>
       {pg && !pg.configured && <div className="row-flex"><input className="grow small" type="password" value={key} placeholder="Pangram API key" onChange={e => setKey(e.target.value)} />
-        <button className="small" disabled={!key.trim()} onClick={async () => { await post('/api/writing/pangram', { key }); setKey(''); reload() }}>Save</button></div>}
+        <button className="small" disabled={!key.trim()} onClick={async () => { const r = await post('/api/writing/pangram', { key }); setKey(''); setErr(r?.error ?? null); reload() }}>Save</button></div>}
       {pg?.configured && <div className="row-flex"><button className="primary small" disabled={busy} onClick={run}>{busy ? 'Checking…' : ai ? 'Check again' : 'Check with Pangram'}</button>
         <button className="link small" onClick={async () => { await post('/api/writing/pangram', { clear: true }); reload() }}>Remove key</button></div>}
       {err && <div className="small error">{err}</div>}

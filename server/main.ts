@@ -612,7 +612,18 @@ route('GET', '/api/doc-versions/:id', m => docVersion(m[1]) ?? { error: 'No such
 route('POST', '/api/doc-versions/:id/restore', async (m, req) => { const b = await body(req); return docTry(() => restoreVersion(m[1], authorOf(b))) })
 route('POST', '/api/docs/:id/slack', async (m, req) => { const b = await body(req); return docTry(() => ({ text: toSlack(typeof b.text === 'string' ? b.text : getDoc(m[1]).text) })) })
 route('GET', '/api/writing/pangram', () => ({ configured: !!pangramKey() }))
-route('POST', '/api/writing/pangram', async (_m, req) => { const b = await body(req); if (!isLoopback(req)) return { error: 'only from the Mac' }; if (b.clear) clearPangramKey(); else if (b.key) setPangramKey(String(b.key).trim()); return { configured: !!pangramKey() } })
+route('POST', '/api/writing/pangram', async (_m, req) => {
+  const b = await body(req)
+  if (!isLoopback(req)) return { error: 'only from the Mac' }
+  if (b.clear) { clearPangramKey(); return { configured: false } }
+  const key = String(b.key ?? '').trim()
+  if (!key) return { error: 'Paste a Pangram API key' }
+  // Check it with Pangram before keeping it (listing models costs nothing).
+  const r = await fetch('https://text.external-api.pangram.com/models', { headers: { 'x-api-key': key }, signal: AbortSignal.timeout(15_000) }).catch((e: any) => ({ ok: false, status: 0, statusText: e.message }) as any)
+  if (r.status === 401 || r.status === 403) return { error: `Pangram rejected that key (${r.status})` }
+  setPangramKey(key)
+  return { configured: true, checked: r.ok, note: r.ok ? 'Pangram accepted the key' : `Saved, but Pangram could not be reached to check it (${r.status || r.statusText})` }
+})
 route('POST', '/api/docs/:id/ai-check', async (m, req) => {
   const b = await body(req), key = pangramKey()
   if (!key) return { error: 'Add a Pangram API key first (the AI check sends the text to Pangram)' }
