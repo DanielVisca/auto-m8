@@ -7,7 +7,7 @@ import { Brand, sourceBrand } from './Brand'
 import { AgentRows, usePrAgents } from './Agents'
 
 // inPage: on the PR's own page, which already shows the title, the agents and the conversations.
-export function PrPreviewCard({ url, inPage, brief }: { url: string; inPage?: boolean; brief?: { title?: string; author?: string } }) {
+export function PrPreviewCard({ url, inPage, brief, reason }: { url: string; inPage?: boolean; brief?: { title?: string; author?: string }; reason?: { label: string; text: string } }) {
   // Paints the last copy of this PR at once (browser cache), then swaps in GitHub's answer when it lands.
   const { data: cached, error, loading, stale } = useLive<any>(`/api/pr/preview?url=${encodeURIComponent(url)}`)
   const p = stale ? undefined : cached
@@ -16,9 +16,13 @@ export function PrPreviewCard({ url, inPage, brief }: { url: string; inPage?: bo
   const [fetched, setFetched] = useState<any>(null)
   useEffect(() => { if (brief?.author) return; let live = true; fetch(`/api/pr/brief?url=${encodeURIComponent(url)}`).then(r => r.ok ? r.json() : null).then(d => live && setFetched(d)).catch(() => {}); return () => { live = false } }, [url, brief?.author])
   const b = brief?.author ? brief : fetched
-  if (error && !p) return <div className="pr-card muted small">{error}</div>
+  // Why it is in the list it was hovered from, first thing on the card; with red CI, which checks failed.
+  const failing: string[] = p?.checks?.failing ?? []
+  const why = reason?.text ? <div className="pr-card-why small"><b>{reason.label}:</b> {reason.text}{/CI is red/i.test(reason.text) && failing.length ? <span className="muted"> · failing: {failing.slice(0, 3).join(', ')}{failing.length > 3 ? ` +${failing.length - 3}` : ''}</span> : null}</div> : null
+  if (error && !p) return <div className="pr-card muted small">{why}{error}</div>
   if (!p) return (
     <div className="pr-card">
+      {why}
       {b?.title && !inPage && <div className="pr-card-head"><b>{b.title}</b></div>}
       {b?.author && <div className="pr-owner small"><Avatar login={b.author} /><span>opened by <b>{b.author}</b></span></div>}
       <div className="muted small">Loading the rest…</div>
@@ -27,6 +31,7 @@ export function PrPreviewCard({ url, inPage, brief }: { url: string; inPage?: bo
   const chk = p.checks.failing.length ? 'bad' : p.checks.state === 'SUCCESS' ? 'ok' : 'pending'
   return (
     <div className="pr-card">
+      {why}
       {!inPage && <div className="pr-card-head"><b className="grow">{p.title}</b><Freshness loading={loading} fetchedAt={p.fetchedAt} error={error} hasData /></div>}
       {p.author && <div className="pr-owner small"><Avatar login={p.author} /><span>opened by <b>{p.author}</b></span></div>}
       <div className="pr-pills small">

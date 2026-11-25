@@ -12,11 +12,12 @@ const SOURCE_LABEL: Record<string, string> = { claude: 'Claude Code', 'posthog-c
 // Hovering a PR badge for a moment shows its preview; moving into the card keeps it open.
 export { usePrAgents as usePrWorkers } from './Agents'
 // A half-recorded PR (no link) shows nothing rather than taking the panel down.
-export function PrBadge({ pr, full }: { pr: PR; full?: boolean }) {
-  return pr?.url ? <PrBadgeHover pr={pr} full={full} /> : null
+// `reason`: why the PR is in the list it's shown in (e.g. "CI is red"), put at the top of its hover card.
+export function PrBadge({ pr, full, reason }: { pr: PR; full?: boolean; reason?: { label: string; text: string } }) {
+  return pr?.url ? <PrBadgeHover pr={pr} full={full} reason={reason} /> : null
 }
 
-function PrBadgeHover({ pr, full }: { pr: PR; full?: boolean }) {
+function PrBadgeHover({ pr, full, reason }: { pr: PR; full?: boolean; reason?: { label: string; text: string } }) {
   const ref = useRef<HTMLAnchorElement>(null)
   const [hover, setHover] = useState(false)
   const timer = useRef<any>(null)
@@ -27,7 +28,7 @@ function PrBadgeHover({ pr, full }: { pr: PR; full?: boolean }) {
       <PrBadgeLink pr={pr} full={full} aRef={ref} onEnter={enter} onLeave={leave} />
       {hover && (
         <Popover anchor={ref} open={hover} onClose={() => setHover(false)} width={440}>
-          <div onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><PrPreviewCard url={pr.url} /></div>
+          <div onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><PrPreviewCard url={pr.url} reason={reason} /></div>
         </Popover>
       )}
     </>

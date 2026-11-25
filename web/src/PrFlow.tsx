@@ -144,7 +144,7 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
           return (
           <div key={p.url} className="line flow-row">
             <span className={`flow-tag o-${p.outcome}`} title={tip}>{OUTCOMES.find(o => o.id === p.outcome)?.icon} {OUTCOMES.find(o => o.id === p.outcome)?.label}</span>
-            <span className="grow ellipsis" title={reason || undefined}><PrBadge pr={{ url: p.url, number: p.number, title: p.title, repo: p.repo, state: p.outcome === 'merged' ? 'MERGED' : p.outcome === 'abandoned' ? 'CLOSED' : 'OPEN', draft: p.draft ? 1 : 0, review: null, checks: p.checks } as any} full /></span>
+            <span className="grow ellipsis" title={reason || undefined}><PrBadge pr={{ url: p.url, number: p.number, title: p.title, repo: p.repo, state: p.outcome === 'merged' ? 'MERGED' : p.outcome === 'abandoned' ? 'CLOSED' : 'OPEN', draft: p.draft ? 1 : 0, review: null, checks: p.checks } as any} full reason={reason ? { label: OUTCOMES.find(o => o.id === p.outcome)?.label ?? 'Why', text: reason } : undefined} /></span>
             {['needs-you', 'stalled', 'stale'].includes(p.outcome) && <Watched url={p.url} />}
             <span className="muted small nowrap">{p.area} · {p.why || (p.merged ? `merged ${ago(p.merged)} ago` : `${ago(p.last)} ago`)}</span>
             {p.conversation && <button className="link small" onClick={() => onOpen(p.conversation!)}>open</button>}
