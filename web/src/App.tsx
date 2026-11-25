@@ -36,7 +36,7 @@ const DocEditor = lazy(() => import('./Writing').then(m => ({ default: m.DocSpli
 // Fetch and parse the editor's code once the app is idle, so the first doc you open doesn't wait on it.
 // Only the code: Harper (grammar, 20 MB) starts from the docs list or the doc itself.
 if (typeof window !== 'undefined') ((window as any).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 3000)))(() => { import('./Writing').catch(() => {}) }, { timeout: 8000 })
-import { Paused, PauseBar, usePause } from './Paused'
+import { Paused, PauseBar, PauseButton } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'
 import { LayoutTree, topLeftOf, UiAsk, UiDraftBar, useLayout, useLayoutColors, useLayoutEscape, type Run } from './Layout'
@@ -420,8 +420,6 @@ function Toasts({ zen }: { zen?: boolean }) {
 }
 
 function Nav({ view, setView }: { view: View; setView: (v: View) => void }) {
-  const { data, reload } = usePause()
-  const paused = !!data?.paused
   // Evolve lives under Skills & scouts (it writes the skills). Explore keeps its tab: Daniel asked for it back.
   const items: [View['kind'], string, string][] = [['insights', '▤', 'Insights'], ['explore', '⌬', 'Explore'], ['library', '◇', 'Skills & scouts'], ['automations', '↻', 'Automations'], ['settings', '⚙', 'Settings  ⌘,']]
   const on = (k: View['kind']) => view.kind === k || (k === 'library' && view.kind === 'evolve')
@@ -431,8 +429,7 @@ function Nav({ view, setView }: { view: View; setView: (v: View) => void }) {
         <button key={k} className={on(k) ? 'on' : ''} title={label} onClick={() => setView({ kind: k } as View)}><i className="nav-glyph">{icon}</i><span>{label.split('  ')[0]}</span></button>
       ))}
       {/* One click pauses or resumes everything; the bar across the top shows what's held. */}
-      <button className={`nav-icon${paused ? ' on' : ''}`} title={paused ? 'Paused: click to resume all agents and scouts' : 'Pause all agents and scouts'}
-        onClick={async () => { await post(paused ? '/api/resume' : '/api/pause'); reload() }}>{paused ? '▶' : '⏸'}</button>
+      <PauseButton />
     </nav>
   )
 }

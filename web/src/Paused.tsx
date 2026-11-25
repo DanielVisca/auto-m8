@@ -95,3 +95,33 @@ export function Paused({ onOpen }: { onOpen: (id: string) => void }) {
     </div>
   )
 }
+
+// The ⏸/▶ at the end of the bottom bar. Hover says exactly what a pause does (and what it doesn't),
+// with live counts, straight away rather than after the system tooltip's delay.
+export function PauseButton() {
+  const { data, reload } = usePause()
+  const paused = !!data?.paused
+  const n = data?.counts ?? {}
+  const covered = [
+    n.shepherds ? `PR shepherds (${n.shepherds} PRs)` : 'PR shepherds',
+    n.routines ? `routines and scheduled scouts (${n.routines})` : 'routines and scheduled scouts',
+    n.followUps ? `agents' follow-ups (${n.followUps})` : "agents' follow-ups",
+    'watches, self drive, autopilot and stall nudges',
+  ]
+  return (
+    <span className="pause-wrap">
+      <button className={`nav-icon${paused ? ' on' : ''}`} aria-label={paused ? 'Resume all automation' : 'Pause all automation'}
+        onClick={async () => { await post(paused ? '/api/resume' : '/api/pause'); reload() }}>{paused ? '▶' : '⏸'}</button>
+      <span className="pause-tip" role="tooltip">
+        {paused ? <>
+          <span><b>Paused{data?.since ? ` ${since(data.since)}` : ''}</b>. Click to resume all automation.</span>
+          <span>Everything auto-m8 runs on its own starts again{data?.interrupted?.length ? `, and the ${data.interrupted.length} chat${data.interrupted.length === 1 ? '' : 's'} the pause stopped pick${data.interrupted.length === 1 ? 's' : ''} up where ${data.interrupted.length === 1 ? 'it' : 'they'} left off` : ''}.{n.held ? ` ${n.held} message${n.held === 1 ? ' was' : 's were'} held while paused.` : ''}</span>
+        </> : <>
+          <span><b>Pause all automation</b>: stop every agent and scout auto-m8 runs on its own, to save tokens or take back control.</span>
+          <span>Stops {covered.join(', ')}.{n.running ? ` ${n.running} agent chat${n.running === 1 ? '' : 's'} running now ${n.running === 1 ? 'stops and picks' : 'stop and pick'} up again when you resume.` : ' Agent chats running at the time stop, and pick up again when you resume.'}</span>
+          <span className="muted">Your own chats keep working. Scouts in PostHog cloud and cloud tasks aren't covered.</span>
+        </>}
+      </span>
+    </span>
+  )
+}
