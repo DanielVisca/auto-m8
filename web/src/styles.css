@@ -123,8 +123,10 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 
 /* ---------- chat ---------- */
 .chat, .termview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* Side padding follows the chat pane's own width (cqi), not the window's (vw): beside a canvas the pane is narrow while the window is wide. */
+.chat { container-type: inline-size; min-width: 0; }
 .view-head { display: flex; align-items: center; gap: 6px; padding: 4px 12px 6px; border-bottom: 1px solid var(--line); min-height: 34px; }
-.chat .scroll { overflow-x: hidden; padding: 14px clamp(10px, 4vw, 48px) 8px; }
+.chat .scroll { overflow-x: hidden; padding: 14px clamp(10px, 4cqi, 48px) 8px; }
 .msg { max-width: 860px; margin: 0 auto 12px; }
 .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
 .bubble.agent { background: color-mix(in srgb, #8b5cf6 16%, var(--bg3)); border: 1px solid color-mix(in srgb, #8b5cf6 40%, transparent); }
@@ -168,10 +170,10 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .activity-count { white-space: nowrap; }
 .activity p { margin: 8px 0 0; }
 .work-card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); overflow: hidden; }
-.work-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 10px 12px; border: 0; border-radius: 9px; background: none; text-align: left; }
+.work-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; min-height: 42px; padding: 10px 12px; border: 0; border-radius: 9px; background: none; text-align: left; }
 .work-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .work-title { font-weight: 600; font-size: 12px; }
-.work-meta { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; white-space: normal; }
+.work-meta { flex: 1 1 160px; min-width: 0; color: var(--muted); font-size: 11px; white-space: normal; }
 .work-chevron { color: var(--muted); font-size: 20px; line-height: 16px; transition: transform .15s; }
 .work-chevron.open { transform: rotate(90deg); }
 .work-preview { padding: 0 12px 12px 27px; }
@@ -236,10 +238,10 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .empty { max-width: 520px; margin: 12vh auto 0; text-align: center; }
 .empty-title { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
 
-.composer { border-top: 1px solid var(--line); padding: 8px clamp(8px, 4vw, 48px) 8px; display: flex; flex-direction: column; gap: 6px; }
+.composer { border-top: 1px solid var(--line); padding: 8px clamp(8px, 4cqi, 48px) 8px; display: flex; flex-direction: column; gap: 6px; }
 .composer > * { max-width: 860px; width: 100%; margin: 0 auto; }
 .input-row { display: flex; gap: 6px; align-items: flex-end; }
-.input-row textarea { flex: 1; resize: none; overflow-y: hidden; padding: 7px 10px; line-height: 1.4; border-radius: 9px; }
+.input-row textarea { flex: 1; min-width: 0; resize: none; overflow-y: hidden; padding: 7px 10px; line-height: 1.4; border-radius: 9px; }
 .input-row button { height: 33px; min-width: 36px; border-radius: 9px; }
 .stop { color: var(--bad); }
 .composer-opts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -256,7 +258,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .chip.ok { color: var(--ok); }
 .chip button { background: none; border: none; padding: 0; color: var(--muted); }
 
-.btw { border-top: 1px dashed var(--accent); background: var(--bg2); padding: 6px clamp(8px, 4vw, 48px); max-height: 40%; display: flex; flex-direction: column; gap: 4px; }
+.btw { border-top: 1px dashed var(--accent); background: var(--bg2); padding: 6px clamp(8px, 4cqi, 48px); max-height: 40%; display: flex; flex-direction: column; gap: 4px; }
 .btw-head { display: flex; align-items: center; gap: 8px; }
 .btw-head b { color: var(--accent); }
 .btw-log { overflow: auto; display: flex; flex-direction: column; gap: 8px; }
@@ -535,7 +537,7 @@ img.brand { object-fit: contain; }
 .msg-actions .msg-time { align-self: center; padding: 2px 6px 2px 8px; color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
 .msg-actions button:hover { color: var(--fg); background: var(--bg3); }
 @media (pointer: coarse) { .msg-actions { display: inline-flex; position: static; margin-bottom: 4px; } }
-.rewind, .opt-setup { border-top: 1px solid var(--line); padding: 10px clamp(10px, 4vw, 48px); display: flex; flex-direction: column; gap: 6px; background: var(--bg2); }
+.rewind, .opt-setup { border-top: 1px solid var(--line); padding: 10px clamp(10px, 4cqi, 48px); display: flex; flex-direction: column; gap: 6px; background: var(--bg2); }
 .opt-setup { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 .opt-setup textarea { width: 100%; resize: vertical; }
 .opt-strip { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-bottom: 1px solid var(--line); background: var(--bg2); min-width: 0; flex-wrap: wrap; }
@@ -1406,3 +1408,6 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 .blocker-card.ok > .blocker-head > b { color: var(--ok); }
 .blocker-card .blocker-extras { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .md a.conv-link::before { content: '💬 '; }
+
+/* Narrow chat pane (beside a canvas or board): the Working card's bar and mood drop under the title instead of squeezing the stats into a word-per-line column. */
+@container (max-width: 520px) { .work-health { order: 9; flex-basis: 100%; padding-left: 16px; } .work-marks { flex: 1; justify-content: flex-start; } }
