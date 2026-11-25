@@ -261,8 +261,8 @@ export function List({ selectedId, onOpen, terms, selectedTerm, onOpenTerm, sear
   )
 }
 
-// Past the few in Now: the rest of the chats you've been in, newest first. Expands into a scroll box
-// that loads 15 more each time you reach its bottom. Refreshes in place when the sidebar does.
+// Past the few in Now: the rest of the chats you've been in, newest first. Expands inline in the
+// sidebar's own scroll and loads 15 more each time its end comes into view. Refreshes in place when the sidebar does.
 function MoreRecent({ open, onToggle, refresh, row }: { open: boolean; onToggle: () => void; refresh: unknown; row: (c: Conversation) => React.JSX.Element }) {
   const [items, setItems] = useState<Conversation[]>([])
   const [total, setTotal] = useState<number | null>(null)
@@ -280,19 +280,23 @@ function MoreRecent({ open, onToggle, refresh, row }: { open: boolean; onToggle:
   }
   // First open loads a page; after that, a sidebar refresh reloads what's already shown so order and dots stay current.
   useEffect(() => { if (open) load(0, Math.max(15, count.current), true) }, [open, refresh]) // eslint-disable-line react-hooks/exhaustive-deps
-  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget
-    if (total !== null && items.length < total && el.scrollTop + el.clientHeight > el.scrollHeight - 80) load(items.length, 15, false)
-  }
+  const more = total !== null && items.length < total
+  const end = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open || !more || !end.current) return
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) load(count.current, 15, false) }, { rootMargin: '80px' })
+    io.observe(end.current)
+    return () => io.disconnect()
+  }, [open, more, items.length]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <button className="link small work-more" onClick={onToggle} title="Chats you've been in, past the ones above. Scroll to load more.">
         {open ? 'Fewer recent' : `More recent${total ? ` (${total})` : ''}`}
       </button>
       {open && (
-        <div className="recent-more" onScroll={onScroll}>
+        <div className="recent-more">
           {items.map(row)}
-          {total !== null && items.length < total && <div className="muted small pad-s">Scroll for more…</div>}
+          {more && <div ref={end} className="muted small pad-s">Scroll for more…</div>}
           {total === 0 && <div className="muted small pad-s">Nothing else recent.</div>}
         </div>
       )}
