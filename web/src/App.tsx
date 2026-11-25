@@ -224,8 +224,8 @@ export function App() {
       {view.kind === 'chat' && <WithBoard conversationId={view.id} onOpen={id => openById(id)} chat={<Chat key={view.id ?? 'new'} id={view.id} onOpen={id => openById(id)} onTerminal={openInClaude} settings={settings}
         compact={mode === 'compact'} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen(!detailsOpen)} />} />}
       {view.kind === 'board' && (view.id
-        ? <div className="scroll"><BoardPage key={view.id} id={view.id} onOpen={openById} onBoards={() => setView({ kind: 'board', id: null })} /></div>
-        : <div className="scroll"><BoardsIndex onOpenBoard={id => setView({ kind: 'board', id })} /></div>)}
+        ? <div className="scroll"><BoardPage key={view.id} id={view.id} onOpen={openById} onBoards={() => setView({ kind: 'explore', id: 'canvases' })} /></div>
+        : <div className="scroll"><BoardsIndex onOpenBoard={id => setView({ kind: 'board', id })} onBack={() => setView({ kind: 'explore', id: 'canvases' })} /></div>)}
       {view.kind === 'term' && (term ? <TermView key={term.id} term={term} onClose={() => setView({ kind: 'chat', id: null })} /> : <div className="pad muted">Terminal closed.</div>)}
       {view.kind === 'task' && <div className="scroll"><Details id={view.id} onOpen={openById} onMakeRoutine={() => {}} /></div>}
       {view.kind === 'needs' && <div className="scroll"><div className="page"><NeedsMe onOpen={openById} /></div></div>}

@@ -26,9 +26,9 @@ export function BoardPage({ id, onOpen, onBoards }: { id: string; onOpen: (id: s
   const { data, error } = useLive<any>(`/api/boards/${encodeURIComponent(id)}`, ['canvas'])
   const recent = recentList(useRecent().data)
   useEffect(() => { post(`/api/boards/${encodeURIComponent(id)}/opened`, {}).catch(() => {}) }, [id])
-  if (error) return <div className="pad muted">{error === 'No such board' ? 'This canvas expired or was removed.' : error} <button className="link" onClick={onBoards}>All boards</button></div>
+  if (error) return <div className="pad muted">{error === 'No such board' ? 'This canvas expired or was removed.' : error} <button className="link" onClick={onBoards}>All canvases</button></div>
   if (!data) return <div className="pad muted">…</div>
-  if (data.error) return <div className="pad muted">This board is gone. <button className="link" onClick={onBoards}>All boards</button></div>
+  if (data.error) return <div className="pad muted">This board is gone. <button className="link" onClick={onBoards}>All canvases</button></div>
   return (
     <div className="page board-page">
       <BoardHead b={data} onBoards={onBoards} />
@@ -43,7 +43,7 @@ function BoardHead({ b, onBoards }: { b: BoardSummary; onBoards?: () => void }) 
   const save = (patch: any) => post<any>(`/api/boards/${b.id}`, patch).then(r => r?.error && toast(r.error))
   return (
     <div className="row-flex board-head" style={{ flexWrap: 'wrap' }}>
-      {onBoards && <button className="link small" onClick={onBoards}>← Boards</button>}
+      {onBoards && <button className="link small" onClick={onBoards}>← Canvases</button>}
       <input className="board-name grow" value={name} onChange={e => setName(e.target.value)} onBlur={() => name.trim() && name !== b.name && save({ name: name.trim() })} />
       <LifetimeSelect value={b.ttl_seconds} onChange={ttl_seconds => save({ ttl_seconds })} />
       <KeepBoard b={b} />
@@ -52,13 +52,14 @@ function BoardHead({ b, onBoards }: { b: BoardSummary; onBoards?: () => void }) 
   )
 }
 
-export function BoardsIndex({ onOpenBoard }: { onOpenBoard: (id: string) => void }) {
+export function BoardsIndex({ onOpenBoard, onBack }: { onOpenBoard: (id: string) => void; onBack?: () => void }) {
   const list = useBoards().data?.boards ?? []
   const [name, setName] = useState('')
   const [ttl, setTtl] = useState<number | null>(null)
   const make = async () => { const n = name.trim(); if (!n) return; const b = await post<any>('/api/boards', { name: n, ttl_seconds: ttl }); if (b?.error) return toast(b.error); setName(''); if (b?.id) onOpenBoard(b.id) }
   return (
     <div className="page">
+      {onBack && <button className="link small exh-back" onClick={onBack}>← Canvases</button>}
       <h2>Boards</h2>
       <div className="muted small">Keep a live view, or make a temporary canvas for a quick visualization. Temporary canvases disappear after their idle time; opening or using one resets its timer.</div>
       <div className="row-flex" style={{ margin: '12px 0', flexWrap: 'wrap' }}>
