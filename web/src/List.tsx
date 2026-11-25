@@ -6,6 +6,7 @@ import { Popover } from './Popover'
 import { PrPreviewCard } from './PrPreview'
 import { Brand, sourceBrand } from './Brand'
 import { PrAgents } from './Agents'
+import { brief } from './PrPill'
 
 const SOURCE_LABEL: Record<string, string> = { claude: 'Claude Code', 'posthog-code': 'PostHog Code', 'posthog-task': 'PostHog task', cursor: 'Cursor', import: 'Copied from another profile' }
 
@@ -39,9 +40,20 @@ function PrBadgeLink({ pr, full, aRef, onEnter, onLeave }: { pr: PR; full?: bool
   const state = pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : pr.state ? 'open' : 'unknown'
   const flag = pr.state === 'OPEN' && (pr.checks === 'FAILURE' || pr.checks === 'ERROR') ? '✗' : pr.review === 'CHANGES_REQUESTED' ? '!' : pr.review === 'APPROVED' ? '✓' : ''
   const n = pr.number ?? pr.url?.split('/').pop()
+  // Merged PRs turn blue once live in production, same as the chat pills' dot (brief is batched and cached).
+  const [deploy, setDeploy] = useState<string | undefined>()
+  useEffect(() => {
+    if (state !== 'merged') return
+    let live = true
+    const url = pr.url.match(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/)?.[0] ?? pr.url
+    const read = () => brief(url).then(b => { if (live) setDeploy(b?.deploy) })
+    read()
+    const t = setInterval(read, 5 * 60_000 + 1000) // turns blue once it lands; cached briefs make the deployed ones free
+    return () => { live = false; clearInterval(t) }
+  }, [pr.url, state])
   return (
-    <a ref={aRef} onMouseEnter={onEnter} onMouseLeave={onLeave} className={`pr ${state}`} href={pr.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-      title={`${pr.repo ?? ''} #${n} ${pr.title ?? ''}\n${state}${pr.review ? ` · review ${pr.review.toLowerCase()}` : ''}${pr.checks ? ` · checks ${pr.checks.toLowerCase()}` : ''}`}>
+    <a ref={aRef} onMouseEnter={onEnter} onMouseLeave={onLeave} className={`pr ${state}${deploy ? ` dp-${deploy}` : ''}`} href={pr.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+      title={`${pr.repo ?? ''} #${n} ${pr.title ?? ''}\n${deploy === 'deployed' ? 'merged · live in production' : state}${pr.review ? ` · review ${pr.review.toLowerCase()}` : ''}${pr.checks ? ` · checks ${pr.checks.toLowerCase()}` : ''}`}>
       #{n}{flag && <b>{flag}</b>}<PrAgents url={pr.url} size={13} />{full && pr.title ? <span className="pr-title"> {pr.title}</span> : null}
     </a>
   )

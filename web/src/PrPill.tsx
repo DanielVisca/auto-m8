@@ -22,9 +22,15 @@ export function openPr(url: string) {
 export type Brief = { url: string; title: string; state: 'open' | 'draft' | 'merged' | 'closed'; repo: string; number: number; author?: string
   deploy?: 'deployed' | 'deploying' | 'stuck' | 'failed' | 'unknown' }
 const briefs = new Map<string, Promise<Brief | null>>()
-function brief(url: string) {
+// A merged PR not yet live is forgotten after 5 minutes (the server's own TTL for those), so asking again sees the deploy.
+export function brief(url: string) {
   let p = briefs.get(url)
-  if (!p) { p = fetch(`/api/pr/brief?url=${encodeURIComponent(url)}`).then(r => r.ok ? r.json() : null).then(d => d?.title ? d : null).catch(() => null); briefs.set(url, p) }
+  if (!p) {
+    p = fetch(`/api/pr/brief?url=${encodeURIComponent(url)}`).then(r => r.ok ? r.json() : null).then(d => d?.title ? d : null).catch(() => null)
+    briefs.set(url, p)
+    const mine = p
+    p.then(b => { if (b?.state === 'merged' && b.deploy !== 'deployed') setTimeout(() => { if (briefs.get(url) === mine) briefs.delete(url) }, 5 * 60_000) })
+  }
   return p
 }
 
