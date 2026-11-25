@@ -3,12 +3,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, post, shell, toast, useLive } from './api'
 import { copyText, focusInChat, Markdown, type FocusAt } from './Chat'
+import { Brand } from './Brand'
 
 export type FileRef = { path: string; name: string; size: number; mtime: number; kind: 'text' | 'image' | 'video' | 'pdf' | 'archive' | 'other'; how?: string; uses?: (FocusAt & { how: string })[] }
 const ICON = { text: '📄', image: '🖼', video: '🎬', pdf: '📕', archive: '🗜', other: '📦' }
 const size = (n: number) => n < 1024 ? `${n} B` : n < 1 << 20 ? `${Math.round(n / 1024)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`
 const raw = (p: string, download = false) => `/api/files/raw?path=${encodeURIComponent(p)}${download ? '&download=1' : ''}`
-const act = (path: string, action: string, done: string) => post<any>('/api/files/action', { path, action }).then(r => { if (!r?.error) toast(done, { kind: 'ok' }) })
+const act = (path: string, action: string, done: string) => post<any>('/api/files/action', { path, action }).then(r => r?.error ? toast(String(r.error)) : toast(done, { kind: 'ok' }), () => {})
+// Finder lives on the Mac running auto-m8: offer it in the app, or in a browser on this Mac.
+const onMac = () => !!shell.isElectron || ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+// Paths with an extension are files; without one, treat it as a folder (Show in Finder works for both).
+const looksLikeFile = (p: string) => /\.[A-Za-z0-9]{1,8}$/.test(p)
 
 export const openFile = (path: string) => window.dispatchEvent(new CustomEvent('perch-file', { detail: path }))
 
@@ -85,7 +90,7 @@ function FileRow({ f, convId }: { f: FileRef; convId: string }) {
   useEffect(() => () => clearTimeout(timer.current), [])
   const sub = f.kind === 'text' && text ? firstLine(text) : ''
   return (
-    <div className="file-row">
+    <div className="file-row" data-path={f.path}>
       <button ref={ref} className="file-main" onClick={() => { leave(); openFile(f.path) }} onMouseEnter={enter} onMouseLeave={leave} title={`${f.path}\nClick to view`}>
         <Thumb f={f} text={text} />
         <span className="grow file-names">
@@ -119,8 +124,50 @@ function FileActions({ f, compact }: { f: FileRef; compact?: boolean }) {
   )
 }
 
+// Right-click any file or folder path (anything with data-path: a path in a reply, a tool call, a
+// file row, a chat's folder) for Show in Finder, Open, View and Copy path.
+function PathMenu() {
+  const [at, setAt] = useState<{ x: number; y: number; path: string; dir: boolean } | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // Capture on window so it wins over the message and list menus underneath.
+    const on = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-path]') as HTMLElement | null
+      const path = el?.dataset.path
+      if (!path) return
+      e.preventDefault(); e.stopPropagation()
+      setAt({ x: e.clientX, y: e.clientY, path, dir: el!.dataset.dir === '1' || !looksLikeFile(path) })
+    }
+    addEventListener('contextmenu', on, true)
+    return () => removeEventListener('contextmenu', on, true)
+  }, [])
+  useEffect(() => {
+    if (!at) return
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setAt(null) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null) }
+    const t = setTimeout(() => addEventListener('mousedown', close), 0)
+    addEventListener('keydown', esc); addEventListener('blur', () => setAt(null), { once: true })
+    return () => { clearTimeout(t); removeEventListener('mousedown', close); removeEventListener('keydown', esc) }
+  }, [at])
+  if (!at) return null
+  const go = (f: () => unknown) => () => { setAt(null); f() }
+  const name = at.path.replace(/\/+$/, '').split('/').pop() || at.path
+  return (
+    <div className="ctx" ref={ref} style={{ left: Math.min(at.x, innerWidth - 240), top: Math.min(at.y, innerHeight - 170) }} onContextMenu={e => e.preventDefault()}>
+      <div className="ctx-head ellipsis" title={at.path}>{at.dir ? '📁' : '📄'} {name}</div>
+      {onMac() && <button onClick={go(() => act(at.path, 'reveal', 'Shown in Finder'))}><Brand id="finder" size={15} /> Show in Finder</button>}
+      {onMac() && <button onClick={go(() => act(at.path, 'open', 'Opened'))}>↗ {at.dir ? 'Open folder' : 'Open in its app'}</button>}
+      {!at.dir && <button onClick={go(() => openFile(at.path))}>👁 View in auto-m8</button>}
+      <button onClick={go(() => copyText(at.path).then(() => toast('Path copied', { kind: 'ok' })))}>⌁ Copy path</button>
+    </div>
+  )
+}
+
 // One viewer for the whole app: opened from the panel or by clicking a path in a reply.
 export function FileViewer() {
+  return <><PathMenu /><FileViewerModal /></>
+}
+function FileViewerModal() {
   const [f, setF] = useState<FileRef | null>(null)
   const [text, setText] = useState<string | null>(null)
   useEffect(() => {
@@ -146,7 +193,7 @@ export function FileViewer() {
           <FileActions f={f} />
           <button className="icon" onClick={() => setF(null)} title="Close (Esc)">×</button>
         </div>
-        <div className="muted small ellipsis file-viewer-path" title={f.path}>{f.path}</div>
+        <div className="muted small ellipsis file-viewer-path" title={f.path} data-path={f.path}>{f.path}</div>
         <div className="file-viewer-body">
           {f.kind === 'image' && <img src={raw(f.path)} alt={f.name} />}
           {f.kind === 'video' && <video src={raw(f.path)} controls autoPlay playsInline />}

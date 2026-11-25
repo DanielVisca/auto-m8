@@ -27,7 +27,7 @@ export function FolderList({ selected, onOpen, onRecent, recentOn, zenAreas }: {
         <>
           <div className={`folder-row ${recentOn ? 'active' : ''}`} onClick={onRecent}><span className="folder-icon">🕘</span><span className="grow">Recent</span></div>
           {list.map(f => (
-            <div key={f.id} className={`folder-row ${selected === f.id ? 'active' : ''}`} onClick={() => onOpen(f)} title={f.description ?? ''}>
+            <div key={f.id} className={`folder-row ${selected === f.id ? 'active' : ''}`} onClick={() => onOpen(f)} title={f.description ?? ''} data-path={f.cwd || undefined} data-dir="1">
               <span className="folder-icon">{f.icon || '📁'}</span>
               <span className="grow ellipsis">{f.name}</span>
               {f.running > 0 && <span className="dot s-running" />}

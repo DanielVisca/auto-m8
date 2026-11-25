@@ -107,10 +107,21 @@ function referencedRecently(p: string) {
 }
 const ok = (p: string) => { const f = check(p); if (!f) throw new Error('auto-m8 only opens files a conversation made or mentioned.'); return f }
 
+// Any file or folder you right-click (a path in a reply, a tool call, a chat's folder): showing it in
+// Finder or opening a folder reads nothing, so it isn't limited to files a conversation made.
+function localPath(path: string) {
+  const p = resolve(path.startsWith('~') ? path.replace(/^~/, HOME) : path)
+  if (!isAbsolute(path.replace(/^~/, HOME))) throw new Error('That isn’t a full path.')
+  if (PRIVATE.test(p)) throw new Error('auto-m8 doesn’t open private folders (keys, tokens, configs).')
+  if (!existsSync(p)) throw new Error('That path isn’t on this Mac any more.')
+  return p
+}
+
 export async function fileAction(path: string, action: 'reveal' | 'open' | 'copy-file') {
+  if (action === 'reveal') { await exec('open', ['-R', localPath(path)]); return { ok: true } }
+  if (action === 'open') { const p = localPath(path); if (statSync(p).isDirectory()) { await exec('open', [p]); return { ok: true } } }
   const f = ok(path)
-  if (action === 'reveal') await exec('open', ['-R', f.path])
-  else if (action === 'open') await exec('open', [f.path])
+  if (action === 'open') await exec('open', [f.path])
   // The file itself on the clipboard: paste into Slack, Mail or Finder as an attachment.
   else await exec('osascript', ['-e', `set the clipboard to (POSIX file ${JSON.stringify(f.path)})`])
   return { ok: true }

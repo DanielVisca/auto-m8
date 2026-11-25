@@ -2,7 +2,7 @@ import { BoardButton } from './Boards'
 import { marked } from 'marked'
 import { createContext, memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
-import { ago, api, cachedThread, loadThread, baseName, post, sendChat, shortPath, useOutbox, titleOf, useLive, type Conversation, type Item, type Term } from './api'
+import { ago, api, cachedThread, loadThread, baseName, post, sendChat, toast, shortPath, useOutbox, titleOf, useLive, type Conversation, type Item, type Term } from './api'
 import { adopt, apply, emptyLive, toolLabel, toolSummary, type Live } from './stream'
 import { StateMenu } from './List'
 import { OpenIn } from './OpenIn'
@@ -43,8 +43,10 @@ marked.use({ renderer: {
   // A video path also plays right there in the chat.
   codespan: t => {
     const v = String((t as any).text)
+    // A folder path (no extension): click shows it in Finder; right-click for the path menu.
+    if (/^(~|\/(Users|private|tmp|var\/folders|Volumes))(\/[^\s.][^\s]*)?\/?$/.test(v) && !/\.[A-Za-z0-9]{1,8}$/.test(v)) return `<code class="file-path dir" data-path="${esc(v)}" data-dir="1" title="Show in Finder (right-click for more)">${esc(v)}</code>`
     if (!/^(~|\/(Users|private|tmp|var\/folders|Volumes))\/\S+\.[A-Za-z0-9]{1,8}$/.test(v)) return `<code>${esc(v)}</code>`
-    const link = `<code class="file-path" data-path="${esc(v)}" title="View this file">${esc(v)}</code>`
+    const link = `<code class="file-path" data-path="${esc(v)}" title="View this file (right-click for Finder)">${esc(v)}</code>`
     return /\.(mp4|m4v|mov|webm)$/i.test(v) ? `${link}<video class="inline-video" controls preload="metadata" playsinline src="/api/files/raw?path=${encodeURIComponent(v)}"></video>` : link
   },
   // Every code block gets its own copy button (shown on hover); shell blocks also get ▶ Run, which types it into a terminal under the chat.
@@ -66,6 +68,7 @@ addEventListener('error', e => { const t = e.target as HTMLElement; if (t instan
 const onLinkClick = (e: React.MouseEvent) => {
   const a = (e.target as HTMLElement).closest('a')
   const fp = (e.target as HTMLElement).closest('code.file-path') as HTMLElement | null
+  if (fp?.dataset.path && fp.dataset.dir) { e.preventDefault(); post('/api/files/action', { path: fp.dataset.path, action: 'reveal' }).then((r: any) => r?.error && toast(String(r.error)), () => {}); return }
   if (fp?.dataset.path) { e.preventDefault(); window.dispatchEvent(new CustomEvent('perch-file', { detail: fp.dataset.path })); return }
   const run = (e.target as HTMLElement).closest('.code-run') as HTMLElement | null
   if (run) {
@@ -164,6 +167,12 @@ export const Markdown = memo(({ text }: { text: string }) => {
   return <div ref={ref} className="md" onClick={onLinkClick} dangerouslySetInnerHTML={{ __html: html }} />
 })
 
+// The file or folder a tool call worked on, for the right-click path menu.
+const toolPath = (input: any): string | undefined => {
+  const p = input?.file_path ?? input?.notebook_path ?? input?.path
+  return typeof p === 'string' && /^(~|\/)/.test(p) ? p : undefined
+}
+
 function ToolRow({ b }: { b: Extract<Item, { kind: 'assistant' }>['blocks'][number] & { type: 'tool' } }) {
   const focus = useContext(Focus)
   const [open, setOpen] = useState(false)
@@ -174,7 +183,7 @@ function ToolRow({ b }: { b: Extract<Item, { kind: 'assistant' }>['blocks'][numb
       <button className="tool-head" onClick={() => setOpen(!open)}>
         <span className={`dot ${pending ? 'pending' : b.isError ? 'bad' : 'ok'}`} />
         <span className="tool-name">{toolLabel(b.name)}</span>
-        <span className="tool-sum">{toolSummary(b.name, b.input)}</span>
+        <span className="tool-sum" data-path={toolPath(b.input)}>{toolSummary(b.name, b.input)}</span>
       </button>
       {open && (
         <div className="tool-body">
@@ -1165,7 +1174,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
       <div className="composer-opts">
         {!id && folder && <span className="chip">📁 {folder.name}</span>}
         {!id && <input className="cwd" value={cwd} onChange={e => setCwd(e.target.value)} title="Working directory" list="cwds" />}
-        {id && conv?.cwd && <span className="muted small" title={conv.cwd}>{baseName(conv.cwd)}{conv.branch ? ` · ${conv.branch}` : ''}</span>}
+        {id && conv?.cwd && <span className="muted small" title={`${conv.cwd}\nRight-click to show in Finder`} data-path={conv.cwd} data-dir="1">{baseName(conv.cwd)}{conv.branch ? ` · ${conv.branch}` : ''}</span>}
         {/* Which model: Auto picks per message from what you already pay for; or pin one. */}
         <EnginePicker value={engine || 'auto'} onChange={pickEngine} local={local} className={isLocalEngine(engine) ? 'local' : ''}
           title={engine === 'auto' || !engine ? 'Auto: Haiku for quick asks, Sonnet for everyday work, Opus for heavy thinking; Claude and Codex cover for each other: when one hits its cap or is signed out, the other takes over with the same context, tools and memory' : engine.startsWith('codex') ? 'Codex on your ChatGPT plan: same conversation, auto-m8 tools, MCP servers, instructions, memory and skills. Switch back to Claude any time.' : isLocalEngine(engine) ? (engine.endsWith(':cloud') ? `Runs on ${engine} through Ollama's cloud (your Ollama account), with all of Claude Code's tools` : `Runs on ${engine} on this Mac: private and free, slower and less capable than Claude`) : 'A fixed Claude model on your plan'} />
