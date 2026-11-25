@@ -60,20 +60,11 @@ const emit = (owner: string, event: string, text: string) => browserEvents.forEa
 const changed = () => onBrowserChange.forEach(f => { try { f() } catch {} })
 const hook = (e: Parameters<typeof browserHooks extends Set<infer F> ? F : never>[0]) => browserHooks.forEach(f => { try { (f as any)(e) } catch (err) { console.error('browserHooks', err) } })
 
-// The live feed under the side panel's page: what the agent does in this window and what the page
-// does back (failed or slow requests, dialogs, takeovers), newest last. In memory only, per window.
-export type FeedItem = { at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number }
-const feeds = new Map<string, FeedItem[]>()
-export const feedListeners = new Set<(owner: string, item: FeedItem) => void>()
-export function feed(owner: string, item: Omit<FeedItem, 'at'> & { at?: number }) {
-  const it: FeedItem = { at: Date.now(), ...item, text: item.text.length > 240 ? item.text.slice(0, 239) + '…' : item.text }
-  const list = feeds.get(owner) ?? []
-  list.push(it); if (list.length > 150) list.splice(0, list.length - 150)
-  feeds.set(owner, list)
-  feedListeners.forEach(f => { try { f(owner, it) } catch {} })
-}
-export const feedFor = (owner: string) => feeds.get(owner) ?? []
+// The activity panel under the live view (browserfeed.ts).
+import { feed, feedFor, feedListeners, type FeedItem } from './browserfeed.ts'
+export { feed, feedFor, feedListeners, type FeedItem }
 const shortUrl = (u: string) => { try { const x = new URL(u); return (x.host + x.pathname).replace(/\/$/, '') + (x.search ? '?…' : '') } catch { return u } }
+const hostOfUrl = (u: string) => { try { return new URL(u).host } catch { return '' } }
 
 export const sessions = new Map<string, Session>()
 export const approvals = new Map<string, Approval>()
@@ -320,7 +311,7 @@ function wire(c: CDP) {
     const s = bySid(sid); if (!s || p.frame.parentId) return
     s.mainFrame = p.frame.id
     if (p.frame.loaderId !== s.loaderId) { s.loaderId = p.frame.loaderId; s.ctx = null }
-    if (p.frame.url !== s.url && !/^about:/.test(p.frame.url)) feed(s.owner, { kind: 'nav', text: shortUrl(p.frame.url) })
+    if (p.frame.url !== s.url && !/^about:/.test(p.frame.url)) feed(s.owner, { kind: 'nav', text: shortUrl(p.frame.url), detail: { url: p.frame.url, from: s.url } })
     s.url = p.frame.url
     hook({ type: 'navigate', session: s })
     if (s.shown) setTimeout(() => { pill(s) }, 400)
@@ -362,9 +353,11 @@ function wire(c: CDP) {
     if (n && n.ms == null) { n.ms = Date.now() - n.at; if (p.errorText) n.failed = p.errorText }
     // Worth a line in the feed: the page's own requests that failed, errored or crawled.
     if (n && /^(Document|XHR|Fetch)$/.test(n.type) && !/^(chrome-extension|data|blob):/.test(n.url)) {
-      if (n.failed && !/ERR_ABORTED|ERR_BLOCKED/.test(n.failed)) feed(s.owner, { kind: 'net', level: 'bad', text: `${n.method} ${shortUrl(n.url)} failed: ${n.failed.replace(/^net::/, '')}`, ms: n.ms })
-      else if ((n.status ?? 0) >= 400) feed(s.owner, { kind: 'net', level: (n.status ?? 0) >= 500 ? 'bad' : 'warn', text: `${n.status} ${n.method} ${shortUrl(n.url)}`, ms: n.ms })
-      else if ((n.ms ?? 0) > 3000) feed(s.owner, { kind: 'net', level: 'warn', text: `slow: ${n.method} ${shortUrl(n.url)}`, ms: n.ms })
+      const detail: Record<string, string> = { type: n.type, host: hostOfUrl(n.url), method: n.method, url: n.url, ...(n.status ? { status: String(n.status) } : {}), ...(n.mime ? { mime: n.mime } : {}), ...(n.rid ? { 'request id': n.rid } : {}), ...(n.failed ? { error: n.failed } : {}) }
+      const base = { kind: 'net' as const, at: n.at, ms: n.ms, detail }
+      if (n.failed && !/ERR_ABORTED|ERR_BLOCKED/.test(n.failed)) feed(s.owner, { ...base, level: 'bad', text: `${n.method} ${shortUrl(n.url)} failed: ${n.failed.replace(/^net::/, '')}` })
+      else if ((n.status ?? 0) >= 400) feed(s.owner, { ...base, level: (n.status ?? 0) >= 500 ? 'bad' : 'warn', text: `${n.status} ${n.method} ${shortUrl(n.url)}` })
+      else if ((n.ms ?? 0) > 3000) feed(s.owner, { ...base, text: `${n.method} ${shortUrl(n.url)}` })
     }
   }
   c.on('Network.loadingFinished', done)
@@ -970,13 +963,30 @@ export async function fitViewport(owner: string, ratio: number | null, panelWidt
   }
   const r = Math.max(0.4, Math.min(3, ratio))
   // The window's own toolbars sit outside the page: size the window so the page itself gets the shape.
-  const [dw, dh] = await evalIn(s, '[outerWidth - innerWidth, outerHeight - innerHeight]', { page: true, timeoutMs: 5000 }).catch(() => [0, 87]) as [number, number]
+  const [dw, dh, before] = await evalIn(s, '[outerWidth - innerWidth, outerHeight - innerHeight, innerHeight]', { page: true, timeoutMs: 5000 }).catch(() => [0, 87, 0]) as [number, number, number]
   // The page's width follows the panel's: about 1.7 CSS px per screen px keeps text readable while
   // sites still lay out as desktop (1024 to 1600). The height then fills the panel.
   const width = panelWidth ? Math.round(Math.max(1024, Math.min(1600, panelWidth * 1.7))) : FIT_WIDTH
   const height = Math.round(Math.max(500, Math.min(3200, width / r)))
   await c.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => {})
   await c.send('Browser.setWindowBounds', { windowId, bounds: { width: width + dw, height: height + dh } })
+  // macOS won't make a window taller than the screen. If the height fell short, narrow the page
+  // instead so it still has the panel's shape (and fills it) rather than stopping short.
+  // The size the window manager actually gave it: Chrome's own bounds report what was asked for, so
+  // read the page, and wait for the resize to land (it is asynchronous) before trusting the number.
+  let gotH = height
+  for (let i = 0; i < 8; i++) {
+    await sleep(125)
+    const h = await evalIn(s, 'innerHeight', { page: true, timeoutMs: 3000 }).catch(() => null) as number | null
+    if (h == null) break
+    gotH = h
+    if (h !== before) break
+  }
+  if (gotH < height * 0.97) {
+    const w2 = Math.max(640, Math.round(gotH * r))
+    await c.send('Browser.setWindowBounds', { windowId, bounds: { width: w2 + dw } })
+    return { ok: true, width: w2, height: gotH, limitedBy: 'screen height' }
+  }
   return { ok: true, width, height }
 }
 

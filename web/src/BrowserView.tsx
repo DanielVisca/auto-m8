@@ -91,7 +91,13 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
           }
           setHasFrame(true)
         } else if (m.t === 'state') setSt({ url: m.url, title: m.title, paused: !!m.paused, approvals: m.approvals ?? [] })
-        else if (m.t === 'feed') setFeedItems(old => (m.items.length > 1 ? m.items : [...old, ...m.items]).slice(-150))
+        else if (m.t === 'feed') setFeedItems(old => {
+          // The first message is the backlog; then one entry at a time, new or an update to a running span.
+          if (m.items.length !== 1) return m.items.slice(-150)
+          const it = m.items[0], i = old.findIndex(x => x.id === it.id)
+          if (i < 0) return [...old, it].slice(-150)
+          const next = old.slice(); next[i] = it; return next
+        })
         else if (m.t === 'error') setErr(m.error)
       }
       ws.onclose = e => {
@@ -140,6 +146,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
   }, [fit, owner, feedOn])
   // Something else (another view of this window) changed its shape: put the panel's shape back, at
   // most every 10s so two views can't fight over it.
+  useEffect(() => { if (fit) root.current?.dispatchEvent(new Event('perch-refit')) }, [feedH]) // eslint-disable-line react-hooks/exhaustive-deps
   const reassertAt = useRef(0)
   useEffect(() => {
     const want = sentRatio.current
@@ -238,35 +245,105 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
   )
 }
 
-export type FeedItem = { at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number }
-const FEED_ICON: Record<FeedItem['kind'], string> = { tool: '›', step: '•', nav: '→', net: '⇅', note: '!' }
-const fmtMs = (ms?: number) => ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+export type FeedItem = { id: string; at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number; running?: boolean; concern?: string; detail?: Record<string, string>; children?: FeedItem[] }
+const FEED_ICON: Record<FeedItem['kind'], string> = { tool: '◆', step: '·', nav: '→', net: '⇅', note: '!' }
+const FEED_KIND: Record<FeedItem['kind'], string> = { tool: 'Agent action', step: 'Step', nav: 'Page changed', net: 'Page request', note: 'Event' }
+const fmtMs = (ms?: number) => ms == null ? '' : ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s` : `${Math.floor(ms / 60_000)}m${String(Math.round(ms / 1000) % 60).padStart(2, '0')}s`
 const ago = (at: number, now: number) => { const s = Math.max(0, Math.round((now - at) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h` }
-// The live feed: newest at the bottom, like stream comments; sticks to the bottom unless you scroll up.
+const WINDOW_MAX = 5 * 60_000 // the timeline covers at most the last 5 minutes; older bars are clipped at its left edge
+const MONO = new Set(['url', 'script', 'result', 'error', 'request id', 'page after', 'from'])
+
+// One span or event on the shared timeline [t0, t1]: a bar for spans (growing while running), a tick
+// for instant events. Concerns show in amber with their reason, always visible.
+function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1: number; now: number; depth?: number }) {
+  const [open, setOpen] = useState(false)
+  const dur = it.running ? now - it.at : it.ms
+  const span = Math.max(1, t1 - t0)
+  const left = Math.max(0, Math.min(100, ((it.at - t0) / span) * 100))
+  const width = dur == null ? 0 : Math.max(0, Math.min(100 - left, ((Math.min(it.at + dur, t1) - Math.max(it.at, t0)) / span) * 100))
+  const clipped = it.at < t0
+  const expandable = !!(it.children?.length || (it.detail && Object.keys(it.detail).length))
+  const tone = it.level === 'bad' ? 'bad' : it.concern || it.level === 'warn' ? 'warn' : it.running ? 'run' : it.kind
+  return <>
+    <div className={`feed-row ${tone} ${expandable ? 'can-open' : ''} ${open ? 'open' : ''}`} style={{ paddingLeft: 4 + depth * 14 }}
+      onClick={() => expandable && setOpen(o => !o)} title={`${FEED_KIND[it.kind]} · started ${new Date(it.at).toLocaleTimeString()}`}>
+      <span className="chev">{expandable ? (open ? '⌄' : '›') : ''}</span>
+      <span className="ic">{it.concern ? '⚠' : FEED_ICON[it.kind]}</span>
+      <span className="lbl">
+        <span className="tx">{it.text}</span>
+        {it.concern && <span className="concern">{it.concern}</span>}
+        {!open && (() => { const n = it.children?.filter(c => c.concern || c.level === 'bad').length ?? 0; return n ? <span className="concern">{n} step{n > 1 ? 's' : ''} inside to look at</span> : null })()}
+      </span>
+      <span className="track">
+        {dur == null ? <span className="tick" style={{ left: `${left}%` }} /> :
+          <span className={`bar ${it.running ? 'live' : ''} ${clipped ? 'clipped' : ''}`} style={{ left: `${left}%`, width: `max(3px, ${width}%)` }} />}
+      </span>
+      <span className="dur">{it.running ? <span className="live-dot">{fmtMs(dur)}</span> : fmtMs(dur)}</span>
+      <span className="ago">{ago(it.at, now)}</span>
+    </div>
+    {open && <div className="feed-detail" style={{ marginLeft: 22 + depth * 14 }}>
+      {it.detail && Object.entries(it.detail).filter(([k, v]) => v && k !== 'host').map(([k, v]) => (
+        <div key={k} className="kv"><span className="k">{k}</span><span className={`v ${MONO.has(k) ? 'mono' : ''}`}>{v}</span></div>
+      ))}
+    </div>}
+    {open && it.children?.length ? (() => {
+      // Children on their parent's own timeline, so the steps inside one call are readable.
+      const c0 = it.at, c1 = Math.max(it.at + (dur ?? 0), ...it.children.map(c => c.at + (c.ms ?? 0)))
+      return it.children.map(c => <FeedRow key={c.id} it={c} t0={c0} t1={c1} now={now} depth={depth + 1} />)
+    })() : null}
+  </>
+}
+
+// The activity panel: what the agent does in this window as spans on one timeline, newest at the
+// bottom; sticks to the bottom unless you scroll up. Click a row with › to see its details and steps.
 function BrowserFeed({ items, boxRef, onHeight }: { items: FeedItem[]; boxRef: React.RefObject<HTMLDivElement | null>; onHeight: (h: number) => void }) {
   const list = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const [now, setNow] = useState(Date.now())
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(t) }, [])
+  const running = items.some(i => i.running)
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), running ? 250 : 5000); return () => clearInterval(t) }, [running])
   useLayoutEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight }, [items.length])
   useLayoutEffect(() => {
     const el = boxRef.current; if (!el) return
     const ro = new ResizeObserver(() => onHeight(el.offsetHeight)); ro.observe(el); onHeight(el.offsetHeight)
     return () => { ro.disconnect(); onHeight(0) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const t1 = Math.max(now, ...items.map(i => i.at + (i.ms ?? 0)))
+  const t0 = Math.max(t1 - WINDOW_MAX, Math.min(t1 - 10_000, ...items.map(i => i.at)))
+  const concerns = items.reduce((n, i) => n + (i.concern ? 1 : 0) + (i.children?.filter(c => c.concern).length ?? 0), 0)
+  // Collapse to its header (click it); drag the line above it to any height. Both remembered.
+  const CKEY = 'perch.browserFeed.collapsed', HKEY = 'perch.browserFeed.height'
+  const [collapsed, setCollapsedState] = useState(() => { try { return localStorage.getItem(CKEY) === '1' } catch { return false } })
+  const setCollapsed = (v: boolean) => { setCollapsedState(v); try { localStorage.setItem(CKEY, v ? '1' : '0') } catch {} }
+  const [height, setHeightState] = useState<number | null>(() => { try { return Number(localStorage.getItem(HKEY)) || null } catch { return null } })
+  const drag = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const el = boxRef.current; if (!el) return
+    const panel = el.parentElement?.getBoundingClientRect()
+    const startY = e.clientY, startH = el.offsetHeight
+    let last = startH
+    const move = (ev: PointerEvent) => { last = Math.round(Math.max(90, Math.min((panel?.height ?? 900) - 160, startH + (startY - ev.clientY)))); setHeightState(last); if (collapsed) setCollapsed(false) }
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); document.body.style.cursor = ''; try { localStorage.setItem(HKEY, String(last)) } catch {} }
+    document.body.style.cursor = 'ns-resize'
+    addEventListener('pointermove', move); addEventListener('pointerup', up)
+  }
+  const latest = items[items.length - 1]
   return (
-    <div ref={boxRef} className="browser-feed">
-      <div ref={list} className="browser-feed-list" onScroll={e => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24 }}>
-        {!items.length && <div className="muted small browser-feed-empty">What the agent does in this window shows up here: pages it opens, clicks, what it reads, and requests that fail or crawl.</div>}
-        {items.map((it, i) => (
-          <div key={`${it.at}-${i}`} className={`browser-feed-row ${it.kind} ${it.level ?? ''}`} title={new Date(it.at).toLocaleTimeString()}>
-            <span className="ic">{FEED_ICON[it.kind]}</span>
-            <span className="tx">{it.text}</span>
-            {it.ms != null && it.ms >= 300 && <span className="ms">{fmtMs(it.ms)}</span>}
-            <span className="ago">{ago(it.at, now)}</span>
-          </div>
-        ))}
+    <div ref={boxRef} className={`browser-feed ${collapsed ? 'collapsed' : ''}`} style={!collapsed && height ? { height } : undefined}>
+      <div className="feed-grip" onPointerDown={drag} onDoubleClick={() => { setHeightState(null); try { localStorage.removeItem(HKEY) } catch {} }} title="Drag to resize the activity panel. Double-click for the default size." />
+      <div className="feed-head" onClick={() => setCollapsed(!collapsed)} title={collapsed ? 'Show the activity panel' : 'Collapse the activity panel'}>
+        <span className="chev">{collapsed ? '›' : '⌄'}</span>
+        <span className="ttl">Activity</span>
+        {concerns > 0 && <span className="feed-concerns">⚠ {concerns} to look at</span>}
+        {collapsed && latest && <span className={`feed-latest ${latest.running ? 'run' : ''}`}>{latest.running ? '● ' : ''}{latest.text}</span>}
+        <span className="grow" />
+        {!collapsed && <><span className="axis"><span>{fmtMs(t1 - t0)} ago</span><span>now</span></span>
+        <span className="dur-h" /><span className="ago-h" /></>}
       </div>
+      {!collapsed && <div ref={list} className="browser-feed-list" onScroll={e => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24 }}>
+        {!items.length && <div className="muted small browser-feed-empty">What the agent does in this window shows up here as it happens: each action as a bar on the timeline, the steps inside it, page changes, and page requests that fail or crawl. Anything slower than expected is flagged.</div>}
+        {items.map(it => <FeedRow key={it.id} it={it} t0={t0} t1={t1} now={now} />)}
+      </div>}
     </div>
   )
 }

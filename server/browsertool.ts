@@ -1,6 +1,7 @@
 // The `browser` MCP tool, run inside the perch server (the MCP process forwards here). One tool,
 // a handful of actions, and modes that pick the cheapest way to get the job done.
 import * as B from './browser.ts'
+import { concernFor } from './browserfeed.ts'
 import * as O from './overlay.ts'
 import { ownerName, possessive } from './owner.ts'
 
@@ -38,27 +39,56 @@ async function view(s: B.Session, mode: string, opts: { find?: string; max?: num
   return out
 }
 
-// Every call also goes in the window's live feed (B.feed): what the agent asked for, how long it took,
-// and whether it failed. act lists its steps one per line.
+// Every call is a span in the window's activity panel (browserfeed.ts): it shows as running at once,
+// then gets its duration, outcome, details and, for act, one child span per step.
 const QUIET = new Set(['status', 'paths', 'remember'])
+const hostOf = (u: string) => { try { return new URL(u).host } catch { return '' } }
+function callDetail(a: any): Record<string, string> {
+  const d: Record<string, string> = { action: String(a.action ?? '') }
+  if (a.url) { d.url = String(a.url); d.host = hostOf(String(a.url)) }
+  for (const k of ['goal', 'mode', 'find', 'what', 'filter', 'for', 'text', 'value', 'method'] as const) if (a[k] != null && a[k] !== '') d[k] = String(a[k]).slice(0, 300)
+  if (a.expression) d.script = String(a.expression).slice(0, 600)
+  return d
+}
 export async function browserTool(owner: string, a: any): Promise<ToolResult> {
   const action = String(a?.action ?? '')
   if (!owner || QUIET.has(action) || !B.sessions.has(owner) && action !== 'open') return browserToolRun(owner, a)
   const t0 = Date.now()
   const what = describeCall(a)
+  const detail = callDetail(a)
+  if (!detail.host) { const u = B.sessions.get(owner)?.url; if (u) detail.host = hostOf(u) }
+  const span = B.feed(owner, { kind: 'tool', text: what, at: t0, running: true, detail })
+  const logFrom = B.sessions.get(owner)?.log.length ?? 0
   try {
     const r = await browserToolRun(owner, a)
     const ms = Date.now() - t0
+    const failed = /^(No browser window|Error|Browser error)/.test(r.text) || (action === 'act' && /^\d+\. FAILED/m.test(r.text))
+    let children: B.FeedItem[] | undefined
     if (action === 'act') {
-      for (const line of r.text.split('\n')) {
-        const m = /^\d+\. (.*)$/.exec(line)
-        if (m) B.feed(owner, { kind: 'step', text: m[1], level: /^FAILED/.test(m[1]) ? 'bad' : undefined })
-        else if (/^\(stopped/.test(line)) B.feed(owner, { kind: 'step', level: 'warn', text: line.replace(/[()]/g, '') })
-      }
-    } else B.feed(owner, { kind: 'tool', text: what, ms, level: /^(No browser window|Error|FAILED)/.test(r.text) ? 'bad' : undefined })
+      // One child per step: timing from the session's step log, wording and failures from the result.
+      const lines = r.text.split('\n').map(l => /^\d+\. (.*)$/.exec(l)?.[1]).filter((x): x is string => !!x)
+      const logged = (B.sessions.get(owner)?.log ?? []).slice(logFrom)
+      let cursor = t0
+      children = lines.map((line, i) => {
+        const l = logged[i]
+        const took = l?.took
+        const at = l ? l.at - l.took : cursor
+        cursor = l ? l.at : cursor
+        const bad = /^FAILED/.test(line)
+        return { id: `${span.id}.${i}`, kind: 'step' as const, text: line, at, ms: took, level: bad ? 'bad' as const : undefined,
+          detail: { action: l?.do ?? String((a.steps?.[i] ?? a).do ?? ''), host: detail.host ?? '', ...(l?.locator ? { target: `${l.locator.role} "${l.locator.name}"` } : {}), ...(l?.value && !l.secret ? { value: l.value.slice(0, 200) } : {}), ...(l?.urlAfter ? { 'page after': l.urlAfter } : {}) } }
+      })
+      // Steps get the same concern check as calls (a click that took 5s is worth a flag).
+      for (const c of children) if (c.ms != null && !c.concern) c.concern = concernFor(owner, c)
+      const stopped = /^\((stopped[^)]*)\)/m.exec(r.text)?.[1]
+      if (stopped) children.push({ id: `${span.id}.stop`, kind: 'step', text: stopped, at: cursor, level: 'warn' })
+    }
+    B.feed(owner, { ...span, running: false, ms, level: failed ? 'bad' : undefined, children,
+      text: action === 'act' && children ? `${what} (${children.filter(c => c.kind === 'step' && !c.id.endsWith('.stop')).length} step${children.length === 1 ? '' : 's'})` : what,
+      detail: { ...detail, result: r.text.slice(0, 500) } })
     return r
   } catch (e: any) {
-    B.feed(owner, { kind: 'tool', level: 'bad', text: `${what}: ${String(e?.message ?? e).split('\n')[0]}`, ms: Date.now() - t0 })
+    B.feed(owner, { ...span, running: false, level: 'bad', ms: Date.now() - t0, text: `${what}: ${String(e?.message ?? e).split('\n')[0]}`, detail: { ...detail, error: String(e?.message ?? e).slice(0, 500) } })
     throw e
   }
 }
@@ -74,6 +104,7 @@ function describeCall(a: any): string {
     case 'eval': return `run script: ${String(a.expression ?? '').replace(/\s+/g, ' ').slice(0, 80)}`
     case 'wait': return a.for === 'approval' ? 'wait for your approval' : a.for === 'resume' ? 'wait for you to hand back' : `wait for "${a.text ?? ''}"`
     case 'overlay': return `PostHog overlay ${a.value ?? ''}`
+    case 'act': return a.steps?.length ? `do: ${a.steps.slice(0, 3).map((x: any) => `${x.do}${x.name ? ` "${x.name}"` : x.ref ? ` ${x.ref}` : x.url ? ` ${host(String(x.url))}` : ''}`).join(', ')}${a.steps.length > 3 ? ', …' : ''}` : `${a.do ?? 'act'}${a.name ? ` "${a.name}"` : ''}`
     case 'begin': return `start: ${a.goal ?? ''}`
     case 'finish': return a.ok ? 'done' : 'gave up'
     case 'replay': return 'replay a saved path'
