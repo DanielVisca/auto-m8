@@ -324,7 +324,7 @@ function Organised({ selectedId, selected, onOpen, onMenu, onSelect, onSearch }:
     <>
       {data.pinned?.length > 0 && <div className="section pinned-section"><div className="section-head pinned-head">📌 Pinned <span className="count">{data.pinned.length}</span></div>{data.pinned.map(row)}</div>}
       <div className="section">{data.now.map(row)}<MoreRecent open={!!open.recent} onToggle={() => toggle('recent')} refresh={data} row={row} /></div>
-      {data.needs.length > 0 && <div className="section"><div className="section-head needs">Waiting chats <span className="count">{data.needs.length}</span></div>{data.needs.map(row)}</div>}
+      {data.needs.length > 0 && <div className="section"><button className="section-head needs toggle" onClick={() => toggle('waiting')}>Waiting chats <span className="count">{data.needs.length}</span> <span className="muted">{open.waiting ? '▾' : '▸'}</span></button>{open.waiting && data.needs.map(row)}</div>}
       {data.working.length > 0 && (
         <div className="section">
           <button className="section-head toggle" onClick={() => toggle('working')}><span className="dot s-running" /> {data.working.length} agent{data.working.length > 1 ? 's' : ''} working <span className="muted">{open.working ? '▾' : '▸'}</span></button>
