@@ -110,3 +110,18 @@
 .ex-edgecard-head button { margin-left: auto; }
 .ex-edgecard .ex-evidence { margin: 6px 0 2px; }
 .ex-empty { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); max-width: 420px; text-align: center; }
+
+.ex-chips { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 6px; }
+.ex-chip { font-size: 11px; padding: 0 7px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); text-decoration: none; cursor: default; }
+a.ex-chip { cursor: pointer; }
+.ex-fold { border-top: 1px solid var(--line); padding: 5px 0; }
+.ex-fold > summary { cursor: pointer; font-size: 12px; list-style: none; display: flex; gap: 6px; align-items: baseline; }
+.ex-fold > summary::-webkit-details-marker { display: none; }
+.ex-fold > summary::before { content: '▸'; color: var(--muted); width: 10px; }
+.ex-fold[open] > summary::before { content: '▾'; }
+.ex-fold > summary .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.ex-i { color: var(--muted); cursor: help; font-size: 11px; }
+.ex-fold-body { padding: 4px 0 2px 14px; }
+.ex-sub { margin-bottom: 8px; }
+.ex-subh { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 2px; }
+.ex-hubs { margin-top: 4px; }

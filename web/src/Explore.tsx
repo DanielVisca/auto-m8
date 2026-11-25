@@ -406,10 +406,24 @@ function TimelineBar({ tl, steps, step, setStep, playing, setPlaying, at }: { tl
   )
 }
 
+// A section that starts closed and says in one line what's inside; remembers if you opened it.
+function Section({ id, title, summary, hint, children }: { id: string; title: string; summary?: React.ReactNode; hint?: string; children: React.ReactNode }) {
+  const key = `perch.explore.open.${id}`
+  const [open, setOpen] = useState(() => localStorage.getItem(key) === '1')
+  return (
+    <details className="ex-fold" open={open} onToggle={e => { const o = (e.target as HTMLDetailsElement).open; setOpen(o); localStorage.setItem(key, o ? '1' : '0') }}>
+      <summary><b>{title}</b> <span className="muted">{summary}</span>{hint && <span className="ex-i" title={hint}>ⓘ</span>}</summary>
+      <div className="ex-fold-body">{children}</div>
+    </details>
+  )
+}
+
 function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced, onFocus, onAsk, onRemove }: { repo: string; id: string; workspace: string[]; org: string | null; onRuntime: (r: Runtime | null) => void; milestones?: Commit[]; introduced?: Ev; onFocus: (id: string) => void; onAsk: () => void; onRemove: () => void }) {
   const [d, setD] = useState<any>(null)
   const [more, setMore] = useState<Record<string, boolean>>({})
   const [open, setOpen] = useState<string | null>(null)
+  const [runs, setRuns] = useState('')
+  const [data, setData] = useState('')
   // Ignore an answer for a concept you've already clicked away from (a slow cold load could overwrite the newer one).
   useEffect(() => { let gone = false; setD(null); api.get(`/api/explore/node?${qs({ repo, id })}`).then(x => !gone && setD(x)).catch(e => !gone && setD({ error: String(e?.message ?? e) })); return () => { gone = true } }, [repo, id])
   if (!d) return <div className="card small muted"><i className="spin" /> Loading {id}…</div>
@@ -418,54 +432,78 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
   const Loc = ({ x }: { x: { file: string; line?: number; github?: string | null } }) => (
     <span className="ex-loc"><button className="link" title="Open in your editor" onClick={() => openLocal(x.file, x.line)}>{x.file}{x.line ? `:${x.line}` : ''}</button>{x.github && <a className="muted" href={x.github} target="_blank" rel="noreferrer" title="On GitHub at the mapped commit"> ↗</a>}</span>
   )
+  const Edge = ({ e, other, k }: { e: any; other: 'from' | 'to'; k: string }) => (
+    <div className="small">
+      <button className="link" onClick={() => setOpen(open === k ? null : k)} title="Show the lines of code behind this link">{open === k ? '▾' : '▸'}</button>{' '}
+      <button className="link" onClick={() => onFocus(e[other])} title={`${e[other]}\nClick to focus the map here`}>{label(e[other])}</button>{' '}
+      <span className={`muted ex-kind ${e.kind}`} title={e.kind === 'fk' ? 'Foreign key: a database link between their tables' : `Imported by ${e.weight} file${e.weight === 1 ? '' : 's'}`}>{e.kind === 'fk' ? 'fk' : ''} {e.weight}</span>
+      {open === k && <div className="ex-evidence">{e.evidence.map((x: any, i: number) => <div key={i}><Loc x={x} /><code>{x.text}</code></div>)}{e.weight > e.evidence.length && <div className="muted tiny">+{e.weight - e.evidence.length} more files</div>}</div>}
+    </div>
+  )
+  // Specific links first; plumbing that most of the repo uses goes in one line at the end.
   const Edges = ({ title, list, other }: { title: string; list: any[]; other: 'from' | 'to' }) => {
-    const all = more[title], shown = all ? list : list.slice(0, 5)
+    const specific = list.filter(e => !e.hub), hubs = list.filter(e => e.hub)
+    const all = more[title], shown = all ? specific : specific.slice(0, 6)
     return (
-      <div className="ex-sec">
-        <h5>{title} <span className="muted">{list.length}</span></h5>
+      <>
         {!list.length && <div className="muted small">Nothing.</div>}
-        {shown.map(e => {
-          const k = `${title}:${e[other]}:${e.kind}`
-          return (
-            <div key={k} className="small">
-              <button className="link" onClick={() => setOpen(open === k ? null : k)}>{open === k ? '▾' : '▸'}</button>{' '}
-              <button className="link" onClick={() => onFocus(e[other])} title="Focus the map here">{e[other]}</button>{' '}
-              <span className={`muted ex-kind ${e.kind}`}>{e.kind === 'fk' ? 'foreign key' : 'import'} · {e.weight}</span>
-              {open === k && <div className="ex-evidence">{e.evidence.map((x: any, i: number) => <div key={i}><Loc x={x} /><code>{x.text}</code></div>)}{e.weight > e.evidence.length && <div className="muted tiny">+{e.weight - e.evidence.length} more files</div>}</div>}
-            </div>
-          )
-        })}
-        {list.length > 5 && <button className="link small" onClick={() => setMore(m => ({ ...m, [title]: !all }))}>{all ? 'fewer' : `+${list.length - 5} more`}</button>}
-      </div>
+        {shown.map(e => <Edge key={`${e[other]}:${e.kind}`} e={e} other={other} k={`${title}:${e[other]}:${e.kind}`} />)}
+        {specific.length > 6 && <button className="link small" onClick={() => setMore(m => ({ ...m, [title]: !all }))}>{all ? 'fewer' : `+${specific.length - 6} more`}</button>}
+        {hubs.length > 0 && (
+          <div className="small muted ex-hubs">
+            <button className="link small" onClick={() => setMore(m => ({ ...m, [title + ':hubs']: !m[title + ':hubs'] }))} title="Modules used by most of the repo (UI kit, utils, the Team model). Real, but they say little about this concept.">{more[title + ':hubs'] ? '▾' : '▸'} {hubs.length} shared foundation{hubs.length === 1 ? '' : 's'}</button>
+            {' '}{!more[title + ':hubs'] && hubs.slice(0, 4).map(e => label(e[other])).join(', ')}{!more[title + ':hubs'] && hubs.length > 4 ? '…' : ''}
+            {more[title + ':hubs'] && hubs.map(e => <Edge key={`${e[other]}:${e.kind}`} e={e} other={other} k={`${title}:${e[other]}:${e.kind}`} />)}
+          </div>
+        )}
+      </>
     )
   }
+  const specificCount = (l: any[]) => l.filter(e => !e.hub).length
   return (
     <div className="card explore-node">
-      <div className="ex-title"><b>{d.concept.name}</b> <span className="muted small">{d.concept.path} · {d.concept.files} files</span></div>
-      <div className="ex-actions small">
-        <button className="small" onClick={onAsk}>Ask about this</button>
-        <button className="small" onClick={() => onFocus(d.concept.id)}>Focus here</button>
-        <button className="small" onClick={onRemove}>What if I remove this?</button>
-        {d.tree && <a className="small" href={d.tree} target="_blank" rel="noreferrer">GitHub ↗</a>}
+      <div className="ex-title"><b title={d.concept.path}>{d.concept.name}</b>{d.tree && <a className="small muted" href={d.tree} target="_blank" rel="noreferrer" title="Open this folder on GitHub"> ↗</a>}</div>
+      <div className="ex-chips small">
+        <span className="ex-chip" title={`${d.concept.path}\n${d.concept.files} files tracked by git`}>{d.concept.files} files</span>
+        {introduced && <a className="ex-chip" href={introduced.commit.url ?? undefined} target="_blank" rel="noreferrer" title={`First seen ${introduced.date.slice(0, 10)} by ${introduced.commit.author}\n${introduced.commit.subject}\n${introduced.source}${introduced.approx ? '\n≈ estimate: this clone is shallow' : ''}`}>since {introduced.date.slice(0, 7)}{introduced.approx ? ' ≈' : ''}</a>}
+        <span className="ex-chip" title={`Built on ${d.dependsOn.length} modules: ${specificCount(d.dependsOn)} specific, ${d.dependsOn.length - specificCount(d.dependsOn)} shared foundations`}>built on {specificCount(d.dependsOn)}</span>
+        <span className="ex-chip" title={`${d.usedBy.length} modules build on it: ${specificCount(d.usedBy)} specific, ${d.usedBy.length - specificCount(d.usedBy)} shared foundations`}>used by {specificCount(d.usedBy)}</span>
       </div>
-      {introduced && <div className="small ex-sec">First seen <b>{introduced.date.slice(0, 10)}</b>{introduced.approx ? ' ≈' : ''} by {introduced.commit.author}{introduced.commit.url && <> · <a href={introduced.commit.url} target="_blank" rel="noreferrer">{introduced.commit.pr ? `#${introduced.commit.pr}` : introduced.commit.sha.slice(0, 8)}</a></>} <span className="muted">{introduced.commit.subject}</span><div className="tiny muted">{introduced.source}</div></div>}
-      <WhereItRuns concept={d.concept.id} repos={workspace} org={org} onLoaded={onRuntime} />
-      <DataSection concept={d.concept.id} repos={workspace} />
-      {d.docs.length > 0 && <div className="ex-sec"><h5>Read first</h5>{d.docs.map((x: any) => <div key={x.file} className="small"><Loc x={x} /></div>)}</div>}
-      {d.models.length > 0 && (
-        <div className="ex-sec"><h5>Data models <span className="muted">{d.models.length}</span></h5>
-          {d.models.slice(0, more.models ? 999 : 8).map((m: any) => {
-            const rels = d.relations.filter((r: any) => r.model === m.name)
-            return <div key={m.name} className="small"><b>{m.name}</b> <Loc x={m} />{rels.length > 0 && <span className="muted"> → {[...new Set(rels.map((r: any) => `${r.target}${r.kind !== 'fk' ? ` (${r.kind})` : ''}`))].join(', ')}</span>}</div>
-          })}
-          {d.models.length > 8 && <button className="link small" onClick={() => setMore(m => ({ ...m, models: !m.models }))}>{more.models ? 'fewer' : `+${d.models.length - 8} more`}</button>}
-        </div>
-      )}
-      <Edges title="Built on" list={d.dependsOn} other="to" />
-      <Edges title="Built on it" list={d.usedBy} other="from" />
-      {milestones && milestones.length > 0 && <div className="ex-sec"><h5>Biggest changes</h5>{milestones.map(c => <div key={c.sha} className="small"><span className="muted">{c.date.slice(0, 10)}</span> {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.pr ? `#${c.pr}` : c.sha.slice(0, 8)}</a> : null} {c.subject} <span className="muted">· {c.author}</span></div>)}</div>}
-      {d.recent.length > 0 && <div className="ex-sec"><h5>Recent commits</h5>{d.recent.slice(0, 5).map((c: Commit) => <div key={c.sha} className="small ellipsis"><span className="muted">{c.date.slice(0, 10)}</span> {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.pr ? `#${c.pr}` : c.sha.slice(0, 8)}</a> : null} {c.subject}</div>)}</div>}
-      {d.largest.length > 0 && <div className="ex-sec"><h5>Largest source files</h5>{d.largest.slice(0, 5).map((x: any) => <div key={x.file} className="small"><Loc x={x} /> <span className="muted">{Math.round(x.size / 1024)} KB</span></div>)}</div>}
+      <div className="ex-actions small">
+        <button className="small" onClick={onAsk} title="Ask the chat about this concept; it gets the map's evidence and is told to cite files">Ask</button>
+        <button className="small" onClick={() => onFocus(d.concept.id)} title="Re-center the map on this concept">Focus</button>
+        <button className="small" onClick={onRemove} title="Dream mode: see what would break if this were removed">What if removed?</button>
+      </div>
+      <Section id="runs" title="Where it runs" summary={runs} hint="Argo CD apps with the concept's name in theirs. Only “runs your code” is proven (the image is tagged with a commit in your repo); others just share the name. A module inside a bigger app (a Django product in the web app) has no app of its own.">
+        <WhereItRuns concept={d.concept.id} repos={workspace} org={org} onLoaded={onRuntime} bare onSummary={setRuns} />
+      </Section>
+      <Section id="data" title="Data" summary={data} hint="ClickHouse tables its code names (or named like it), read from system tables via Grafana; disk fullness from Prometheus; instance types from terraform. Click any number for its query.">
+        <DataSection concept={d.concept.id} repos={workspace} bare onSummary={setData} />
+      </Section>
+      <Section id="builton" title="Built on" summary={`${specificCount(d.dependsOn)} specific${d.dependsOn.length > specificCount(d.dependsOn) ? ` + ${d.dependsOn.length - specificCount(d.dependsOn)} shared` : ''}`} hint="Modules this one imports or has foreign keys to. ▸ shows the lines of code; click a name to focus the map there.">
+        <Edges title="Built on" list={d.dependsOn} other="to" />
+      </Section>
+      <Section id="usedby" title="Built on it" summary={`${specificCount(d.usedBy)} specific${d.usedBy.length > specificCount(d.usedBy) ? ` + ${d.usedBy.length - specificCount(d.usedBy)} shared` : ''}`} hint="Modules that import this one or have foreign keys to it: what would feel a change here.">
+        <Edges title="Built on it" list={d.usedBy} other="from" />
+      </Section>
+      <Section id="code" title="Code" summary={[d.docs.length ? `${d.docs.length} docs` : '', d.models.length ? `${d.models.length} models` : '', d.largest.length ? 'largest files' : ''].filter(Boolean).join(' · ')} hint="Where to start reading: the team's own notes, the data models (with what they point at), and the biggest files.">
+        {d.docs.length > 0 && <div className="ex-sub"><div className="ex-subh">Read first</div>{d.docs.map((x: any) => <div key={x.file} className="small"><Loc x={x} /></div>)}</div>}
+        {d.models.length > 0 && (
+          <div className="ex-sub"><div className="ex-subh">Data models</div>
+            {d.models.slice(0, more.models ? 999 : 8).map((m: any) => {
+              const rels = d.relations.filter((r: any) => r.model === m.name)
+              return <div key={m.name} className="small"><b>{m.name}</b> <Loc x={m} />{rels.length > 0 && <span className="muted"> → {[...new Set(rels.map((r: any) => `${r.target}${r.kind !== 'fk' ? ` (${r.kind})` : ''}`))].join(', ')}</span>}</div>
+            })}
+            {d.models.length > 8 && <button className="link small" onClick={() => setMore(m => ({ ...m, models: !m.models }))}>{more.models ? 'fewer' : `+${d.models.length - 8} more`}</button>}
+          </div>
+        )}
+        {d.largest.length > 0 && <div className="ex-sub"><div className="ex-subh">Largest files</div>{d.largest.slice(0, 5).map((x: any) => <div key={x.file} className="small"><Loc x={x} /> <span className="muted">{Math.round(x.size / 1024)} KB</span></div>)}</div>}
+      </Section>
+      <Section id="history" title="History" summary={introduced ? `since ${introduced.date.slice(0, 7)}${introduced.approx ? ' ≈' : ''} · ${d.recent.length ? `last change ${d.recent[0].date.slice(0, 10)}` : ''}` : d.recent.length ? `last change ${d.recent[0].date.slice(0, 10)}` : ''} hint="When it appeared and who added it, its biggest changes (in the history this clone has), and its latest commits.">
+        {introduced && <div className="small ex-sub">First seen <b>{introduced.date.slice(0, 10)}</b>{introduced.approx ? ' ≈' : ''} by {introduced.commit.author}{introduced.commit.url && <> · <a href={introduced.commit.url} target="_blank" rel="noreferrer">{introduced.commit.pr ? `#${introduced.commit.pr}` : introduced.commit.sha.slice(0, 8)}</a></>} <span className="muted">{introduced.commit.subject}</span><div className="tiny muted">{introduced.source}</div></div>}
+        {milestones && milestones.length > 0 && <div className="ex-sub"><div className="ex-subh" title="By lines changed, in the history this checkout has">Biggest changes</div>{milestones.map(c => <div key={c.sha} className="small ellipsis" title={`${c.subject} · ${c.author}`}><span className="muted">{c.date.slice(0, 10)}</span> {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.pr ? `#${c.pr}` : c.sha.slice(0, 8)}</a> : null} {c.subject}</div>)}</div>}
+        {d.recent.length > 0 && <div className="ex-sub"><div className="ex-subh">Recent commits</div>{d.recent.slice(0, 5).map((c: Commit) => <div key={c.sha} className="small ellipsis" title={`${c.subject} · ${c.author}`}><span className="muted">{c.date.slice(0, 10)}</span> {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.pr ? `#${c.pr}` : c.sha.slice(0, 8)}</a> : null} {c.subject}</div>)}</div>}
+      </Section>
     </div>
   )
 }

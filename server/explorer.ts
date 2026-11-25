@@ -517,7 +517,11 @@ export async function exploreNode(repo: string, id: string) {
   const modelFiles = [...new Set(c.models.map(m => g.models[m].file))]
   const recent = parseLog(await git(g.repo, ['log', '-n', '8', `--format=${FMT}`, '--', c.path]).catch(() => ''), r)
   const link = (file: string, line?: number) => ({ file, line, github: ghUrl(r, 'blob', g.sha, file, line), local: join(g.repo, file) })
-  const ev = (e: Edge) => ({ ...e, evidence: e.evidence.map(x => ({ ...x, ...link(x.file, x.line) })) })
+  // Shared foundations (used by most of the repo) are listed after the links that are specific to this concept.
+  const users = new Map<string, number>()
+  for (const e of g.edges) users.set(e.to, (users.get(e.to) ?? 0) + 1)
+  const hub = (x: string) => (users.get(x) ?? 0) > Math.max(8, g.concepts.length * 0.15)
+  const ev = (e: Edge) => ({ ...e, hub: hub(e.from === c.id ? e.to : e.from), evidence: e.evidence.map(x => ({ ...x, ...link(x.file, x.line) })) })
   return {
     concept: c, sha: g.sha, repo: g.repo, tree: ghUrl(r, 'tree', g.sha, c.path),
     dependsOn: g.edges.filter(e => e.from === c.id).sort((a, b) => b.weight - a.weight).map(ev),

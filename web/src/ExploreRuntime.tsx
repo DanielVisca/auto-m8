@@ -120,7 +120,7 @@ type Dep = { base: string; origin: 'yours' | 'org' | 'third-party' | 'unknown'; 
 export type Runtime = { concept: string; tokens: string[]; argoError: string | null; grafana: string | null; deployments: Dep[]; matchedBy: string }
 
 // Where a concept runs: the deployments, whose code they run, and live numbers from two metric sources side by side.
-export function WhereItRuns({ concept, repos, org, onLoaded }: { concept: string; repos: string[]; org: string | null; onLoaded?: (r: Runtime | null) => void }) {
+export function WhereItRuns({ concept, repos, org, onLoaded, bare, onSummary }: { concept: string; repos: string[]; org: string | null; onLoaded?: (r: Runtime | null) => void; bare?: boolean; onSummary?: (s: string) => void }) {
   const [r, setR] = useState<Runtime | { error: string } | null>(null)
   const [showInfra, setShowInfra] = useState(false)
   useEffect(() => {
@@ -130,13 +130,19 @@ export function WhereItRuns({ concept, repos, org, onLoaded }: { concept: string
       .then(x => { if (!gone) { setR(x); onLoaded?.(x) } }).catch(e => !gone && setR({ error: String(e?.message ?? e) }))
     return () => { gone = true }
   }, [concept, repos.join(',')]) // eslint-disable-line
-  if (!r) return <div className="ex-sec small muted"><h5>Where it runs</h5><i className="spin" /> Asking Argo CD and Grafana… (the first time takes up to a minute)</div>
-  if ('error' in r) return <div className="ex-sec small"><h5>Where it runs</h5><span className="bad">{r.error}</span></div>
+  useEffect(() => {
+    if (!r) return onSummary?.('checking Argo CD…')
+    if ('error' in r) return onSummary?.('error')
+    const yours = r.deployments.filter(d => d.origin === 'yours').length, names = r.deployments.length - yours
+    onSummary?.(yours ? `${yours} app${yours === 1 ? '' : 's'} run your code` : `no app of its own${names ? ` (${names} name match${names === 1 ? '' : 'es'})` : ''}`)
+  }, [r]) // eslint-disable-line
+  if (!r) return <div className="ex-sec small muted">{!bare && <h5>Where it runs</h5>}<i className="spin" /> Asking Argo CD and Grafana… (the first time takes up to a minute)</div>
+  if ('error' in r) return <div className="ex-sec small">{!bare && <h5>Where it runs</h5>}<span className="bad">{r.error}</span></div>
   const mine = r.deployments.filter(d => d.origin !== 'third-party'), infra = r.deployments.filter(d => d.origin === 'third-party')
   return (
     <div className="ex-sec">
-      <h5>Where it runs</h5>
-      <div className="tiny muted">Argo CD apps with “{r.tokens.join('”, “')}” in their name. Only ones marked <b>runs your code</b> are proven to run this repo (their image is tagged with one of its commits); the rest just share the name. Code that's part of a bigger app (like a Django product inside the main web app) has no app of its own, so it won't show here.</div>
+      {!bare && <h5>Where it runs</h5>}
+      {!bare && <div className="tiny muted">Argo CD apps with “{r.tokens.join('”, “')}” in their name. Only ones marked <b>runs your code</b> are proven to run this repo (their image is tagged with one of its commits); the rest just share the name. Code that's part of a bigger app (like a Django product inside the main web app) has no app of its own, so it won't show here.</div>}
       {r.argoError && <div className="small bad">Argo CD: {r.argoError}. Open Sources to connect it.</div>}
       {!r.argoError && !r.deployments.length && <div className="small muted">No Argo CD app is named like this concept. It may run inside another service (look at what's built on it), or as a scheduled job.</div>}
       {mine.length > 0 && !mine.some(d => d.origin === 'yours') && <div className="small warn">None of these run code from your repos, so they're probably unrelated namesakes. This concept likely runs inside a larger app.</div>}
@@ -162,7 +168,7 @@ export type DataRes = { concept: string; tokens: string[]; grafana: string | nul
 const bytes = (n: number | null | undefined) => n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${(n / 1e6).toFixed(0)} MB`
 
 // Datastores and tiers: which ClickHouse clusters and tables hold this concept's data, how big, how full, on what hardware.
-export function DataSection({ concept, repos }: { concept: string; repos: string[] }) {
+export function DataSection({ concept, repos, bare, onSummary }: { concept: string; repos: string[]; bare?: boolean; onSummary?: (s: string) => void }) {
   const [r, setR] = useState<DataRes | { error: string } | null>(null)
   const [all, setAll] = useState(false)
   useEffect(() => {
@@ -172,12 +178,16 @@ export function DataSection({ concept, repos }: { concept: string; repos: string
       .then(x => { if (!gone) setR(x) }).catch(e => !gone && setR({ error: String(e?.message ?? e) }))
     return () => { gone = true }
   }, [concept, repos.join(',')]) // eslint-disable-line
-  if (!r) return <div className="ex-sec small muted"><h5>Data</h5><i className="spin" /> Asking ClickHouse (system tables) and Prometheus…</div>
-  if ('error' in r) return <div className="ex-sec small"><h5>Data</h5><span className="bad">{r.error}</span></div>
+  useEffect(() => {
+    onSummary?.(!r ? 'asking ClickHouse…' : 'error' in r ? 'error' : !r.tables.length ? 'no ClickHouse tables'
+      : `${r.tables.length} table${r.tables.length === 1 ? '' : 's'}${r.clusters.length ? ` · ${r.clusters.slice(0, 2).map(c => `${c.name}${c.disk.max != null ? ` ${pct(c.disk.max)} full` : ''}`).join(', ')}` : ''}`)
+  }, [r]) // eslint-disable-line
+  if (!r) return <div className="ex-sec small muted">{!bare && <h5>Data</h5>}<i className="spin" /> Asking ClickHouse (system tables) and Prometheus…</div>
+  if ('error' in r) return <div className="ex-sec small">{!bare && <h5>Data</h5>}<span className="bad">{r.error}</span></div>
   const tables = all ? r.tables : r.tables.slice(0, 8)
   return (
     <div className="ex-sec small">
-      <h5>Data <span className="muted" title={r.matchedBy}>· ClickHouse tables named in its code or like “{r.tokens.join('”, “')}”</span></h5>
+      {!bare && <h5>Data <span className="muted" title={r.matchedBy}>· ClickHouse tables named in its code or like “{r.tokens.join('”, “')}”</span></h5>}
       {r.clusters.map(c => (
         <div key={c.name} className="ex-dep">
           <div><b>{c.name}</b> <span className="muted">cluster{c.shards != null ? ` · ${c.shards} shards, ${c.replicas} nodes` : ''}{c.ds ? ` · seen via ${c.ds}` : ''}</span></div>
@@ -189,7 +199,7 @@ export function DataSection({ concept, repos }: { concept: string; repos: string
           </div>
         </div>
       ))}
-      {!r.tables.length && <div className="muted">No ClickHouse table is named in this concept's code or named like it{r.datasources?.length ? ` (searched ${r.datasources.map(d => `${d.name}: ${d.tables} tables`).join(', ')})` : ''}.</div>}
+      {!r.tables.length && <div className="muted" title={r.datasources?.length ? `Searched ${r.datasources.map(d => `${d.name}: ${d.tables} tables`).join(', ')}` : undefined}>None of its code names a ClickHouse table, and no table is named like it. Its data may live in Postgres (see its models under Code).</div>}
       {r.tables.length > 0 && (
         <table className="ex-facts ex-tables">
           <thead><tr><th>table</th><th>engine</th><th>size</th><th>rows</th><th>found by</th></tr></thead>
@@ -205,8 +215,7 @@ export function DataSection({ concept, repos }: { concept: string; repos: string
         </table>
       )}
       {r.tables.length > 8 && <button className="link small" onClick={() => setAll(!all)}>{all ? 'fewer' : `+${r.tables.length - 8} more`}</button>}
-      {r.tables.length > 0 && <div className="tiny muted">Sizes are compressed bytes on disk from system.parts; hover for whether they're summed across every replica or on one node. Click for the query in Grafana.</div>}
-      {r.infra && <div className="tiny muted">Tiers from {shortPath(r.infra.path)}@{r.infra.sha} ({r.infra.files} ClickHouse terraform files){r.infra.behind ? <span className={r.infra.behind > 50 ? 'warn' : ''}> · {r.infra.behind.toLocaleString()} commits behind main, so instance types may be out of date: pull it</span> : ''}.</div>}
+      {r.infra && r.clusters.length > 0 && <div className="tiny muted">Tiers from {shortPath(r.infra.path)}@{r.infra.sha} ({r.infra.files} ClickHouse terraform files){r.infra.behind ? <span className={r.infra.behind > 50 ? 'warn' : ''}> · {r.infra.behind.toLocaleString()} commits behind main, so instance types may be out of date: pull it</span> : ''}.</div>}
       {r.problems.map((p, i) => <div key={i} className="tiny"><span className="bad">{p.source}:</span> {p.error}{p.fix && <> · fix: <code>{p.fix}</code></>}</div>)}
     </div>
   )
