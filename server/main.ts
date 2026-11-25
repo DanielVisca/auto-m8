@@ -57,7 +57,7 @@ import { allLabels, applyRules, markSeen, setTitle, deleteRule, detail, editLabe
 import { ask, briefing, generateBrief, home, today } from './brief.ts'
 import { indexStatus, onChange, onTick, posthogStatus, scanAll, startIndexer, syncMyPrs, syncPrs, syncTasks } from './indexer.ts'
 import { clearAnthropicKey, clearPangramKey, clearPosthogKey, pangramKey, posthogKey, setAnthropicKey, setPangramKey, setPosthogKey } from './keychain.ts'
-import { addComment, addResearch, agentEdit, deleteComment, deleteResearch, DOCS_DIR, getDoc, listDocs, newDoc, onDocs, openDoc, pangramCheck, resolveComment, restoreVersion, saveDoc, snapshot, toSlack, updateDoc, version as docVersion, type Author as DocAuthor } from './docs.ts'
+import { addComment, addResearch, agentEdit, deleteComment, deleteResearch, DOCS_DIR, getDoc, listDocs, newDoc, onDocs, openDoc, pangramBalance, pangramCheck, resolveComment, restoreVersion, saveDoc, snapshot, toSlack, updateDoc, version as docVersion, type Author as DocAuthor } from './docs.ts'
 import { runStoreCommand, scouts, skills, tasks } from './posthog.ts'
 import { onError, recentErrors, recordError, resolveErrors } from './errors.ts'
 import { taskOutput } from './taskOutput.ts'
@@ -611,7 +611,7 @@ route('POST', '/api/docs/:id/versions', async (m, req) => { const b = await body
 route('GET', '/api/doc-versions/:id', m => docVersion(m[1]) ?? { error: 'No such version' })
 route('POST', '/api/doc-versions/:id/restore', async (m, req) => { const b = await body(req); return docTry(() => restoreVersion(m[1], authorOf(b))) })
 route('POST', '/api/docs/:id/slack', async (m, req) => { const b = await body(req); return docTry(() => ({ text: toSlack(typeof b.text === 'string' ? b.text : getDoc(m[1]).text) })) })
-route('GET', '/api/writing/pangram', () => ({ configured: !!pangramKey() }))
+route('GET', '/api/writing/pangram', async () => { const k = pangramKey(); return { configured: !!k, balance: k ? await pangramBalance(k) : null } })
 route('POST', '/api/writing/pangram', async (_m, req) => {
   const b = await body(req)
   if (!isLoopback(req)) return { error: 'only from the Mac' }

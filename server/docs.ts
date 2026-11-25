@@ -245,6 +245,7 @@ export async function pangramCheck(text: string, key: string) {
   const base = 'https://text.external-api.pangram.com'
   const headers = { 'x-api-key': key, 'Content-Type': 'application/json' }
   const start = await fetch(`${base}/task`, { method: 'POST', headers, body: JSON.stringify({ text, model: 'default' }), signal: AbortSignal.timeout(30_000) })
+  if (start.status === 402) throw new Error('Your Pangram account has no credits. Add credits in the Pangram API dashboard (text costs $0.05 per 100 words), then check again.')
   if (!start.ok) throw new Error(`Pangram said ${start.status}: ${(await start.text()).slice(0, 200)}`)
   const { task_id } = await start.json() as any
   for (let i = 0; i < 60; i++) {
@@ -260,4 +261,13 @@ export async function pangramCheck(text: string, key: string) {
     return { verdict: r.prediction_short, headline: r.headline, prediction: r.prediction, fraction_ai: r.fraction_ai, fraction_ai_assisted: r.fraction_ai_assisted, fraction_human: r.fraction_human, version: r.version, windows, at: now() }
   }
   throw new Error('Pangram took too long; try again')
+}
+
+// Your Pangram credit balance in dollars (reading it costs nothing). Null when Pangram can't be reached.
+export async function pangramBalance(key: string): Promise<number | null> {
+  try {
+    const r: any = await (await fetch('https://text.external-api.pangram.com/balance', { headers: { 'x-api-key': key }, signal: AbortSignal.timeout(10_000) })).json()
+    const n = Number(r?.available_balance_usd)
+    return Number.isFinite(n) ? n : null
+  } catch { return null }
 }

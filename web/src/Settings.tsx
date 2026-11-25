@@ -514,19 +514,19 @@ function PosthogKey({ status, settings, save }: { status: any; settings: any; sa
 
 // Pangram: the AI-text check in the writing editor. Opt-in, your own key, kept in the keychain.
 function PangramKey() {
-  const { data, reload } = useLive<{ configured: boolean }>('/api/writing/pangram')
+  const { data, reload } = useLive<{ configured: boolean; balance: number | null }>('/api/writing/pangram')
   const [key, setKey] = useState('')
   const [msg, setMsg] = useState('')
   return (
     <div className="line wrap">
       <span className={`dot ${data?.configured ? 'ok' : 'pending'}`} />
       <span className="line-label">Pangram</span>
-      <span className="grow ellipsis">{data?.configured ? 'Key saved · AI-text check on in the writing editor' : 'Optional: an API key turns on the AI-text check in the writing editor'}</span>
+      <span className="grow ellipsis">{data?.configured ? 'Key saved' + (data.balance != null ? ' · $' + data.balance.toFixed(2) + ' credit (about ' + Math.floor(data.balance / 0.05 * 100).toLocaleString() + ' words)' : '') : 'Optional: an API key turns on the AI-text check in the writing editor'}</span>
       <input type="password" placeholder={data?.configured ? 'replace key…' : 'Pangram API key'} value={key} onChange={e => setKey(e.target.value)} />
       <button disabled={!key} onClick={async () => { setMsg('Checking…'); const r = await post('/api/writing/pangram', { key }); setKey(''); setMsg(r.error ?? r.note ?? 'Saved'); reload() }}>Save</button>
       {data?.configured && <button className="link small" onClick={async () => { await post('/api/writing/pangram', { clear: true }); setMsg(''); reload() }}>remove</button>}
       {msg && <span className="muted small">{msg}</span>}
-      <div className="muted small full">Get one at <a href="https://www.pangram.com" target="_blank" rel="noreferrer">pangram.com</a> (paid API). Text is sent to Pangram only when you press Check on a doc. Stored in the macOS keychain, never in a file.</div>
+      <div className="muted small full">Get one at <a href="https://www.pangram.com" target="_blank" rel="noreferrer">pangram.com</a> Checks use prepaid credits ($0.05 per 100 words); a free account starts with none. Text is sent to Pangram only when you press Check on a doc. Stored in the macOS keychain, never in a file.</div>
     </div>
   )
 }

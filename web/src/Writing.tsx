@@ -308,7 +308,7 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
             {tab === 'versions' && <Versions id={id} versions={data.versions} current={textNow} onRestored={reload} before={save} />}
             {tab === 'agent' && <AgentPanel doc={doc} selection={selection} settings={settings} onOpenChat={onOpenChat} />}
             {tab === 'check' && <CheckPanel id={id} grammar={grammar} setGrammar={setGrammar} tells={tells} setTells={setTells} dialect={dialect} setDialect={setDialect}
-              ai={ai} setAi={r => { setAi(r); keep(`perch.writing.ai.${id}`, r) }} text={textNow} onJump={jump} />}
+              ai={ai} setAi={r => { setAi(r); keep(`perch.writing.ai.${id}`, r) }} text={textNow} selection={selection} onJump={jump} />}
           </div>
         </aside>
       )}
@@ -494,20 +494,25 @@ function AgentPanel({ doc, selection, settings, onOpenChat }: { doc: Doc; select
   )
 }
 
-function CheckPanel({ id, grammar, setGrammar, tells, setTells, dialect, setDialect, ai, setAi, text, onJump }: {
+function CheckPanel({ id, grammar, setGrammar, tells, setTells, dialect, setDialect, ai, setAi, text, selection, onJump }: {
   id: string; grammar: boolean; setGrammar: (b: boolean) => void; tells: boolean; setTells: (b: boolean) => void; dialect: number; setDialect: (n: number) => void
-  ai: AiResult | null; setAi: (r: AiResult | null) => void; text: () => string; onJump: (from: number | null, to?: number | null) => void
+  ai: AiResult | null; setAi: (r: AiResult | null) => void; text: () => string; selection: { from: number; text: string } | null; onJump: (from: number | null, to?: number | null) => void
 }) {
-  const { data: pg, reload } = useLive<{ configured: boolean }>('/api/writing/pangram')
+  const { data: pg, reload } = useLive<{ configured: boolean; balance: number | null }>('/api/writing/pangram')
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const run = async () => {
+  // The whole doc, or just the selected passage (cheaper: Pangram charges per word).
+  const run = async (part?: { from: number; text: string }) => {
     setBusy(true); setErr(null)
-    const r: any = await post(`/api/docs/${id}/ai-check`, { text: text() }).catch(e => ({ error: String(e) }))
+    const r: any = await post(`/api/docs/${id}/ai-check`, { text: part ? part.text : text() }).catch(e => ({ error: String(e) }))
     setBusy(false)
-    if (r?.error) setErr(r.error); else setAi(r)
+    if (r?.error) setErr(r.error)
+    else setAi(part ? { ...r, windows: r.windows.map((w: AiWindow) => ({ ...w, start: w.start == null ? null : w.start + part.from, end: w.end == null ? null : w.end + part.from })) } : r)
+    reload()
   }
+  const words = countWords(text()), selWords = selection ? countWords(selection.text) : 0
+  const price = (n: number) => `$${(Math.ceil(n / 100) * 0.05).toFixed(2)}` // Pangram text: $0.05 per 100 words
   const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`
   return (
     <div className="doc-check">
@@ -521,8 +526,10 @@ function CheckPanel({ id, grammar, setGrammar, tells, setTells, dialect, setDial
       <div className="muted small">Pangram is the detector with the lowest false-positive rates in independent tests. Nothing is perfect: treat its verdict as a signal, not proof. Checking sends this doc's text to Pangram with your key.</div>
       {pg && !pg.configured && <div className="row-flex"><input className="grow small" type="password" value={key} placeholder="Pangram API key" onChange={e => setKey(e.target.value)} />
         <button className="small" disabled={!key.trim()} onClick={async () => { const r = await post('/api/writing/pangram', { key }); setKey(''); setErr(r?.error ?? null); reload() }}>Save</button></div>}
-      {pg?.configured && <div className="row-flex"><button className="primary small" disabled={busy} onClick={run}>{busy ? 'Checking…' : ai ? 'Check again' : 'Check with Pangram'}</button>
+      {pg?.configured && <div className="row-flex wrap"><button className="primary small" disabled={busy || !words} onClick={() => run()}>{busy ? 'Checking…' : `Check the doc · ~${price(words)}`}</button>
+        {selection && selWords > 0 && <button className="small" disabled={busy} onClick={() => run({ from: selection.from, text: selection.text })}>Check selection · ~{price(selWords)}</button>}
         <button className="link small" onClick={async () => { await post('/api/writing/pangram', { clear: true }); reload() }}>Remove key</button></div>}
+      {pg?.configured && pg.balance != null && <div className={`small ${pg.balance < 0.05 ? 'error' : 'muted'}`}>Pangram credit: ${pg.balance.toFixed(2)}{pg.balance < 0.05 ? ': none left. Add credits in the Pangram API dashboard to check.' : ` (about ${Math.floor(pg.balance / 0.05 * 100).toLocaleString()} words)`}</div>}
       {err && <div className="small error">{err}</div>}
       {ai && <div className="doc-ai">
         <div><b>{ai.verdict}</b> <span className="muted small">{ai.headline} · {ago(ai.at)}</span></div>
