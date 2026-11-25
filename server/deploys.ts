@@ -96,3 +96,51 @@ export async function listDeploys(days = 14) {
   cache = { at: Date.now(), days, data }
   return data
 }
+
+// ---------- alert: merged but slow to reach production ----------
+// posthog's p50/p90 merge → prod is about 1h, so 3h without every prod region is well outside normal.
+// Other repos have no per-environment signal, only the shepherd's stage: give them a day.
+export const SLOW_AFTER = { bot: 3 * 3600_000, other: STUCK_AFTER }
+const WATCH_DAYS = 7 // older merges are history, not alerts
+export const deployKey = (url: string) => `deploy:${url}`
+
+export function slowDeploys(prs: any[], now = Date.now()) {
+  return prs.filter(p => {
+    if (now - p.mergedAt > WATCH_DAYS * 86400_000) return false
+    if (p.state === 'failed') return true
+    if (p.state === 'deployed' || p.state === 'unknown') return false // no signal is not an alert
+    return now - p.mergedAt > (p.source === 'deploy-bot' ? SLOW_AFTER.bot : SLOW_AFTER.other)
+  })
+}
+
+const envLine = (p: any) => p.envs?.length ? p.envs.map((e: any) => `${e.env}: ${e.status}${e.at ? ` at ${new Date(e.at).toISOString().slice(0, 16)}Z` : ''}`).join(', ') : `shepherd stage only (${p.source ?? 'no source'})`
+
+// Report each slow or failed deploy to Needs me (an agent checks it before it reaches the user),
+// and close the ones that have since landed. Stable title and context: polling never resets an item.
+export async function checkSlowDeploys(now = Date.now()) {
+  const { reportNeed, needByKey, updateNeed, activeNeed } = await import('./needsstore.ts')
+  const d = await listDeploys(14)
+  const slow = slowDeploys(d.prs, now)
+  for (const p of slow) {
+    const n = p.url.split('/').pop(), repo = p.repo?.replace(/^PostHog\//, '')
+    reportNeed({
+      key: deployKey(p.url), source: 'deploy', url: p.url,
+      title: `${p.state === 'failed' ? 'Deploy failed' : 'Not in production yet'}: ${repo}#${n} ${p.title}`.slice(0, 240),
+      context: [
+        `${p.url} merged ${new Date(p.mergedAt).toISOString().slice(0, 16)}Z and is ${p.state === 'failed' ? 'failing to deploy' : 'not live in every production region'}.`,
+        `Where it is: ${envLine(p)}.`,
+        `Normal for ${p.source === 'deploy-bot' ? 'posthog is about 1h merge → prod (alert after 3h)' : 'this repo: alert after 24h, from the shepherd stage'}.`,
+        'Find out why before asking the user: the deploy bot comment\'s charts workflow run (gh run view), argocd app get/history for the service, the Kargo stage, or the version pin that should carry it (gh api repos/<org>/<repo>/compare/<pinned>...<merge sha>).',
+        'Resolve with evidence if it is live now. If a deploy is blocked on something only the user can do (approve a promotion, a manual bump PR), say exactly that.',
+      ].join('\n'),
+    }, now)
+  }
+  // Landed since: close with the evidence.
+  const flagged = new Set(slow.map(p => p.url))
+  for (const p of d.prs) {
+    if (flagged.has(p.url) || p.state !== 'deployed') continue
+    const old = needByKey(deployKey(p.url))
+    if (old && activeNeed(old)) updateNeed(old.id, { status: 'resolved', evidence: `Live now: ${envLine(p)}.` }, 'source', now)
+  }
+  return slow.length
+}

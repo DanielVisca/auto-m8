@@ -33,3 +33,18 @@ test('no prod env after a day is stuck; no signal is unknown, never deployed', (
   assert.equal(deployState(merged, [], 'verified', merged + 2 * 3600_000).state, 'deployed')
   assert.equal(deployState(merged, [], 'deploying', merged + 2 * 86400_000).state, 'stuck')
 })
+
+test('slow deploys: posthog after 3h, others after a day, failed at once, no-signal never', async () => {
+  const { slowDeploys } = await import('./deploys.ts')
+  const now = merged + 4 * 3600_000
+  const prs = [
+    { url: 'a', mergedAt: merged, state: 'deploying', source: 'deploy-bot' },
+    { url: 'b', mergedAt: merged, state: 'deploying', source: 'shepherd' },
+    { url: 'c', mergedAt: now - 600_000, state: 'failed', source: 'deploy-bot' },
+    { url: 'd', mergedAt: merged, state: 'unknown', source: null },
+    { url: 'e', mergedAt: merged, state: 'deployed', source: 'deploy-bot' },
+    { url: 'f', mergedAt: now - 30 * 86400_000, state: 'stuck', source: 'shepherd' },
+    { url: 'g', mergedAt: now - 2 * 86400_000, state: 'stuck', source: 'shepherd' },
+  ]
+  assert.deepEqual(slowDeploys(prs, now).map(p => p.url), ['a', 'c', 'g'])
+})

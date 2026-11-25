@@ -78,7 +78,7 @@ import { beat, getDraft as getComposeDraft, handoff, macIdleMs, mobileStatus, no
 import { backfillStartedBy, focusSuggestions, onListChange } from './conversations.ts'
 import { openFile, openIn, targets, type Target } from './open.ts'
 import { enrich } from './enrich.ts'
-import { listDeploys } from './deploys.ts'
+import { checkSlowDeploys, listDeploys } from './deploys.ts'
 import { addAgent, fixCi, orchestrate, prWorkers, deepAudit, preview as prPreview, pushThrough, snooze } from './pr.ts'
 import { compare, judge, linkGroup } from './compare.ts'
 import { fork, restoreFiles, rewind, snapshotsFor } from './branch.ts'
@@ -1323,6 +1323,10 @@ setInterval(sweepAttention, 10 * 60_000).unref()
 const checkNeeds = () => sweepNeeds().then(() => broadcast('home')).catch(e => console.error('needs', e))
 setTimeout(checkNeeds, 15_000).unref()
 setInterval(checkNeeds, 60_000).unref()
+// Merged PRs slow to reach production go to Needs me (an agent checks first); landed ones close themselves.
+const checkDeploys = () => { if (isPaused()) return; checkSlowDeploys().then(n => { if (n) broadcast('home') }).catch(e => console.error('deploys', e?.message)) }
+setTimeout(checkDeploys, 3 * 60_000).unref()
+setInterval(checkDeploys, 15 * 60_000).unref()
 // Stalled agents are nudged to carry on (twice a day at most) instead of landing in Needs me.
 const sweepStalls = () => { if (isPaused()) return; try { const ids = resumeStalls(list({ states: ['active', 'idle', 'waiting'], limit: 400, focus: false }).conversations as any); if (ids.length) { console.log(`[stalls] resumed ${ids.length}`); broadcast('conversations') } } catch (e) { console.error('stalls', e) } }
 setTimeout(sweepStalls, 2 * 60_000).unref()
