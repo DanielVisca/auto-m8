@@ -195,6 +195,11 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
   const [state, setState] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   const { data: words } = useLive<{ words: string[] }>('/api/writing/words', ['docs'])
   useEffect(() => {
+    // Words added before the dictionary was shared lived in this window only: move them over once.
+    const old = local<string[]>('perch.writing.words', [])
+    if (old.length) { old.forEach(w => post('/api/writing/words', { add: w })); try { localStorage.removeItem('perch.writing.words') } catch {} }
+  }, [])
+  useEffect(() => {
     if (!words) return
     const before = dictionary.size
     for (const w of words.words) dictionary.add(w.toLowerCase())
