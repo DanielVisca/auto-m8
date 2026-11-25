@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, importsOf, namesIt, prOf, scan } from './explorer.ts'
+import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, importsOf, MECHANICAL, namesIt, prOf, scan } from './explorer.ts'
 
 // A tiny product repo: dashboards are built on insights, alerts on insights, everything on core.
 function fixture() {
@@ -120,6 +120,10 @@ test('timeline orders concept and link introductions with authors and PR numbers
   // A concept is only “mentioned” when the subject names it as a word.
   assert.ok(namesIt('feat: Dashboards v2 (#9)', 'dashboard'))
   assert.ok(!namesIt('add alertmanager config', 'alert'))
+  // Blame on a line rewritten by tooling isn't when the link was made.
+  for (const m of ['chore: upgraded Ruff linter (#18188)', 'chore(frontend): Sort imports (#18663)', 'chore(dashboards): move dashboard models and API to product (#51924)', 'chore(flags): Add type annotations and fix mypy baseline'])
+    assert.ok(MECHANICAL.test(m), m)
+  assert.ok(!MECHANICAL.test('feat(bi): Insight variables rollups on dashboards (#25545)'))
 })
 
 test('checkRepo accepts git repos inside home only', async () => {

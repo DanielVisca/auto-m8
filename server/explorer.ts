@@ -382,6 +382,39 @@ function ghCommit(r: { owner: string; name: string }, c: any): Commit {
   const subject = String(c.commit?.message ?? '').split('\n')[0], pr = prOf(subject)
   return { sha: c.sha, date: c.commit?.author?.date ?? '', author: c.commit?.author?.name ?? c.author?.login ?? '', subject, pr, url: pr ? ghUrl(r, 'pr', pr) : ghUrl(r, 'commit', c.sha) }
 }
+// GitHub blame: the commit that last wrote a line, even before a shallow clone's cut-off (it follows renames).
+// One GraphQL query per file at one commit, cached; the PR comes from the "(#123)" in the subject, because
+// asking GitHub for the PR as well pushes blame on a big repo past its 10s query limit.
+type Blame = { start: number; end: number; c: Commit }[]
+const blameCache = new Map<string, Promise<{ lines: string[]; ranges: Blame } | null>>()
+function ghBlame(r: { owner: string; name: string }, ref: string, file: string) {
+  const k = `${r.owner}/${r.name}@${ref}:${file}`
+  if (!blameCache.has(k)) blameCache.set(k, (async () => {
+    try {
+      // The file as GitHub has it at that commit, so line numbers match the blame (the checkout may differ).
+      const content = Buffer.from(JSON.parse(await gh(['api', `repos/${r.owner}/${r.name}/contents/${file.split('/').map(encodeURIComponent).join('/')}?ref=${ref}`])).content ?? '', 'base64').toString('utf8')
+      const q = `query($o:String!,$n:String!,$e:String!,$p:String!){repository(owner:$o,name:$n){object(expression:$e){... on Commit{blame(path:$p){ranges{startingLine endingLine commit{oid committedDate messageHeadline author{name}}}}}}}}`
+      const j = JSON.parse(await gh(['api', 'graphql', '-f', `query=${q}`, '-f', `o=${r.owner}`, '-f', `n=${r.name}`, '-f', `e=${ref}`, '-f', `p=${file}`], 25_000))
+      const ranges = (j?.data?.repository?.object?.blame?.ranges ?? []).map((x: any) => {
+        const pr = prOf(x.commit.messageHeadline ?? '')
+        return { start: x.startingLine, end: x.endingLine, c: { sha: x.commit.oid, date: x.commit.committedDate, author: x.commit.author?.name ?? '', subject: x.commit.messageHeadline ?? '', pr, url: pr ? ghUrl(r, 'pr', pr) : ghUrl(r, 'commit', x.commit.oid) } }
+      })
+      return { lines: content.split('\n'), ranges }
+    } catch { return null }
+  })())
+  return blameCache.get(k)!
+}
+async function blameLine(r: { owner: string; name: string }, ref: string, file: string, text: string): Promise<Commit | null> {
+  const b = await ghBlame(r, ref, file)
+  const needle = text.trim()
+  if (!b || !needle) return null
+  const i = b.lines.findIndex(l => l.trim() === needle) + 1 || b.lines.findIndex(l => l.includes(needle)) + 1
+  return i ? b.ranges.find(x => x.start <= i && i <= x.end)?.c ?? null : null
+}
+// Commits that rewrite lines without creating them: moves, renames, linters, formatters, import sorting, upgrades.
+// Blame stops at them, so the real link is older.
+export const MECHANICAL = /\b(move[sd]?|moving|renam\w*|relocat\w*|extract\w*|migrat\w* .* to|ruff|black|prettier|eslint|isort|sort(ed)? imports|lint\w*|format\w*|mypy|pyright|upgrad\w*|bump\w*|codemod|type annotations)\b/i
+
 const earliest = (...cs: (Commit | null)[]) => cs.filter(Boolean).sort((a, b) => a!.date.localeCompare(b!.date))[0] ?? null
 const termFor = (c: Concept) => { const n = c.name.replace(/[_-]/g, ' ').replace(/ies$/, 'y').replace(/s$/, ''); return n.length >= 4 && !GENERIC.has(c.name.toLowerCase()) && !GENERIC.has(n.toLowerCase()) ? n : null }
 
@@ -389,6 +422,10 @@ export async function buildTimeline(repo: string, nodes: Concept[], edges: Edge[
   const r = await remoteOf(repo)
   const shallow = (await git(repo, ['rev-parse', '--is-shallow-repository'], 5000).catch(() => 'false')).trim() === 'true'
   const useGh = shallow && !!r && await gh(['auth', 'status'], 8000).then(() => true, () => false)
+  // A commit GitHub has that's closest to this checkout (the branch may be unpushed): where to read blame.
+  let ghRef: string | null = null
+  if (useGh) for (const ref of ['origin/HEAD', 'origin/master', 'origin/main']) { const m = (await git(repo, ['merge-base', 'HEAD', ref], 8000).catch(() => '')).trim(); if (m) { ghRef = m; break } }
+  if (useGh && !ghRef) ghRef = 'HEAD'
   // A shallow clone's cut-off commits have no parents, so they mark where the history we have begins.
   const boundary = shallow ? parseLog(await git(repo, ['log', `--format=${FMT}`, '--max-parents=0']).catch(() => ''), r).map(c => c.date).sort()[0] ?? null : null
   const source = useGh ? 'GitHub (this clone is shallow)' : shallow ? `local git (shallow clone: history only since ${boundary?.slice(0, 10)})` : 'local git'
@@ -421,11 +458,25 @@ export async function buildTimeline(repo: string, nodes: Concept[], edges: Edge[
         first = earliest(first, c)
       }
       how = 'first commit adding the evidence line'
+    } else if (useGh && ghRef) {
+      // Shallow clone: GitHub blame on the evidence lines; the earliest one is when this link was written.
+      for (const ev of e.evidence.slice(0, 3)) {
+        const needle = e.kind === 'fk' ? ev.text.split(': ').slice(1).join(': ') : ev.text
+        first = earliest(first, await blameLine(r!, ghRef, ev.file, needle).catch(() => null))
+      }
+      if (first) {
+        const a = intro.get(e.from), b = intro.get(e.to), floor = a && b ? (a.date > b.date ? a : b) : null
+        if (MECHANICAL.test(first.subject) && floor && floor.date < first.date) {
+          // Blame landed on a rewrite: place the link when both ends existed, and say the range.
+          how = `between ${floor.date.slice(0, 7)} (both ends existed) and ${first.date.slice(0, 7)} (the line was rewritten by ${first.pr ? `#${first.pr} ` : ''}“${first.subject.slice(0, 60)}”)`
+          first = floor
+        } else how = MECHANICAL.test(first.subject) ? `GitHub blame: line last rewritten by “${first.subject.slice(0, 60)}”, so the link is older` : 'GitHub blame: when the line making this link was written'
+      }
     }
     const a = intro.get(e.from), b = intro.get(e.to)
     // Without full history: the link can't be older than either end, so place it when the later one appeared.
     if (!first && a && b) { first = a.date > b.date ? a : b; how = 'estimated: when both ends existed' }
-    if (first) t.events.push({ date: first.date, kind: 'edge', id: `${e.from}→${e.to}`, from: e.from, to: e.to, approx: shallow || how.startsWith('estimated'), source: how, commit: first })
+    if (first) t.events.push({ date: first.date, kind: 'edge', id: `${e.from}→${e.to}`, from: e.from, to: e.to, approx: how.startsWith('estimated') || how.startsWith('between') || how.includes('rewritten'), source: how, commit: first })
     step()
   }
   for (const c of nodes) {
@@ -491,7 +542,7 @@ export async function exploreGraph(repo: string, focus?: string | null, hubs = f
 export async function exploreTimeline(repo: string, focus?: string | null, onUpdate?: () => void) {
   const g = await graphFor(repo)
   const f = focusGraph(g, focus)
-  const key = keyOf(g.repo, g.sha, focus ?? '', f.nodes.map(n => n.id).join(','))
+  const key = keyOf('timeline-v2-blame', g.repo, g.sha, focus ?? '', f.nodes.map(n => n.id).join(',')) // bump when dating changes, so saved timelines are rebuilt
   const file = DIR && join(DIR, `timeline-${key}.json`)
   const have = timelines.get(key)
   if (have) return have
