@@ -9,7 +9,7 @@
 // The model switches inside the running session (a set_model control message), so the agent keeps
 // its whole context.
 import { intentOf } from './turns.ts'
-import { capsOf } from './account.ts'
+import { capsOf, markSubCapped } from './account.ts'
 
 // Fable is pin-only: Auto never picks it (it tops out at Opus), but a chat pinned to Fable falls
 // back down this list when Fable hits its cap.
@@ -75,7 +75,8 @@ export function capFrom(text: string): number | null {
   }
   return Date.now() + 60 * 60_000 // no time given: try again in an hour
 }
-export const markCapped = (tier: Tier | 'all', until: number) => { const capped = capsOf(); for (const t of tier === 'all' ? ORDER : [tier]) capped.set(t, Math.max(until, capped.get(t) ?? 0)) }
+// A cap applies to the subscription that hit it; the router sees a tier as capped once every subscription is (account.ts).
+export const markCapped = (tier: Tier | 'all', until: number, sub = 'main') => markSubCapped(sub, tier === 'all' ? ['all'] : [tier], until)
 // Claude and Codex are peers (both on plans you already pay for) and cover for each other:
 // - every Claude model capped, or Opus/Fable capped for heavy work: Codex takes the message;
 // - Codex capped or signed out (a pinned Codex chat or one Codex was covering): Claude takes it;

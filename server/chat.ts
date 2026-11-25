@@ -8,7 +8,8 @@ import { hold, shouldHold } from './pausehold.ts'
 import { abandonTurns, contextTokens, isCorrection, engineFor, requeueTurns, setEngine, setTurbo, settleTurns, startTurn, turboFor, turnEvent } from './turns.ts'
 import { agentEnv, localJob, localRoomSync, localUpSync } from './local.ts'
 import { usageNow, noteClaude } from './usage.ts'
-import { billing, claudeEnv, noteChatAccount, type Billing } from './account.ts'
+import { billing, claudeEnv, noteChatAccount, pickSub, shareFolder, subDir, subOf, subUsage, type Billing } from './account.ts'
+import { subscriptionBudget } from './subscription-budget.ts'
 import { chooseProvider } from './subscription-budget.ts'
 import { runTextJobs } from './job-fallback.ts'
 import { allCapped, available, capFrom, capScope, claudeFixed, isCodex, isLocal, markCapped, route, tierLabel, wantsCodex, type Tier } from './router.ts'
@@ -73,6 +74,7 @@ export type Chat = {
   codexQueue?: SendOpts[] // messages that arrived while it ran
   handoffQueue?: SendOpts[] // reserve message order while checking the next provider
   account?: Billing // how its claude process is billed (account.ts); unset on a local model
+  sub?: string // which Claude subscription its process runs on (account.ts subs); unset on local/Codex
 }
 
 export const chats = new Map<string, Chat>()
@@ -89,6 +91,15 @@ const SIGN_HOOK = { PreToolUse: [
 const agentLabel = (id: string) => {
   const by = get<{ by: string | null }>('select by from perch_started where id = ?', id)?.by
   return !by || by === 'you' || by === 'agent' ? 'auto-m8 chat' : `auto-m8 ${by}`
+}
+
+// Why Auto left a subscription, in a few words for the chat's note.
+function subWhy(from: string | undefined, tier: string) {
+  const u = from ? subUsage(from) : null, top = u?.windows.slice().sort((a, b) => b.pct - a.pct)[0]
+  if (!from) return 'your pick'
+  if (u?.blocked) return `${subOf(from).label} is at its limit`
+  if (top && subscriptionBudget(u, tier).pressure > 1) return `${subOf(from).label} is at ${Math.round(top.pct * 100)}% of its ${top.label}, ahead of pace`
+  return `switched from ${subOf(from).label}`
 }
 
 export function childEnv(configDir?: string, extra?: NodeJS.ProcessEnv) {
@@ -212,9 +223,9 @@ function systemPrompt(context: boolean, id?: string, turbo = false) {
 const RUN = join(DATA_DIR, 'run')
 mkdirSync(RUN, { recursive: true })
 const files = (id: string) => ({ fifo: join(RUN, `${id}.in`), out: join(RUN, `${id}.out`), meta: join(RUN, `${id}.json`) })
-type Meta = { id: string; pid: number; cwd: string; mode: string; context: boolean; turbo: boolean; engine?: string; tier?: Tier | null; profile?: string[]; offset: number; state: Chat['state']; at: number; account?: Billing }
+type Meta = { id: string; pid: number; cwd: string; mode: string; context: boolean; turbo: boolean; engine?: string; tier?: Tier | null; profile?: string[]; offset: number; state: Chat['state']; at: number; account?: Billing; sub?: string }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
-const saveMeta = (c: Chat) => { if (c.proc) try { writeFileSync(files(c.id).meta, JSON.stringify({ id: c.id, pid: c.proc.pid, cwd: c.cwd, mode: c.mode, context: c.context, turbo: c.turbo, engine: c.engine, tier: c.tier, profile: c.profile, offset: c.proc.offset, state: c.state, at: Date.now(), account: c.account } satisfies Meta)) } catch {} }
+const saveMeta = (c: Chat) => { if (c.proc) try { writeFileSync(files(c.id).meta, JSON.stringify({ id: c.id, pid: c.proc.pid, cwd: c.cwd, mode: c.mode, context: c.context, turbo: c.turbo, engine: c.engine, tier: c.tier, profile: c.profile, offset: c.proc.offset, state: c.state, at: Date.now(), account: c.account, sub: c.sub } satisfies Meta)) } catch {} }
 const forget = (id: string) => { for (const f of Object.values(files(id))) rmSync(f, { force: true }) }
 
 export type Runner = { pid: number; offset: number; write: (line: string) => void; kill: (sig?: NodeJS.Signals) => void; stop: () => void }
@@ -278,7 +289,7 @@ function attach(c: Chat, pid: number, offset: number): Runner {
       if (!line.trim()) continue
       let ev: ChatEvent
       try { ev = JSON.parse(line) } catch { c.stderr = (c.stderr + line + '\n').slice(-4000); continue }
-      if (ev.type === 'rate_limit_event') noteClaude(ev, Date.now())
+      if (ev.type === 'rate_limit_event') noteClaude(ev, Date.now(), c.sub ?? 'main')
       turnEvent(c.id, ev) // first: it adds the turn's own cost (perch_cost) for the chat to show
       emit(c, ev)
       // Claude Code starts turns on its own too: a background task finishing, or a message that
@@ -352,7 +363,12 @@ function start(c: Chat, resume: boolean) {
   }
   // How it is billed (account.ts): your Claude Code login, or your API key when one is set.
   c.account = local ? undefined : billing()
-  noteChatAccount(c.id, c.account ?? 'local')
+  // Which Claude subscription: a PostHog Code session keeps its own folder; otherwise Auto's pick.
+  const sourceDir = configDirFor(c.id)
+  c.sub = local || sourceDir ? undefined : pickSub(c.tier ?? 'sonnet', c.sub)
+  const dir = sourceDir ?? (c.sub && c.sub !== 'main' ? subDir(c.sub) : undefined)
+  if (dir && c.sub) shareFolder(dir)
+  noteChatAccount(c.id, local ? 'local' : c.account === 'login' && c.sub && c.sub !== 'main' ? `login:${c.sub}` : c.account!)
   const f = files(c.id)
   forget(c.id)
   execFileSync('mkfifo', [f.fifo])
@@ -360,7 +376,7 @@ function start(c: Chat, resume: boolean) {
   // Detached, in its own process group: it keeps running if perch stops.
   const clean = !c.context && !c.profile
   if (clean) mkdirSync(c.cwd, { recursive: true })
-  const proc = spawn('claude', args, { cwd: existsSync(c.cwd) ? c.cwd : settings.chat.cwd, env: childEnv(configDirFor(c.id), { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: agentLabel(c.id), PERCH_ORIGIN_MARKER: !clean && originFor(chatSubject(c.id)) ? originMarker(originFor(chatSubject(c.id))!) : '', ...(clean ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}), ...(local ? agentEnv(c.engine) : claudeEnv()) }), stdio: [fdIn, fdOut, fdOut], detached: true })
+  const proc = spawn('claude', args, { cwd: existsSync(c.cwd) ? c.cwd : settings.chat.cwd, env: childEnv(dir, { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: agentLabel(c.id), PERCH_ORIGIN_MARKER: !clean && originFor(chatSubject(c.id)) ? originMarker(originFor(chatSubject(c.id))!) : '', ...(clean ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}), ...(local ? agentEnv(c.engine) : claudeEnv()) }), stdio: [fdIn, fdOut, fdOut], detached: true })
   closeSync(fdIn); closeSync(fdOut)
   proc.unref()
   proc.on('error', () => {}) // reported through the exit check
@@ -399,7 +415,7 @@ export function reattachChats(resumeLost: (id: string) => void) {
     let wrote = m.at ?? Date.now()
     try { wrote = Math.max(wrote, statSync(files(m.id).out).mtimeMs) } catch {}
     const since = m.state === 'running' ? Date.now() : Math.min(Date.now(), wrote) // running: keep the stall watchdog's grace
-    const c: Chat = { id: m.id, cwd: m.cwd, proc: null, state: m.state === 'exited' ? 'idle' : m.state, turn: [], listeners: new Set(), lastUsed: since, mode: m.mode, context: m.context, stderr: '', profile: m.profile, turbo: m.turbo, engine: m.engine ?? '', tier: m.tier ?? null, pending: [], lastOutput: since, account: m.account }
+    const c: Chat = { id: m.id, cwd: m.cwd, proc: null, state: m.state === 'exited' ? 'idle' : m.state, turn: [], listeners: new Set(), lastUsed: since, mode: m.mode, context: m.context, stderr: '', profile: m.profile, turbo: m.turbo, engine: m.engine ?? '', tier: m.tier ?? null, pending: [], lastOutput: since, account: m.account, sub: m.sub }
     for (const l of waiting.get(m.id) ?? []) c.listeners.add(l)
     waiting.delete(m.id)
     chats.set(m.id, c)
@@ -546,7 +562,13 @@ export function send(opts: SendOpts): string {
   // You added or removed the API key: restart this idle process so it picks up the new billing.
   // Same session (--resume), same config dir, so the context carries over.
   const now = c.proc && c.account && c.state !== 'running' && !isLocal(c.engine) ? billing() : null
-  if (now && now !== c.account) {
+  // Auto (or your pin) wants another Claude subscription: same restart, same session, so nothing is lost.
+  const subNow = c.proc && c.sub && c.state !== 'running' && !isLocal(c.engine) && !opts.profile ? pickSub(c.tier ?? 'sonnet', c.sub) : null
+  if (subNow && subNow !== c.sub) {
+    emit(c, { type: 'perch_notice', text: `Continuing on Claude · ${subOf(subNow).label} (${subWhy(c.sub, c.tier ?? 'sonnet')}). Same conversation, tools and context.` })
+    const old = c.proc!; c.proc = null; old.kill(); old.stop()
+    resume = true
+  } else if (now && now !== c.account) {
     const old = c.proc!; c.proc = null; old.kill(); old.stop()
     resume = true
   }
@@ -577,8 +599,16 @@ function resumeHandoff(c: Chat, engine: string) {
 
 function onCap(c: Chat, until: number, scope: Tier | 'all' = 'all', unanswered: Chat['pending'] = []) {
   const was = c.tier!
-  markCapped(scope === 'all' ? 'all' : was, until)
+  markCapped(scope === 'all' ? 'all' : was, until, c.sub ?? 'main')
   const at = new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  // Another Claude subscription still has room for this model: move there, same tier, same session.
+  const other = c.sub ? pickSub(was, c.sub) : null
+  if (other && other !== c.sub && (c.capRetries ?? 0) < 3 && c.lastPrompt) {
+    c.capRetries = (c.capRetries ?? 0) + 1
+    emit(c, { type: 'perch_notice', text: `Claude · ${subOf(c.sub).label} hit its limit (resets ${at}). Continuing on Claude · ${subOf(other).label} with the same conversation.` })
+    c.handoffQueue = (unanswered.length ? unanswered : [{ prompt: c.lastPrompt, images: c.lastImages }]).map(o => ({ id: c.id, prompt: o.prompt, images: o.images, retry: true }))
+    return resumeHandoff(c, `claude:${was}`)
+  }
   const next = available(was)
   c.capRetries = (c.capRetries ?? 0) + 1
   if (c.capRetries > 3 || !c.lastPrompt) return emit(c, { type: 'perch_notice', text: `${tierLabel(was)} hit its usage cap (resets ${at}).` })
@@ -739,7 +769,7 @@ type EphemeralJob = (l: Listener) => () => void
 
 // A cap discovered during this run must not reach JSON consumers as an answer. Wait for
 // Claude to finish, then try the fallback once; cancellation still stops the active job.
-export function withCapFallback(job: EphemeralJob, fallback: () => EphemeralJob | null, l: Listener) {
+export function withCapFallback(job: EphemeralJob, fallback: () => EphemeralJob | null, l: Listener, sub = 'main') {
   let cappedResult: ChatEvent | undefined, finished = false, cancelled = false
   let stop: (() => void) | undefined
   const initialStop = job(ev => {
@@ -747,13 +777,13 @@ export function withCapFallback(job: EphemeralJob, fallback: () => EphemeralJob 
     if (ev.type === 'result' && ev.is_error) {
       const text = `${ev.result ?? ''} ${ev.error ?? ''} ${JSON.stringify(ev.errors ?? '')}`
       const until = capFrom(text)
-      if (until) { markCapped(capScope(text), until); cappedResult = ev; return }
+      if (until) { markCapped(capScope(text), until, sub); cappedResult = ev; return }
     }
     if (ev.type === 'perch_done') {
       finished = true
       // Some CLI failures only reach stderr, with no result event.
       const until = ev.error ? capFrom(String(ev.error)) : null
-      if (until) markCapped(capScope(String(ev.error)), until)
+      if (until) markCapped(capScope(String(ev.error)), until, sub)
       const next = !cancelled && (cappedResult || until) ? fallback() : null
       if (next) { stop = next(l); return }
       if (cappedResult) l(cappedResult)
@@ -768,10 +798,13 @@ export function ephemeral(args: string[], cwd: string, l: Listener, configDir?: 
   // Text-only background jobs (no tools: a strict, empty MCP config) can run on the local model.
   const textOnly = args.includes('--strict-mcp-config') && args.includes('{"mcpServers":{}}')
   // A cap is noted (router.ts) and never reaches JSON consumers as an answer.
+  const sub = configDir ? 'main' : pickSub(args[args.indexOf('--model') + 1] || 'sonnet')
+  const dir = configDir ?? (sub !== 'main' ? subDir(sub) : undefined)
+  if (dir && !configDir) shareFolder(dir)
   const claudeJob: EphemeralJob = emit => withCapFallback(emit => {
     // No stdin: with a pipe left open, claude -p waits 3s for input, warns on stderr, and the brief
     // and autopilot scans read that warning as a failure.
-    const proc = spawn('claude', args, { cwd, env: childEnv(configDir, claudeEnv()), stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn('claude', args, { cwd, env: childEnv(dir, claudeEnv()), stdio: ['ignore', 'pipe', 'pipe'] })
     let buf = ''
     proc.stdout.on('data', d => {
       buf += d
@@ -779,7 +812,7 @@ export function ephemeral(args: string[], cwd: string, l: Listener, configDir?: 
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i)
         buf = buf.slice(i + 1)
-        try { const ev = JSON.parse(line); if (ev.type === 'rate_limit_event') noteClaude(ev, Date.now()); emit(ev) } catch {}
+        try { const ev = JSON.parse(line); if (ev.type === 'rate_limit_event') noteClaude(ev, Date.now(), sub); emit(ev) } catch {}
       }
     })
     let err = ''
@@ -789,7 +822,7 @@ export function ephemeral(args: string[], cwd: string, l: Listener, configDir?: 
     proc.on('error', e => finish(1, String(e.message))) // claude not found: report it, don't crash perch
     proc.on('exit', code => finish(code, code ? err.slice(-1000) : undefined))
     return () => proc.kill()
-  }, () => null, emit)
+  }, () => null, emit, sub)
   if (!textOnly) return claudeJob(l)
   const modelFlag = args.findIndex(a => a === '--model' || a === '-m')
   const tier = modelFlag >= 0 ? args[modelFlag + 1] : 'sonnet'

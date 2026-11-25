@@ -3,11 +3,11 @@
 // - Codex writes its rate limits (plan windows, percent used, reset time) into its session files.
 // Local models have no limit. Auto balances these windows against their reset dates and
 // distinguishes exhausted included usage from an account that still has existing credits.
-import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { DATA_DIR, HOME, UNDER_TEST } from './settings.ts'
 import { subscriptionBudget } from './subscription-budget.ts'
-import { claudeUsage, noteClaudeUsage } from './account.ts'
+import { claudeUsage, noteClaudeUsage, pickSub, subs, subUsage } from './account.ts'
 
 export type Win = { key: string; label: string; pct: number; resetsAt: number; minutes?: number } // pct 0..1, resetsAt in ms
 export type Usage = { windows: Win[]; at: number; plan?: string; creditsAvailable?: boolean; blocked?: boolean }
@@ -38,15 +38,17 @@ export function parseClaudeUsage(ev: any, at: number): Usage | null {
   const creditsAvailable = rl.overageStatus === 'allowed' || rl.overageStatus === 'allowed_warning'
   return { windows, at, creditsAvailable, blocked: rl.status === 'rejected' && !creditsAvailable }
 }
-export function noteClaude(ev: any, at = Date.now()) {
+// sub: the Claude subscription (account.ts) whose process reported it.
+export function noteClaude(ev: any, at = Date.now(), sub = 'main') {
   const parsed = parseClaudeUsage(ev, at)
-  if (parsed) noteClaudeUsage(parsed)
+  if (parsed) noteClaudeUsage(parsed, sub)
 }
+const subOfRun = (out: string) => { try { return JSON.parse(readFileSync(out.replace(/\.out$/, '.json'), 'utf8')).sub || 'main' } catch { return 'main' } }
 function bootClaude() {
-  for (const f of newest(join(DATA_DIR, 'run'), n => n.endsWith('.out'), 6)) {
+  for (const f of newest(join(DATA_DIR, 'run'), n => n.endsWith('.out'), 12)) {
     try {
       const lines = tail(f, 300_000).split('\n')
-      for (let i = lines.length - 1; i >= 0; i--) if (lines[i].includes('"rate_limit_event"')) { try { noteClaude(JSON.parse(lines[i]), statSync(f).mtimeMs); break } catch {} }
+      for (let i = lines.length - 1; i >= 0; i--) if (lines[i].includes('"rate_limit_event"')) { try { noteClaude(JSON.parse(lines[i]), statSync(f).mtimeMs, subOfRun(f)); break } catch {} }
     } catch {}
   }
 }
@@ -83,7 +85,9 @@ function readCodex() {
 
 // A window whose reset time has passed is back to empty (the number we saw is old news).
 const live = (u: Usage | null): Usage | null => u && { ...u, windows: u.windows.map(w => w.resetsAt && w.resetsAt < Date.now() ? { ...w, pct: 0 } : w) }
+// claude: the subscription Auto would use now; claudeSubs: each one (the model menu shows them all).
 export function usageNow() { readCodex(); return { claude: live(claudeUsage()), codex: live(codex) } }
+export function claudeSubsNow() { const active = pickSub(); return subs().filter(s => s.enabled).map(s => ({ id: s.id, label: s.label, active: s.id === active, pinned: s.pinned, usage: live(subUsage(s.id)) })) }
 const hot = (u: Usage | null) => !!u && u.windows.some(w => w.pct >= HOT)
 export const claudeHot = () => hot(live(claudeUsage()))
 export const codexHot = () => { readCodex(); return hot(live(codex)) }

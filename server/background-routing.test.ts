@@ -19,6 +19,7 @@ function fixture() {
     localJob: (_a: any, emit: (ev: any) => void) => { attempts.push({ provider: 'local', emit }); return () => {} },
     codexJob: (_a: any, _cwd: any, emit: (ev: any) => void) => { attempts.push({ provider: 'codex', emit }); return () => {} },
     withCapFallback: (job: any, _fallback: any, emit: any) => job(emit), childEnv: () => ({}), claudeEnv: () => ({}),
+    pickSub: () => 'main', subDir: () => '', shareFolder: () => {},
     spawn: () => { assert.fail('pressure should keep these text jobs off Claude') },
   }
   vm.createContext(context); vm.runInContext(code, context)

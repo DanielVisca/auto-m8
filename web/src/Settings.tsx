@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ago, api, post, sendChat, shell, useLive } from './api'
 import { Brand, brandFor } from './Brand'
 import { ProfilesCard } from './Profile'
-import { ClaudeBillingCard } from './ClaudeAccounts'
+import { ClaudeBillingCard, ClaudeSubsCard } from './ClaudeAccounts'
 import { PrSpendCard, SpendCard } from './Spend'
 import { useBrowser } from './BrowserView'
 import { Kits } from './Kits'
@@ -208,9 +208,11 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
       </>}
       {tab === 'accounts' && <>
       <ProfilesCard onTerminal={onTerminal} />
+      <ClaudeSubsCard Login={ClaudeLogin} />
       <ClaudeBillingCard />
       </>}
       {tab === 'models' && <>
+      <ClaudeSubsCard Login={ClaudeLogin} />
       <ClaudeBillingCard />
       <Routing />
       <LocalModels settings={settings} save={save} />

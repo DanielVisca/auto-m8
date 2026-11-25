@@ -41,3 +41,53 @@ export function ClaudePressure() {
   const detail = `${data.usage?.windows?.length ? data.usage.windows.map(w => `${w.label} ${Math.round(w.pct * 100)}%, resets ${time(w.resetsAt)}`).join('; ') : 'no usage seen yet'}${data.out && data.until ? `; at limit until ${time(data.until)}` : ''}`
   return <span className="usage-chips" title={detail}><span className={`usage-chip ${heat}`}>Claude {data.out ? 'full' : `${Math.round(p * 100)}%`}</span></span>
 }
+
+// Claude subscriptions in this profile (server/account.ts): a Team seat and a personal Max plan,
+// say. Each is the claude CLI's own login in its own folder; chats keep their context when Auto
+// moves them between subscriptions. Order = preference; a pin makes Auto use only that one while it can.
+export type ClaudeSub = { id: string; label: string; main: boolean; enabled: boolean; pinned: boolean; active: boolean; login: { loggedIn: boolean; email?: string; org?: string; plan?: string } | null; usage: { windows: Win[]; blocked?: boolean } | null }
+export const useClaudeSubs = () => useLive<ClaudeSub[]>('/api/claude-subs', ['settings', 'chats'], undefined, 60_000)
+const who = (s: ClaudeSub) => !s.login ? 'checking…' : !s.login.loggedIn ? 'not signed in' : [s.login.email, s.login.org, s.login.plan].filter(Boolean).join(' · ')
+export const subChips = (s: { usage: { windows: Win[] } | null }) => (s.usage?.windows ?? []).map(w => `${w.label} ${Math.round(w.pct * 100)}%`).join(' · ')
+
+export function ClaudeSubsCard({ Login }: { Login: (p: { login?: any }) => any }) {
+  const { data, reload } = useClaudeSubs()
+  const { data: st } = useLive<any>('/api/status', ['status'], undefined, 3000)
+  const [name, setName] = useState('')
+  const [edit, setEdit] = useState<string | null>(null)
+  if (!data) return null
+  const put = async (id: string, p: any) => { await api.send('PUT', `/api/claude-subs/${encodeURIComponent(id)}`, p); reload() }
+  const add = async () => { if (!name.trim()) return; await post('/api/claude-subs', { label: name.trim() }); setName(''); reload() }
+  return (
+    <section className="card">
+      <h3>Claude subscriptions</h3>
+      <div className="muted small">Every Claude plan this profile can use. Auto starts new chats on the first one with room, keeps a chat where it is while that plan is on pace, and moves it (same conversation, same context) when it runs ahead of its weekly budget or hits a limit. Pin one to use only it while it can work.</div>
+      {data.map((s, i) => (
+        <div key={s.id} className="line" style={{ alignItems: 'flex-start' }}>
+          <span className={`ex-dot ${s.login?.loggedIn ? 'connected' : s.login ? 'missing' : 'expired'}`} style={{ marginTop: 6 }} />
+          <div className="grow">
+            {edit === s.id
+              ? <input autoFocus defaultValue={s.label} onBlur={e => { put(s.id, { label: e.target.value }); setEdit(null) }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+              : <b onDoubleClick={() => setEdit(s.id)} title="Double-click to rename">{s.label}</b>}
+            {s.active && <span className="ex-badge yours" style={{ marginLeft: 6 }}>Auto's pick now</span>}
+            {s.pinned && <span className="ex-badge" style={{ marginLeft: 6 }}>pinned</span>}
+            {!s.enabled && <span className="ex-badge" style={{ marginLeft: 6 }}>off</span>}
+            <div className="muted small">{who(s)}{subChips(s) ? ` · ${subChips(s)}` : ''}{s.main ? ' · this profile’s main login' : ''}</div>
+          </div>
+          {s.login && !s.login.loggedIn && <button className="small primary" onClick={() => post(`/api/claude-subs/${s.id}/login`)}>Sign in</button>}
+          <button className="small" title={s.pinned ? 'Let Auto choose again' : 'Use only this one while it can work'} onClick={() => put(s.id, { pinned: !s.pinned })}>{s.pinned ? 'Unpin' : 'Pin'}</button>
+          <button className="small" disabled={i === 0} title="Prefer this one" onClick={() => put(s.id, { move: -1 })}>↑</button>
+          <button className="small" disabled={i === data.length - 1} title="Prefer it less" onClick={() => put(s.id, { move: 1 })}>↓</button>
+          <button className="small" onClick={() => put(s.id, { enabled: !s.enabled })}>{s.enabled ? 'Turn off' : 'Turn on'}</button>
+          {!s.main && <button className="link small" onClick={async () => { if (confirm(`Remove ${s.label}? Its sign-in stays in ~/.claude-subs until you delete it.`)) { await api.send('DELETE', `/api/claude-subs/${s.id}`); reload() } }}>remove</button>}
+        </div>
+      ))}
+      <Login login={st?.claudeLogin} />
+      <div className="row-flex small" style={{ marginTop: 6, gap: 6 }}>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Name, e.g. Max (personal)" onKeyDown={e => { if (e.key === 'Enter') add() }} />
+        <button className="small" disabled={!name.trim()} onClick={add}>Add a Claude subscription</button>
+        <span className="muted">opens the Claude sign-in in your browser; pick the account and plan there</span>
+      </div>
+    </section>
+  )
+}

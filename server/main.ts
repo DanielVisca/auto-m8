@@ -11,9 +11,9 @@ import { applyProfileEnv, profile, profiles, readiness, saveProfiles } from './p
 import { detectName as detectOwnerName } from './owner.ts'
 import { homedir } from 'node:os'
 import { localStatus, pull as pullModel } from './local.ts'
-import { usageNow } from './usage.ts'
+import { usageNow, claudeSubsNow } from './usage.ts'
 import { overageNow } from './overage.ts'
-import { billingStatus, clearCaps } from './account.ts'
+import { addSub, billingStatus, clearCaps, loginOf, pickSub, refreshLogins, removeSub, shareFolder, subOf, subs, subUsage, updateSub } from './account.ts'
 import { mcpAccess, resetMcpRows } from './mcpaccess.ts'
 import { mcpLogins, onMcpLogin, startMcpLogin, submitMcpCode } from './mcplogin.ts'
 import { cloudBlockers, describe as describeRuntimes, needsFrom } from './runtimes.ts'
@@ -117,7 +117,7 @@ import { moveToSection, onPrSections, resortSections } from './prsections.ts'
 import { approvals, browserEvents, closeIdleWindows, onBrowserChange, pruneRecordings, resumeBrowser, setOwnerBusy } from './browser.ts'
 import { browserRoutes, browserSocket } from './browserroutes.ts'
 import { researchRoutes } from './productresearchroutes.ts'
-import { canvases as exploreCanvases, competitor as exploreCompetitor, competitors as exploreCompetitors } from './explorehub.ts'
+import { canvases as exploreCanvases, codebases as exploreCodebases, competitor as exploreCompetitor, competitors as exploreCompetitors, saveThumb, thumbFile } from './explorehub.ts'
 import { ensureProductBoard } from './productresearchboard.ts'
 import { onResearch } from './productresearch.ts'
 import { restartQueue } from './restartqueue.ts'
@@ -487,7 +487,7 @@ route('GET', '/api/boards', (_m, _r, _s, q) => ({ boards: listBoards(q.get('q') 
 route('POST', '/api/boards', async (_m, req) => { const b = await body(req); return createBoard(b.name, b.about, b.created_by, b) })
 route('GET', '/api/boards/:id', m => getBoard(decodeURIComponent(m[1])) ?? { error: 'No such board' })
 route('POST', '/api/boards/:id', async (m, req) => updateBoard(decodeURIComponent(m[1]), await body(req)))
-route('POST', '/api/boards/:id/activity', m => { const id = decodeURIComponent(m[1]); const ok = useBoard(id); if (ok) openedBoard(id); return { ok } })
+route('POST', '/api/boards/:id/activity', m => ({ ok: useBoard(decodeURIComponent(m[1])) }))
 route('POST', '/api/boards/:id/delete', m => { deleteBoard(decodeURIComponent(m[1])); return { ok: true } })
 route('POST', '/api/boards-tile', async (_m, req) => putTile(await body(req)))
 route('POST', '/api/boards-tile/copy', async (_m, req) => { const b = await body(req); return copyTile(b.tile_id, b.board_id) })
@@ -553,7 +553,7 @@ route('GET', '/api/conversations/:id/usage', m => {
   }
   return { turns: seen.size, cost: null, context, byModel: Object.entries(byModel).map(([model, v]) => ({ model, ...v, cost: null })).sort((a, b) => b.tokens - a.tokens), switches: [], measured: false }
 })
-route('GET', '/api/provider-usage', () => usageNow())
+route('GET', '/api/provider-usage', () => ({ ...usageNow(), claudeSubs: claudeSubsNow() }))
 route('GET', '/api/overage', () => overageNow())
 route('GET', '/api/routing', () => ({ caps: capsNow(), fallback: settings.local.model || null }))
 // How claude is billed (account.ts): your Claude Code login by default, or an Anthropic API key
@@ -563,6 +563,25 @@ const claudeBilling = () => {
   return { ...billingStatus(), login: c?.loggedIn ? { email: c.email ?? null, org: c.orgName ?? null, plan: c.planTier ?? c.subscriptionType ?? null } : null }
 }
 route('GET', '/api/claude-billing', () => claudeBilling())
+// Claude subscriptions in this profile (account.ts): each is the CLI's own login in its own folder.
+const claudeSubs = async (fresh = false) => {
+  await refreshLogins(fresh)
+  const active = pickSub()
+  return subs().map(s => ({ id: s.id, label: s.label, main: s.main, enabled: s.enabled, pinned: s.pinned, active: s.id === active, login: loginOf(s.id) ?? null, usage: subUsage(s.id) }))
+}
+route('GET', '/api/claude-subs', async (_m, _req, _res, q) => claudeSubs(q?.get('fresh') === '1'))
+route('POST', '/api/claude-subs', async (_m, req) => {
+  const s = addSub(String((await body(req)).label ?? '').trim() || 'Claude')
+  broadcast('settings')
+  return { sub: s, login: startLogin(() => { refreshLogins(true).then(() => broadcast('settings')); loginChanged() }, s.dir) }
+})
+route('POST', '/api/claude-subs/:id/login', m => {
+  const s = subOf(decodeURIComponent(m[1]))
+  if (!s.main) shareFolder(s.dir)
+  return startLogin(() => { refreshLogins(true).then(() => broadcast('settings')); loginChanged() }, s.main ? undefined : s.dir)
+})
+route('PUT', '/api/claude-subs/:id', async (m, req) => { const b = await body(req); updateSub(decodeURIComponent(m[1]), { label: b.label, enabled: b.enabled, pinned: b.pinned, move: b.move }); broadcast('settings'); return claudeSubs() })
+route('DELETE', '/api/claude-subs/:id', m => { removeSub(decodeURIComponent(m[1])); broadcast('settings'); return claudeSubs() })
 route('POST', '/api/claude-billing/key', async (_m, req) => {
   const k = String((await body(req)).key ?? '').trim()
   if (!isLoopback(req)) return { error: 'Save the key from the Mac.' }
@@ -726,6 +745,16 @@ termEvents.add((owner, id, event, text) => inboxPush(owner, `term:${id}`, event,
 browserRoutes(route, body)
 researchRoutes(route, body)
 route('GET', '/api/explore/canvases', () => ({ boards: exploreCanvases() }))
+route('GET', '/api/explore/codebases', () => swr('explore-codebases', 10 * 60_000, () => exploreCodebases(), { deadline: 4000 }))
+route('POST', '/api/boards/:id/opened', m => { openedBoard(decodeURIComponent(m[1])); return { ok: true } })
+route('POST', '/api/boards/:id/thumb', async (m, req) => { try { return saveThumb(decodeURIComponent(m[1]), (await body(req)).jpeg) } catch (e: any) { return { error: e.message } } })
+route('GET', '/api/boards/:id/thumb', (m, _req, res) => {
+  let file: string | null = null
+  try { file = thumbFile(decodeURIComponent(m[1])) } catch {}
+  if (!file) { res.writeHead(404); res.end('No preview'); return }
+  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=60', 'X-Content-Type-Options': 'nosniff' })
+  createReadStream(file).pipe(res)
+})
 route('GET', '/api/explore/competitors', () => ({ products: exploreCompetitors() }))
 route('GET', '/api/explore/competitors/:id', m => { try { return exploreCompetitor(decodeURIComponent(m[1])) } catch (e: any) { return { error: e.message } } })
 browserEvents.add((owner, event, text) => inboxPush(owner, `browser:${owner}`, event, text))

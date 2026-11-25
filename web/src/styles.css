@@ -649,6 +649,7 @@ img.brand { object-fit: contain; }
 .sw.o-merged { background: var(--o-merged); } .sw.o-moving { background: var(--o-moving); } .sw.o-needs-you { background: var(--o-needs-you); }
 .sw.o-stalled { background: var(--o-stalled); } .sw.o-stale { background: var(--o-stale); }
 .sw.o-abandoned { background: repeating-linear-gradient(45deg, var(--o-abandoned) 0 3px, var(--o-hatch) 3px 4.5px); }
+.flow-legend svg.lg { vertical-align: middle; margin-right: 4px; overflow: visible; }
 .flow-legend .right { text-align: right; min-width: 160px; }
 .flow-fresh { white-space: nowrap; }
 button.icon.flow-refresh { font-size: 14px; line-height: 1; padding: 0; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; transform-origin: 50% 50%; }
@@ -1312,6 +1313,11 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .tier-bars.t-frontier { color: #b45bd6; } .tier-bars.t-workhorse { color: #3b82c4; } .tier-bars.t-fast { color: #3aa77a; }
 .engine-legend { contain: inline-size; padding: 6px 8px 3px; border-top: 1px solid var(--line); margin-top: 4px; font-size: 10px; }
 .engine-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.engine-subs { padding: 0 8px 4px; }
+.engine-sub { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 4px; border-radius: 4px; cursor: pointer; color: var(--muted); }
+.engine-sub:hover { background: var(--hover, rgba(127,127,127,.12)); }
+.engine-sub.on { color: var(--fg); }
+.engine-sub-dot { width: 10px; color: var(--accent); }
 .usage-chips { display: inline-flex; gap: 4px; text-transform: none; letter-spacing: 0; }
 .usage-chip { font-size: 10px; padding: 0 5px; border-radius: 8px; background: color-mix(in srgb, var(--muted) 14%, transparent); color: var(--muted); }
 .usage-chip.warm { background: color-mix(in srgb, #e0a800 22%, transparent); color: #a67c00; }
@@ -1515,3 +1521,4 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 
 .needs-me .need-tabs button { font-size: 12.5px; padding: 2px 10px; }
 .needs-me .need-toggle { font-size: 14px; }
+.board-thumb-root { height: 100%; overflow: hidden; padding: 8px; box-sizing: border-box; }

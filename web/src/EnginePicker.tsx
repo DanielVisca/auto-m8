@@ -6,7 +6,8 @@ import { api } from './api'
 import { Popover } from './Popover'
 
 type UWin = { key: string; label: string; pct: number; resetsAt: number }
-type UsageData = { claude: { windows: UWin[] } | null; codex: { windows: UWin[] } | null }
+type CSub = { id: string; label: string; active: boolean; pinned: boolean; usage: { windows: UWin[]; blocked?: boolean } | null }
+type UsageData = { claude: { windows: UWin[] } | null; codex: { windows: UWin[] } | null; claudeSubs?: CSub[] }
 // Codex credits: null unless it matters (plan near its limit, on credits, or running low).
 type OLine = { text: string; heat: 'ok' | 'warm' | 'hot'; title: string }
 type OverageData = { codex: OLine | null }
@@ -22,10 +23,26 @@ const resetHint = (t: number) => {
 }
 const usageHint = (w: UWin) => `${w.label}: ${Math.round(w.pct * 100)}% used\n${resetHint(w.resetsAt)}`
 const heat = (p: number) => p >= 0.9 ? 'hot' : p >= 0.7 ? 'warm' : 'ok'
-function useUsage(): UsageData | null {
+function useUsage(): [UsageData | null, () => void] {
   const [u, setU] = useState<UsageData | null>(null)
-  useEffect(() => { const f = () => api.get<UsageData>('/api/provider-usage').then(setU).catch(() => {}); f(); const t = setInterval(f, 45_000); return () => clearInterval(t) }, [])
-  return u
+  const f = () => api.get<UsageData>('/api/provider-usage').then(setU).catch(() => {})
+  useEffect(() => { f(); const t = setInterval(f, 45_000); return () => clearInterval(t) }, [])
+  return [u, f]
+}
+// With more than one Claude subscription: each one, its usage, which Auto is on, and a pin.
+function ClaudeSubRows({ subs, onChange }: { subs: CSub[]; onChange: () => void }) {
+  const pin = async (s: CSub) => { await api.send('PUT', `/api/claude-subs/${encodeURIComponent(s.id)}`, { pinned: !s.pinned }); onChange() }
+  return (
+    <div className="engine-subs">
+      {subs.map(s => (
+        <div key={s.id} className={`engine-sub${s.active ? ' on' : ''}`} title={s.pinned ? 'Pinned: Auto uses only this one while it can. Click to let Auto choose.' : 'Click to pin: Auto uses only this one while it can work'} onClick={() => pin(s)}>
+          <span className="engine-sub-dot">{s.active ? '●' : '○'}</span>
+          <span className="grow">{s.label}{s.pinned && <span className="muted"> · pinned</span>}{s.active && !s.pinned && <span className="muted"> · Auto's pick</span>}</span>
+          <Usage w={s.usage?.windows} />
+        </div>
+      ))}
+    </div>
+  )
 }
 function useOverage(): OverageData | null {
   const [o, setO] = useState<OverageData | null>(null)
@@ -78,7 +95,8 @@ export function EnginePicker({ value, onChange, local, title, className }: { val
   const [q, setQ] = useState('')
   const [at, setAt] = useState(0)
   const [favs, setFavs] = useState<string[]>(readFavs)
-  const usage = useUsage()
+  const [usage, reloadUsage] = useUsage()
+  const multi = (usage?.claudeSubs?.length ?? 0) > 1
   const overage = useOverage()
   const groupOverage = (g: string) => g === 'openai' ? overage?.codex : null
   const groupUsage = (g: string) => g === 'claude' ? usage?.claude?.windows : g === 'openai' ? usage?.codex?.windows : undefined
@@ -123,7 +141,7 @@ export function EnginePicker({ value, onChange, local, title, className }: { val
       <Popover anchor={ref} open={open} onClose={() => { setOpen(false); setQ('') }} align="start">
         <div className="engine-menu" onKeyDown={onKey}>
           <input autoFocus className="engine-q" placeholder="Type to filter…" value={q} onChange={e => setQ(e.target.value)} />
-          {rows.map((r, i) => r.kind === 'head' ? <div key={`h${i}`}><div className="engine-head"><span>{r.label}</span>{r.group && <Usage w={groupUsage(r.group)} />}</div>{r.group && (o => o && <div className={`engine-overage ${o.heat}`} title={o.title}>{o.text}</div>)(groupOverage(r.group))}</div>
+          {rows.map((r, i) => r.kind === 'head' ? <div key={`h${i}`}><div className="engine-head"><span>{r.label}</span>{r.group && !(r.group === 'claude' && multi) && <Usage w={groupUsage(r.group)} />}</div>{r.group === 'claude' && multi && <ClaudeSubRows subs={usage!.claudeSubs!} onChange={reloadUsage} />}{r.group && (o => o && <div className={`engine-overage ${o.heat}`} title={o.title}>{o.text}</div>)(groupOverage(r.group))}</div>
             : r.kind === 'auto' ? (
               <div key="auto" className={`engine-row${at === i ? ' hot' : ''}${!value || value === 'auto' ? ' on' : ''}`} onMouseEnter={() => setAt(i)} onClick={() => pickRow(i)}>
                 <span className="engine-name">Auto</span><span className="muted small">picks per message · Claude and Codex cover for each other</span>
