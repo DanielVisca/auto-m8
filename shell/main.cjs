@@ -352,6 +352,22 @@ function toggleCollapse() {
   }
 }
 
+// Pop-out: one page of the app (the architecture explorer) in its own window, so it can sit on another screen.
+// Its links back into the app open in the main window.
+const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):47\d\d\//
+ipcMain.handle('popout', (_e, url) => {
+  if (!LOCAL.test(String(url))) return false
+  const w = new BrowserWindow({ width: 1500, height: 950, title: 'Explore', backgroundColor: nativeTheme.shouldUseDarkColors ? '#16171a' : '#fbfbfa',
+    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true } })
+  w.webContents.setWindowOpenHandler(({ url: u }) => {
+    if (LOCAL.test(u) && !u.includes('popout=')) { win.loadURL(u.replace('localhost', '127.0.0.1')); win.show(); win.focus() }
+    else if (!LOCAL.test(u)) shell.openExternal(u)
+    return { action: 'deny' }
+  })
+  w.webContents.on('will-navigate', (e, u) => { if (!LOCAL.test(u)) { e.preventDefault(); shell.openExternal(u) } })
+  w.loadURL(url)
+  return true
+})
 ipcMain.handle('pin', (_e, on) => { win.setAlwaysOnTop(!!on, 'floating'); return win.isAlwaysOnTop() })
 ipcMain.handle('is-pinned', () => win.isAlwaysOnTop())
 // Big decisions waiting on you show on the dock icon, so you see them without opening perch.
@@ -502,7 +518,8 @@ function setTuck(on) {
 // Click the tab, the shortcut, or switch to perch and it slides back out. Off in Settings → Window.
 let autoTucked = false, occludeTimer = null
 const autoTuckOn = () => read().window?.autoTuck !== false
-ipcMain.on('occluded', (_e, hidden) => {
+ipcMain.on('occluded', (e, hidden) => {
+  if (e.sender !== win?.webContents) return // a pop-out window being covered says nothing about the main one
   clearTimeout(occludeTimer)
   if (!hidden) return
   occludeTimer = setTimeout(() => {

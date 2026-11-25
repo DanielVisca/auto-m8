@@ -2,7 +2,7 @@
 // what, watch it evolve, drill into the evidence, ask a chat that's handed exactly what you're looking at,
 // and sketch "what if" changes. The map is deterministic; the chat explains and must cite files.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, post, sendChat, shortPath, toast } from './api'
+import { api, post, sendChat, shell, shortPath, toast } from './api'
 import { MiniChat } from './Mini'
 import { DataSection, RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
 import './explore.css'
@@ -48,8 +48,15 @@ function layout(nodes: Node[]) {
   return pos
 }
 
-export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onOpenChat: (id: string) => void }) {
+// Where you were, per repo, so leaving for a chat and coming back lands you in the same place.
+type Saved = { focus?: string; active?: string | null; selected?: string[]; step?: number | null; hubs?: boolean; allLinks?: boolean; trail?: string[]; dreaming?: boolean; ops?: Op[]; sources?: boolean }
+const stateKey = (r: string) => `perch.explore.state.${r}`
+const loadSaved = (r: string): Saved => { try { return JSON.parse(localStorage.getItem(stateKey(r)) ?? '{}') } catch { return {} } }
+
+export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: string; onOpenChat: (id: string) => void; popout?: boolean }) {
   const [repo, setRepo] = useState(() => initialRepo || recentRepos()[0] || '')
+  const [saved0] = useState(() => loadSaved(initialRepo || recentRepos()[0] || ''))
+  const restoring = useRef(true)
   const [repoInput, setRepoInput] = useState(repo)
   const repos = useRepos()
   // A workspace: the repo you map plus related ones (deploy charts, infra, services) used to tell where its code runs.
@@ -57,32 +64,48 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   const [ws, setWs] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(wsKey(repo)) ?? '[]') } catch { return [] } })
   useEffect(() => { try { setWs(JSON.parse(localStorage.getItem(wsKey(repo)) ?? '[]')) } catch { setWs([]) } }, [repo])
   const saveWs = (next: string[]) => { setWs(next); localStorage.setItem(wsKey(repo), JSON.stringify(next)) }
-  const [sources, setSources] = useState(false)
+  const [sources, setSources] = useState(!!saved0.sources)
   const [runtime, setRuntime] = useState<Runtime | null>(null)
-  const [focus, setFocusState] = useState(() => localStorage.getItem('perch.explore.focus') ?? '')
+  const [focus, setFocusState] = useState(() => saved0.focus ?? localStorage.getItem('perch.explore.focus') ?? '')
   // Focus history, so "Focus here" can always be undone with Back.
-  const [trail, setTrail] = useState<string[]>([])
+  const [trail, setTrail] = useState<string[]>(saved0.trail ?? [])
   const setFocus = (f: string) => { if (f === focus) return; setTrail(t => [...t, focus].slice(-20)); setFocusState(f) }
   const goBack = () => { const prev = trail[trail.length - 1]; if (prev == null) return; setTrail(t => t.slice(0, -1)); setFocusState(prev); setFocusInput(prev); setActive(null); setSelected([]) }
   const clearFocus = () => { setFocus(''); setFocusInput(''); setActive(null); setSelected([]) }
+  // Everything back to the whole map, now. Keeps the repo, its workspace and its chat.
+  const resetAll = () => { setFocusState(''); setFocusInput(''); setTrail([]); setActive(null); setSelected([]); setStep(null); setPlaying(false); setDreaming(false); setOps([]); setEdgeCard(null); setHubs(false); setAllLinks(false); setSources(false) }
+  // Each repo keeps its own place: switching repos picks up where you left that one.
+  const switchRepo = (p: string) => {
+    const sv = loadSaved(p)
+    restoring.current = true
+    setRepoInput(p); setRepo(p); setFocusState(sv.focus ?? ''); setFocusInput(sv.focus ?? ''); setTrail(sv.trail ?? []); setActive(sv.active ?? null); setSelected(sv.selected ?? [])
+    setStep(sv.step ?? null); setHubs(!!sv.hubs); setAllLinks(!!sv.allLinks); setDreaming(!!sv.dreaming); setOps(sv.ops ?? []); setSources(!!sv.sources); setEdgeCard(null)
+  }
+  const popOut = () => {
+    const url = `${location.origin}/?popout=explore#explore/${encodeURIComponent(repo)}`
+    const sh = shell as any
+    // In the app: its own window. Before the app is restarted with that ability, or in a browser: a browser window.
+    if (sh.popout) sh.popout(url)
+    else window.open(url.replace('127.0.0.1', 'localhost'), '_blank')
+  }
   const [focusInput, setFocusInput] = useState(focus)
-  const [hubs, setHubs] = useState(false)
-  const [allLinks, setAllLinks] = useState(false)
+  const [hubs, setHubs] = useState(!!saved0.hubs)
+  const [allLinks, setAllLinks] = useState(!!saved0.allLinks)
   const [g, setG] = useState<GraphRes | null>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
   const [tl, setTl] = useState<Timeline | null>(null)
-  const [step, setStep] = useState<number | null>(null) // null = now
+  const [step, setStep] = useState<number | null>(saved0.step ?? null) // null = now
   const [playing, setPlaying] = useState(false)
-  const [active, setActive] = useState<string | null>(null)
+  const [active, setActive] = useState<string | null>(saved0.active ?? null)
   const [hovered, setHovered] = useState<string | null>(null)
   // The link under the mouse (or pinned by a click), with where to show its card.
   const [edgeCard, setEdgeCard] = useState<{ e: Edge; x: number; y: number; pinned: boolean } | null>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const cardAt = (ev: React.MouseEvent, e: Edge, pinned: boolean) => { const r = stageRef.current!.getBoundingClientRect(); setEdgeCard(c => c?.pinned && !pinned ? c : { e, x: Math.min(ev.clientX - r.left, r.width - 450), y: Math.min(ev.clientY - r.top, r.height - 220), pinned }) }
-  const [selected, setSelected] = useState<string[]>([])
-  const [dreaming, setDreaming] = useState(false)
-  const [ops, setOps] = useState<Op[]>([])
+  const [selected, setSelected] = useState<string[]>(saved0.selected ?? [])
+  const [dreaming, setDreaming] = useState(!!saved0.dreaming)
+  const [ops, setOps] = useState<Op[]>(saved0.ops ?? [])
   const [dreamRes, setDreamRes] = useState<DreamRes | null>(null)
   const [chatId, setChatId] = useState<string | null>(() => repo ? localStorage.getItem(`perch.explore.chat.${repo}`) : null)
   const [lastCtx, setLastCtx] = useState('')
@@ -94,7 +117,8 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   useEffect(() => {
     if (!repo) return
     let gone = false
-    setLoading(true); setErr(''); setTl(null); setStep(null); setPlaying(false)
+    // The first load after coming back keeps your place on the timeline; later changes start from now.
+    setLoading(true); setErr(''); setTl(null); if (!restoring.current) setStep(null); restoring.current = false; setPlaying(false)
     api.get<GraphRes>(`/api/explore/graph?${qs({ repo, focus, hubs: hubs ? '1' : '' })}`)
       .then(r => { if (gone) return; setG(r); localStorage.setItem('perch.explore.repos', JSON.stringify([r.repo, ...recentRepos().filter(x => x !== r.repo && x !== repo)].slice(0, 8))); localStorage.setItem('perch.explore.focus', focus) })
       .catch(e => !gone && setErr(String(e?.message ?? e)))
@@ -112,6 +136,9 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
     return () => { gone = true; clearTimeout(t) }
   }, [g?.repo, g?.sha, g?.focus])
 
+  useEffect(() => {
+    if (repo) localStorage.setItem(stateKey(repo), JSON.stringify({ focus, active, selected, step, hubs, allLinks, trail, dreaming, ops, sources } satisfies Saved))
+  }, [repo, focus, active, selected, step, hubs, allLinks, trail, dreaming, ops, sources])
   const ids = useMemo(() => new Set(g?.nodes.map(n => n.id) ?? []), [g])
   const events = useMemo(() => (tl?.events ?? []).filter(e => e.kind === 'concept' ? ids.has(e.id) : ids.has(e.from!) && ids.has(e.to!)), [tl, ids])
   const intro = useMemo(() => new Map(events.map(e => [e.id, e.date])), [events])
@@ -224,7 +251,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   return (
     <div className="explore">
       <div className="explore-bar">
-        <div className="explore-repo"><RepoPicker value={repo} repos={repos} placeholder="Pick a repo: type to search, or paste a path" onPick={p => { setRepoInput(p); setRepo(p); setActive(null); setSelected([]) }} /></div>
+        <div className="explore-repo"><RepoPicker value={repo} repos={repos} placeholder="Pick a repo: type to search, or paste a path" onPick={switchRepo} /></div>
         <input className="explore-focus" list="explore-names" value={focusInput} placeholder="Focus on a concept: dashboard, insight, alert…" onChange={e => setFocusInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setRepo(repoInput.trim()); setFocus(focusInput.trim()); setActive(null); setSelected([]) } }} />
         <datalist id="explore-names">{g?.names.slice(0, 2000).map(n => <option key={n} value={n} />)}</datalist>
         <button onClick={() => { setRepo(repoInput.trim()); setFocus(focusInput.trim()); setActive(null); setSelected([]) }}>Map</button>
@@ -234,6 +261,8 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
         <label className="small"><input type="checkbox" checked={allLinks} onChange={e => setAllLinks(e.target.checked)} /> all links</label>
         <button className={sources ? 'primary' : ''} onClick={() => setSources(!sources)} title="What the explorer can read beyond code: Argo CD, Grafana, AWS…">Sources</button>
         <button className={dreaming ? 'primary' : ''} onClick={() => { setDreaming(!dreaming); if (dreaming) setOps([]) }} title="Sketch a change: remove or add concepts and see what breaks">{dreaming ? 'Leave dream mode' : 'Dream mode'}</button>
+        <button onClick={resetAll} title="Back to the whole map: clears the focus, selection, timeline position and dream. Keeps the repo, workspace and chat.">↺ Reset</button>
+        {!popout && <button onClick={popOut} title="Open the explorer in its own window, to keep it on another screen">⧉ Pop out</button>}
       </div>
       {repo && (
         <div className="explore-ws small">

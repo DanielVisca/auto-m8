@@ -5,6 +5,7 @@ document.addEventListener('visibilitychange', () => ipcRenderer.send('occluded',
 
 contextBridge.exposeInMainWorld('perch', {
   isElectron: true,
+  popout: url => ipcRenderer.invoke('popout', url),
   pin: on => ipcRenderer.invoke('pin', on),
   isPinned: () => ipcRenderer.invoke('is-pinned'),
   badge: text => ipcRenderer.invoke('badge', text),

@@ -125,3 +125,5 @@ a.ex-chip { cursor: pointer; }
 .ex-sub { margin-bottom: 8px; }
 .ex-subh { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 2px; }
 .ex-hubs { margin-top: 4px; }
+.explore-popout { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
+.explore-popout .explore { flex: 1; min-height: 0; }
