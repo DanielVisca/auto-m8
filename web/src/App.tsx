@@ -395,8 +395,8 @@ function Toasts({ zen }: { zen?: boolean }) {
 function Nav({ view, setView }: { view: View; setView: (v: View) => void }) {
   const { data, reload } = usePause()
   const paused = !!data?.paused
-  // Evolve lives under Skills & scouts (it writes the skills); Explore is linked from Home.
-  const items: [View['kind'], string, string][] = [['insights', '▤', 'Insights'], ['library', '◇', 'Skills & scouts'], ['automations', '↻', 'Automations'], ['settings', '⚙', 'Settings  ⌘,']]
+  // Evolve lives under Skills & scouts (it writes the skills). Explore keeps its tab: Daniel asked for it back.
+  const items: [View['kind'], string, string][] = [['insights', '▤', 'Insights'], ['explore', '⌬', 'Explore'], ['library', '◇', 'Skills & scouts'], ['automations', '↻', 'Automations'], ['settings', '⚙', 'Settings  ⌘,']]
   const on = (k: View['kind']) => view.kind === k || (k === 'library' && view.kind === 'evolve')
   return (
     <nav className="nav">

@@ -129,6 +129,7 @@ function Everything({ onOpen, onStart }: { onOpen: (id: string) => void; onStart
         <div className="card-head">
           <h3>{b?.greeting && !b.error ? b.greeting : 'Your brief'}</h3>
           <span className="muted small">{b?.created_at ? `written ${ago(b.created_at)} ago` : ''}</span>
+          <a className="small" href="#explore" title="Architecture explorer: what a codebase is built on, how it grew, where it runs, and ask about any part">⌬ Explore a codebase</a>
           <button disabled={briefing || data.briefing} onClick={refreshBrief}>{briefing || data.briefing ? 'Writing… (~30s)' : b ? 'Refresh' : 'Write my brief'}</button>
         </div>
         {b?.error && <div className="bad small">{b.error}</div>}
@@ -139,7 +140,6 @@ function Everything({ onOpen, onStart }: { onOpen: (id: string) => void; onStart
               <h4>Pick up</h4>
               {b.pickup?.map(pickRow)}
               <button className="link small" onClick={() => onStart()}>or start something new →</button>
-              <a className="small" href="#explore" title="See what a codebase is built on, how it grew, and ask about any part">or explore a codebase's architecture →</a>
             </div>
             {b.dropping?.length > 0 && <div><h4>Slipping</h4>{b.dropping.map(pickRow)}</div>}
           </div>
