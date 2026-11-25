@@ -5,13 +5,13 @@
 // "no agent text" mode where agents may only comment and research. Zen hides everything but the page.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Marked } from 'marked'
-import { EditorState, StateEffect, StateField, type Extension, type Range } from '@codemirror/state'
-import { Decoration, EditorView, keymap, drawSelection, placeholder, type DecorationSet } from '@codemirror/view'
+import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, StateEffect, StateField, Transaction, type Extension, type Range } from '@codemirror/state'
+import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, drawSelection, placeholder, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { markdown } from '@codemirror/lang-markdown'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
-import { linter, forceLinting, type Diagnostic } from '@codemirror/lint'
+import { linter, forceLinting, forEachDiagnostic, setDiagnostics, type Diagnostic } from '@codemirror/lint'
 import { api, post, sendChat, toast, useLive } from './api'
 import { Chat, copyText } from './Chat'
 import './writing.css'
@@ -48,6 +48,7 @@ function markField(kind: string) {
   })
 }
 const commentField = markField('comments'), aiField = markField('ai')
+const previewMode = new Compartment()
 // Where each comment's highlight is now (after edits), to save its anchor with the text.
 function anchorsOf(state: EditorState) {
   const out: { id: string; start: number; end: number; quote: string }[] = []
@@ -69,6 +70,56 @@ const mdStyle = HighlightStyle.define([
   { tag: [tags.processingInstruction, tags.meta], color: 'var(--muted)' },
 ])
 
+// Live preview: the page reads like a document. Markdown's marks (# for headings, ** for bold, list
+// dashes, link brackets and addresses, <!-- --> around notes) are hidden, except on the lines your
+// cursor or selection is on, where they show so you can edit them. Notes in <!-- --> show dimmed.
+class Bullet extends WidgetType {
+  toDOM() { const s = document.createElement('span'); s.className = 'cm-md-bullet'; s.textContent = '•'; return s }
+  eq() { return true }
+}
+const hide = Decoration.replace({}), bullet = Decoration.replace({ widget: new Bullet() })
+const noteMark = Decoration.mark({ class: 'cm-md-note' }), quoteLine = Decoration.line({ class: 'cm-md-quote' })
+function previewDecos(view: EditorView): DecorationSet {
+  const { state } = view, doc = state.doc
+  const active = new Set<number>()
+  if (view.hasFocus) for (const r of state.selection.ranges) for (let l = doc.lineAt(r.from).number; l <= doc.lineAt(r.to).number; l++) active.add(l)
+  const on = (pos: number) => active.has(doc.lineAt(pos).number)
+  const out: Range<Decoration>[] = []
+  const hideRange = (from: number, to: number) => { if (to > from && doc.lineAt(from).number === doc.lineAt(to).number && !on(from)) out.push(hide.range(from, to)) }
+  for (const { from, to } of view.visibleRanges) syntaxTree(state).iterate({ from, to, enter: n => {
+    const name = n.name
+    if (name === 'HeaderMark') { const after = doc.sliceString(n.to, n.to + 1) === ' ' ? 1 : 0; hideRange(n.from, n.to + after) }
+    else if (name === 'EmphasisMark' || name === 'CodeMark' || name === 'StrikethroughMark') hideRange(n.from, n.to)
+    else if (name === 'ListMark') { const t = doc.sliceString(n.from, n.to); if (/^[-*+]$/.test(t) && !on(n.from)) out.push(bullet.range(n.from, n.to)) }
+    else if (name === 'QuoteMark') { if (!on(n.from)) { out.push(quoteLine.range(doc.lineAt(n.from).from)); hideRange(n.from, n.to + (doc.sliceString(n.to, n.to + 1) === ' ' ? 1 : 0)) } }
+    else if (name === 'Link') {
+      // [text](url): keep the text, hide the brackets and the address.
+      const c = n.node.cursor(); const marks: [number, number][] = []
+      if (c.firstChild()) do { if (c.name === 'LinkMark' || c.name === 'URL' || c.name === 'LinkTitle') marks.push([c.from, c.to]) } while (c.nextSibling())
+      if (marks.length >= 2) { hideRange(marks[0][0], marks[0][1]); hideRange(marks[1][0], n.to) }
+      return false
+    }
+    else if (name === 'CommentBlock' || name === 'Comment' || (name === 'HTMLBlock' && /^\s*<!--/.test(doc.sliceString(n.from, n.from + 8)))) {
+      for (let pos = n.from; pos <= n.to;) {
+        const line = doc.lineAt(pos)
+        const a = Math.max(line.from, n.from), b = Math.min(line.to, n.to)
+        if (b > a) out.push(noteMark.range(a, b))
+        pos = line.to + 1
+      }
+      const text = doc.sliceString(n.from, n.to)
+      if (text.startsWith('<!--')) hideRange(n.from, n.from + 4 + (text[4] === ' ' ? 1 : 0))
+      if (text.trimEnd().endsWith('-->')) { const end = n.from + text.trimEnd().length; hideRange(end - 3 - (text[text.trimEnd().length - 4] === ' ' ? 1 : 0), end) }
+      return false
+    }
+  } })
+  return Decoration.set(out, true)
+}
+const livePreview = ViewPlugin.fromClass(class {
+  decorations: DecorationSet
+  constructor(v: EditorView) { this.decorations = previewDecos(v) }
+  update(u: ViewUpdate) { if (u.docChanged || u.viewportChanged || u.selectionSet || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) this.decorations = previewDecos(u.view) }
+}, { decorations: v => v.decorations })
+
 // Harper counts characters as code points; the editor counts UTF-16 units. Only differs around emoji.
 function codePointMap(text: string) {
   if (!/[\uD800-\uDBFF]/.test(text)) return (i: number) => i
@@ -79,6 +130,11 @@ function codePointMap(text: string) {
   return (i: number) => map[Math.min(i, map.length - 1)]
 }
 
+// Your dictionary: kept by auto-m8 so every window shares it. Words in it never show as misspelled.
+const dictionary = new Set<string>()
+// Marks changes that came from elsewhere (an agent, another window, the file on disk), not your typing.
+const remote = Annotation.define<boolean>()
+
 // On-device grammar and spelling: Harper in a web worker, loaded the first time a doc opens.
 let harper: Promise<any> | null = null
 function harperLinter(dialect: number) {
@@ -86,11 +142,21 @@ function harperLinter(dialect: number) {
     const [{ WorkerLinter }, { binary }] = await Promise.all([import('harper.js'), import('harper.js/binary')])
     const l = new WorkerLinter({ binary, dialect })
     await l.setup()
-    const words = local<string[]>('perch.writing.words', [])
-    if (words.length) await l.importWords(words)
+    if (dictionary.size) await l.importWords([...dictionary])
     return l
   })().catch(e => { harper = null; throw e })
   return harper
+}
+
+// Take the underline off at once (every copy of the word for the dictionary), without waiting for the next check.
+function dropMarks(v: EditorView, word: string, everywhere: boolean, message?: string) {
+  const keepIt: Diagnostic[] = []
+  forEachDiagnostic(v.state, (d, from, to) => {
+    const text = v.state.sliceDoc(from, to)
+    const same = everywhere ? d.markClass === 'cm-spell' && text.toLowerCase() === word.toLowerCase() : text === word && d.message === message
+    if (!same) keepIt.push({ ...d, from, to })
+  })
+  v.dispatch(setDiagnostics(v.state, keepIt))
 }
 
 // Phrases that read as machine-written. Not a detector: a nudge toward plainer writing.
@@ -118,11 +184,22 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const rev = useRef<number>(-1)
+  const base = useRef('') // the server's text your unsaved edits sit on top of
+  const pending = useRef<ChangeSet | null>(null) // your edits since then: base → what's on screen
+  const sent = useRef<ChangeSet | null>(null) // edits made while a save is on its way
+  const latest = useRef<Full | undefined>(undefined)
+  latest.current = data
   const dirty = useRef(false)
   const saving = useRef<Promise<void> | null>(null)
   const timer = useRef<any>(null)
-  const [state, setState] = useState<'saved' | 'saving' | 'unsaved' | 'conflict'>('saved')
-  const [conflict, setConflict] = useState<{ text: string; rev: number } | null>(null)
+  const [state, setState] = useState<'saved' | 'saving' | 'unsaved'>('saved')
+  const { data: words } = useLive<{ words: string[] }>('/api/writing/words', ['docs'])
+  useEffect(() => {
+    if (!words) return
+    const before = dictionary.size
+    for (const w of words.words) dictionary.add(w.toLowerCase())
+    if (dictionary.size !== before && view.current) { forceLinting(view.current); harperLinter(opts.current.dialect).then(l => l.importWords(words.words)).catch(() => {}) }
+  }, [words])
   const [tab, setTab] = useState<'comments' | 'research' | 'versions' | 'agent' | 'check'>(() => local('perch.writing.tab', 'comments'))
   const [panel, setPanel] = useState(() => local('perch.writing.panel', true))
   const [selection, setSelection] = useState<{ from: number; to: number; text: string } | null>(null)
@@ -132,11 +209,33 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
   const [dialect, setDialect] = useState<number>(() => local('perch.writing.dialect', 0))
   const [ai, setAi] = useState<AiResult | null>(() => local(`perch.writing.ai.${id}`, null))
   const [wordCount, setWordCount] = useState(0)
+  const [raw, setRaw] = useState(() => local('perch.writing.raw', false))
+  const [menu, setMenu] = useState<{ x: number; y: number; pos: number } | null>(null)
   const opts = useRef({ grammar, tells, dialect })
   opts.current = { grammar, tells, dialect }
   useEffect(() => keep('perch.writing.tab', tab), [tab])
   useEffect(() => keep('perch.writing.panel', panel), [panel])
   useEffect(() => { keep('perch.writing.grammar', grammar); keep('perch.writing.tells', tells); keep('perch.writing.dialect', dialect); if (view.current) forceLinting(view.current) }, [grammar, tells, dialect])
+
+  // A change from elsewhere lands under your cursor: what changed between the base and their text is
+  // mapped over your unsaved edits, so both stay and nothing you're typing moves or is lost.
+  const merge = (theirs: string, newRev: number) => {
+    const v = view.current
+    if (!v) return
+    if (theirs !== base.current) {
+      const t = diffChanges(base.current, theirs)
+      const mine = pending.current
+      const changes = mine && !mine.empty ? t.map(mine) : t
+      if (mine && !mine.empty) pending.current = mine.map(t, true)
+      v.dispatch({ changes, annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+      base.current = theirs
+      // Belt and braces: if the bookkeeping ever drifts, rebuild it from the two texts.
+      const now = v.state.doc.toString()
+      if (pending.current && pending.current.length !== theirs.length) pending.current = diffChanges(theirs, now)
+      if (!pending.current && now !== theirs) pending.current = diffChanges(theirs, now)
+    }
+    rev.current = newRev
+  }
 
   const save = async () => {
     const v = view.current
@@ -146,23 +245,25 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
       setState('saving')
       const text = v.state.doc.toString()
       dirty.current = false
+      sent.current = ChangeSet.empty(text.length)
       const r: any = await post(`/api/docs/${id}/save`, { text, rev: rev.current, anchors: anchorsOf(v.state) }).catch(() => ({ error: 'offline' }))
-      if (r?.ok) { rev.current = r.rev; setState(dirty.current ? 'unsaved' : 'saved'); return }
-      dirty.current = true
-      if (r?.conflict) {
-        // An agent edited while you typed: replay its find/replace steps on your text, then save again.
-        let mine = v.state.doc.toString(), clean = true
-        for (const op of r.ops ?? []) {
-          if (op.old && mine.split(op.old).length === 2) mine = mine.replace(op.old, () => op.new)
-          else if (!op.old) mine = mine + (mine.endsWith('\n') ? '' : '\n') + op.new
-          else { clean = false; break }
-        }
-        if (clean && r.ops?.length) { replaceText(v, mine); rev.current = r.rev; setState('unsaved'); setTimeout(save, 50); return }
-        setConflict({ text: r.text, rev: r.rev }); setState('conflict'); return
-      }
-      setState('unsaved')
+      const after = sent.current
+      sent.current = null
+      if (r?.ok) {
+        base.current = text; rev.current = r.rev
+        pending.current = after && !after.empty ? after : null
+        dirty.current = !!pending.current
+        setState(dirty.current ? 'unsaved' : 'saved')
+      } else if (r?.conflict) {
+        // Changed elsewhere since our last look: merge theirs in, then save the result.
+        merge(r.text, r.rev)
+        dirty.current = true; setState('unsaved'); setTimeout(save, 50)
+      } else { dirty.current = true; setState('unsaved'); clearTimeout(timer.current); timer.current = setTimeout(save, 3000) }
     })()
     try { await saving.current } finally { saving.current = null }
+    // Anything that arrived while saving.
+    const d = latest.current
+    if (d?.doc && d.doc.rev > rev.current) merge(d.text, d.doc.rev)
   }
 
   // Build the editor once per doc, as soon as its page is on screen.
@@ -183,18 +284,19 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
             const sp = lint.span(), from = at(sp.start), to = at(sp.end)
             const problem = text.slice(from, to), kind = lint.lint_kind()
             if (ignored.has(`${kind}|${problem}`) || to > v.state.doc.length) continue
+            if (kind === 'Spelling' && dictionary.has(problem.toLowerCase())) continue
             if (kind === 'Capitalization' && /^#{1,6}\s/.test(v.state.doc.lineAt(from).text)) continue // headings are yours to case
-            const spelling = kind === 'Spelling'
+            const spelling = kind === 'Spelling', message = lint.message()
             out.push({
-              from, to, severity: spelling ? 'error' : 'warning', source: lint.lint_kind_pretty(), message: lint.message(), markClass: spelling ? 'cm-spell' : 'cm-grammar',
+              from, to, severity: spelling ? 'error' : 'warning', source: lint.lint_kind_pretty(), message, markClass: spelling ? 'cm-spell' : 'cm-grammar',
               actions: [
                 ...lint.suggestions().slice(0, 4).map((s: any) => {
                   const rep = s.get_replacement_text(), k = s.kind()
                   const name = k === 1 ? 'Remove' : rep ? `→ ${rep}` : 'Fix'
                   return { name, apply: (ev: EditorView, f: number, t: number) => ev.dispatch({ changes: k === 2 ? { from: t, insert: rep } : { from: f, to: t, insert: k === 1 ? '' : rep } }) }
                 }),
-                ...(spelling ? [{ name: 'Add to dictionary', apply: async (ev: EditorView) => { const w = [...local<string[]>('perch.writing.words', []), problem]; keep('perch.writing.words', w); (await harperLinter(opts.current.dialect)).importWords([problem]); forceLinting(ev) } }] : []),
-                { name: 'Ignore', apply: (ev: EditorView) => { keep('perch.writing.ignored', [...ignored, `${kind}|${problem}`]); forceLinting(ev) } },
+                ...(spelling ? [{ name: 'Add to dictionary', apply: (ev: EditorView) => { dictionary.add(problem.toLowerCase()); dropMarks(ev, problem, true); post('/api/writing/words', { add: problem }); harperLinter(opts.current.dialect).then(l => l.importWords([problem])).catch(() => {}) } }] : []),
+                { name: 'Ignore', apply: (ev: EditorView) => { keep('perch.writing.ignored', [...ignored, `${kind}|${problem}`]); dropMarks(ev, problem, false, message) } },
               ],
             })
           }
@@ -203,23 +305,38 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
       return out
     }, { delay: 900 })
     const extensions: Extension[] = [
-      history(), drawSelection(), markdown(), syntaxHighlighting(mdStyle), EditorView.lineWrapping,
+      history(), drawSelection(), markdown({ base: markdownLanguage }), syntaxHighlighting(mdStyle), EditorView.lineWrapping, previewMode.of(local('perch.writing.raw', false) ? [] : livePreview),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab,
         { key: 'Mod-s', run: () => { save(); return true } },
-        { key: 'Mod-Alt-m', run: v => { const s = v.state.selection.main; if (!s.empty) { setPanel(true); setTab('comments'); window.dispatchEvent(new Event('perch-doc-comment')) } return true } }]),
+        { key: 'Mod-Alt-m', run: v => { const s = v.state.selection.main; if (!s.empty) { setPanel(true); setTab('comments'); window.dispatchEvent(new Event('perch-doc-comment')) } return true } },
+        { key: 'Mod-b', run: v => wrap(v, '**') }, { key: 'Mod-i', run: v => wrap(v, '_') }, { key: 'Mod-e', run: v => wrap(v, '`') },
+        { key: 'Mod-Shift-x', run: v => wrap(v, '~~') }, { key: 'Mod-k', run: v => link(v) },
+        { key: 'Mod-Alt-1', run: v => linePrefix(v, '# ') }, { key: 'Mod-Alt-2', run: v => linePrefix(v, '## ') }, { key: 'Mod-Alt-3', run: v => linePrefix(v, '### ') }, { key: 'Mod-Alt-0', run: v => linePrefix(v, '') }]),
       placeholder('Start writing…'), commentField, aiField, lint,
       EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', 'aria-label': 'Document text' }),
       EditorView.updateListener.of(u => {
-        if (u.docChanged) {
+        for (const tr of u.transactions) if (tr.docChanged && !tr.annotation(remote)) {
+          pending.current = pending.current ? pending.current.compose(tr.changes) : tr.changes
+          if (sent.current) sent.current = sent.current.compose(tr.changes)
           dirty.current = true; setState('unsaved'); clearTimeout(timer.current); timer.current = setTimeout(save, 1200)
-          setWordCount(countWords(u.state.doc.toString()))
         }
+        if (u.docChanged) setWordCount(countWords(u.state.doc.toString()))
         if (u.selectionSet || u.docChanged) {
           const s = u.state.selection.main
           setSelection(s.empty ? null : { from: s.from, to: s.to, text: u.state.sliceDoc(s.from, s.to) })
         }
       }),
       EditorView.domEventHandlers({
+        contextmenu: (e, v) => {
+          // Right-click on the text: the editor's own menu (suggestions, comment, agent, formatting, clipboard).
+          const pos = v.posAtCoords({ x: e.clientX, y: e.clientY })
+          if (pos == null) return false
+          const sel = v.state.selection.main
+          if (sel.empty || pos < sel.from || pos > sel.to) v.dispatch({ selection: { anchor: pos } })
+          e.preventDefault()
+          setMenu({ x: e.clientX, y: e.clientY, pos })
+          return true
+        },
         click: e => { const m = (e.target as HTMLElement).closest('[data-mark]') as HTMLElement | null; if (m?.closest('.cm-comment')) { setActiveComment(m.dataset.mark!); setPanel(true); setTab('comments') } return false },
       }),
     ]
@@ -231,17 +348,15 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
     return () => { removeEventListener('beforeunload', flush); clearTimeout(timer.current); if (dirty.current) save(); v.destroy(); view.current = null }
   }, [id, ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Text from the server: the first load, and changes made elsewhere (an agent's edit, a restore).
+  // Text from the server: the first load, then every change made elsewhere, merged in live.
   useEffect(() => {
     const v = view.current
     if (!v || !data?.doc) return
-    if (rev.current < 0 || (data.doc.rev > rev.current && !dirty.current && !saving.current)) {
-      if (v.state.doc.toString() !== data.text) replaceText(v, data.text, rev.current >= 0)
-      rev.current = data.doc.rev
-      dirty.current = false
-      setState('saved'); setConflict(null)
-      setWordCount(countWords(data.text))
-    }
+    if (rev.current < 0) {
+      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: data.text }, annotations: [remote.of(true), Transaction.addToHistory.of(false)] })
+      base.current = data.text; pending.current = null; rev.current = data.doc.rev; dirty.current = false
+      setState('saved'); setWordCount(countWords(data.text))
+    } else if (data.doc.rev > rev.current && !saving.current) merge(data.text, data.doc.rev)
   }, [data?.doc?.rev, data?.text]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Comment highlights follow the comments.
@@ -284,17 +399,18 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
           <button className={`chip-btn ${locked ? 'on locked' : ''}`} title={locked ? 'No agent text: agents can comment and research, but every word of the text is yours. Click to let agents edit.' : 'Agents may edit the text. Click for no agent text mode.'}
             onClick={() => setDoc({ agent_text: locked ? 'allowed' : 'blocked' })}>{locked ? '✍ No agent text' : '🤖 Agents may edit'}</button>
           <span className="grow" />
-          <span className={`muted small save-${state}`}>{state === 'saved' ? 'Saved' : state === 'saving' ? 'Saving…' : state === 'conflict' ? 'Changed elsewhere' : 'Unsaved'} · {wordCount.toLocaleString()} words</span>
+          <span className={`muted small save-${state}`} title="Live: changes from agents, other windows and the file itself merge in as they happen">{state === 'saved' ? '● Live · saved' : state === 'saving' ? 'Saving…' : 'Unsaved'} · {wordCount.toLocaleString()} words</span>
           <button className="icon" title="Comment on the selection  ⌘⌥M" disabled={!selection} onClick={() => { setPanel(true); setTab('comments'); setTimeout(() => window.dispatchEvent(new Event('perch-doc-comment')), 0) }}>💬</button>
+          <button className={`icon ${raw ? 'on' : ''}`} title={raw ? 'Showing markdown marks. Click for the clean page.' : 'Show markdown marks (#, **, links) everywhere'} onClick={() => { const next = !raw; setRaw(next); keep('perch.writing.raw', next); view.current?.dispatch({ effects: previewMode.reconfigure(next ? [] : livePreview) }) }}>{'</>'}</button>
           <ExportMenu id={id} title={doc.title} path={doc.path} text={textNow} />
           <button className={`icon ${zen ? 'on' : ''}`} title={zen ? 'Leave zen  ⌘⇧F' : 'Zen: just the page'} onClick={() => api.send('PUT', '/api/settings', { focus: { ...(settings?.focus ?? { areas: [] }), active: !zen } })}>◎</button>
           {!zen && <button className={`icon ${panel ? 'on' : ''}`} title="Comments, research, versions, agent" onClick={() => setPanel(!panel)}>▤</button>}
         </div>
-        {conflict && <div className="writing-conflict">This doc changed outside the editor while you had unsaved typing.
-          <button onClick={() => { if (view.current) replaceText(view.current, conflict.text); rev.current = conflict.rev; dirty.current = false; setConflict(null); setState('saved') }}>Load the other version</button>
-          <button className="primary" onClick={() => { rev.current = conflict.rev; dirty.current = true; setConflict(null); save() }}>Keep mine</button></div>}
         {!doc.exists && <div className="writing-conflict">The file at {doc.path} is missing; typing will create it again.</div>}
         <div className="writing-scroll"><div className="writing-page" ref={host} /></div>
+        {menu && view.current && <EditorMenu at={menu} view={view.current} onClose={() => { setMenu(null); view.current?.focus() }}
+          onComment={() => { setPanel(true); setTab('comments'); setTimeout(() => window.dispatchEvent(new Event('perch-doc-comment')), 0) }}
+          onAgent={() => { setPanel(true); setTab('agent') }} onCheck={() => { setPanel(true); setTab('check') }} />}
       </div>
       {showPanel && (
         <aside className="writing-side">
@@ -317,15 +433,131 @@ export function DocEditor({ id, onOpenChat, settings, zen }: { id: string; onOpe
 }
 
 const countWords = (t: string) => (t.match(/[\p{L}\p{N}'’-]+/gu) ?? []).length
-// Swap the editor's text for another, changing only the part that differs so the cursor stays put.
-function replaceText(v: EditorView, next: string, keepHistory = true) {
-  const cur = v.state.doc.toString()
-  if (cur === next) return
-  let a = 0
-  while (a < cur.length && a < next.length && cur[a] === next[a]) a++
-  let b = 0
-  while (b < cur.length - a && b < next.length - a && cur[cur.length - 1 - b] === next[next.length - 1 - b]) b++
-  v.dispatch({ changes: { from: a, to: cur.length - b, insert: next.slice(a, next.length - b) }, ...(keepHistory ? {} : { annotations: [] }) })
+// The changes that turn text a into text b, as small separate edits (line by line inside the part that
+// differs), so merging someone else's edit never rewrites the paragraph you're typing in.
+export function diffChanges(a: string, b: string): ChangeSet {
+  let p = 0
+  while (p < a.length && p < b.length && a[p] === b[p]) p++
+  let q = 0
+  while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+  const A = a.slice(p, a.length - q), B = b.slice(p, b.length - q)
+  if (!A && !B) return ChangeSet.empty(a.length)
+  const la = A.match(/[^\n]*\n|[^\n]+$/g) ?? [], lb = B.match(/[^\n]*\n|[^\n]+$/g) ?? []
+  if (la.length * lb.length > 4_000_000 || la.length < 2 || lb.length < 2) return ChangeSet.of([{ from: p, to: a.length - q, insert: B }], a.length)
+  const n = la.length, m = lb.length, L: Uint32Array[] = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1))
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = la[i] === lb[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1])
+  const specs: { from: number; to: number; insert: string }[] = []
+  let i = 0, j = 0, at = p, hunk: { from: number; to: number; insert: string } | null = null
+  const flush = () => { if (hunk) { specs.push(hunk); hunk = null } }
+  while (i < n || j < m) {
+    if (i < n && j < m && la[i] === lb[j]) { flush(); at += la[i].length; i++; j++ }
+    else if (j < m && (i >= n || L[i][j + 1] >= L[i + 1][j])) { hunk ??= { from: at, to: at, insert: '' }; hunk.insert += lb[j]; j++ }
+    else { hunk ??= { from: at, to: at, insert: '' }; at += la[i].length; hunk.to = at; i++ }
+  }
+  flush()
+  return ChangeSet.of(specs, a.length)
+}
+
+// ---------- formatting ----------
+// Toggle a markdown wrapper (** for bold, _ italic, ` code, ~~ strikethrough) around each selection.
+function wrap(v: EditorView, mark: string) {
+  const { state } = v
+  v.dispatch(state.changeByRange(r => {
+    const text = state.sliceDoc(r.from, r.to)
+    const before = state.sliceDoc(r.from - mark.length, r.from), after = state.sliceDoc(r.to, r.to + mark.length)
+    if (before === mark && after === mark) // already wrapped just outside: unwrap
+      return { changes: [{ from: r.from - mark.length, to: r.from }, { from: r.to, to: r.to + mark.length }], range: EditorSelection.range(r.from - mark.length, r.to - mark.length) }
+    if (text.length >= mark.length * 2 && text.startsWith(mark) && text.endsWith(mark)) // the selection includes the marks
+      return { changes: { from: r.from, to: r.to, insert: text.slice(mark.length, -mark.length) }, range: EditorSelection.range(r.from, r.to - mark.length * 2) }
+    return { changes: [{ from: r.from, insert: mark }, { from: r.to, insert: mark }], range: EditorSelection.range(r.from + mark.length, r.to + mark.length) }
+  }))
+  v.focus()
+  return true
+}
+function link(v: EditorView) {
+  const { state } = v
+  v.dispatch(state.changeByRange(r => {
+    const text = state.sliceDoc(r.from, r.to) || 'link'
+    const insert = `[${text}](url)`
+    const urlAt = r.from + text.length + 3
+    return { changes: { from: r.from, to: r.to, insert }, range: EditorSelection.range(urlAt, urlAt + 3) }
+  }))
+  v.focus()
+  return true
+}
+// Set what each selected line is: a heading, quote, list item, or plain text ('' clears it).
+function linePrefix(v: EditorView, prefix: string, numbered = false) {
+  const { state } = v, changes: { from: number; to: number; insert: string }[] = []
+  const seen = new Set<number>()
+  let n = 1
+  for (const r of state.selection.ranges) for (let l = state.doc.lineAt(r.from).number; l <= state.doc.lineAt(r.to).number; l++) {
+    if (seen.has(l)) continue
+    seen.add(l)
+    const line = state.doc.line(l), m = line.text.match(/^(#{1,6} |> |[-*+] |\d+\. )/)
+    const want = numbered ? `${n++}. ` : prefix
+    const has = m?.[0] ?? ''
+    changes.push({ from: line.from, to: line.from + has.length, insert: has === want ? '' : want })
+  }
+  v.dispatch({ changes })
+  v.focus()
+  return true
+}
+
+function EditorMenu({ at, view, onClose, onComment, onAgent, onCheck }: { at: { x: number; y: number; pos: number }; view: EditorView; onClose: () => void; onComment: () => void; onAgent: () => void; onCheck: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: at.x, top: at.y })
+  useEffect(() => {
+    const el = ref.current
+    if (el) setPos({ left: Math.min(at.x, innerWidth - el.offsetWidth - 8), top: Math.min(at.y, innerHeight - el.offsetHeight - 8) })
+    const away = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose() }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    addEventListener('mousedown', away, true); addEventListener('keydown', esc, true); addEventListener('scroll', onClose, true)
+    return () => { removeEventListener('mousedown', away, true); removeEventListener('keydown', esc, true); removeEventListener('scroll', onClose, true) }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const sel = view.state.selection.main, has = !sel.empty
+  // The spelling or grammar note under the cursor, with its fixes.
+  let diag: { d: Diagnostic; from: number; to: number } | null = null
+  forEachDiagnostic(view.state, (d, from, to) => { if (!diag && at.pos >= from && at.pos <= to && d.actions?.length) diag = { d, from, to } })
+  const go = (f: () => unknown) => () => { f(); onClose() }
+  const item = (label: string, f: () => unknown, key?: string, disabled = false) => <button key={label} disabled={disabled} onClick={go(f)}><span>{label}</span>{key && <kbd>{key}</kbd>}</button>
+  const clip = {
+    cut: async () => { const t = view.state.sliceDoc(sel.from, sel.to); try { await navigator.clipboard.writeText(t) } catch { await copyText(t) } view.dispatch({ changes: { from: sel.from, to: sel.to } }) },
+    copy: async () => { const t = view.state.sliceDoc(sel.from, sel.to); try { await navigator.clipboard.writeText(t) } catch { await copyText(t) } },
+    paste: async () => { try { const t = await navigator.clipboard.readText(); view.dispatch(view.state.replaceSelection(t)) } catch { toast('Use ⌘V to paste here', { kind: 'info' }) } },
+  }
+  const d = diag as { d: Diagnostic; from: number; to: number } | null
+  return (
+    <div ref={ref} className="doc-menu" style={pos} onContextMenu={e => e.preventDefault()}>
+      {d && <>
+        <div className="doc-menu-note">{d.d.message}</div>
+        {d.d.actions!.map(a => <button key={a.name} className={a.name.startsWith('→') ? 'doc-menu-fix' : ''} onClick={go(() => a.apply(view, d.from, d.to))}>{a.name.replace(/^→ /, '')}</button>)}
+        <hr />
+      </>}
+      {item('Comment', onComment, '⌘⌥M', !has)}
+      {item('Ask the agent about this', onAgent)}
+      {item('Check for AI writing…', onCheck, undefined, !has)}
+      <hr />
+      <div className="doc-menu-row">
+        <button title="Bold  ⌘B" onClick={go(() => wrap(view, '**'))}><b>B</b></button>
+        <button title="Italic  ⌘I" onClick={go(() => wrap(view, '_'))}><i>I</i></button>
+        <button title="Strikethrough  ⌘⇧X" onClick={go(() => wrap(view, '~~'))}><s>S</s></button>
+        <button title="Code  ⌘E" onClick={go(() => wrap(view, '`'))}><code>{'<>'}</code></button>
+        <button title="Link  ⌘K" onClick={go(() => link(view))}>🔗</button>
+      </div>
+      {item('Heading 1', () => linePrefix(view, '# '), '⌘⌥1')}
+      {item('Heading 2', () => linePrefix(view, '## '), '⌘⌥2')}
+      {item('Heading 3', () => linePrefix(view, '### '), '⌘⌥3')}
+      {item('Normal text', () => linePrefix(view, ''), '⌘⌥0')}
+      {item('Quote', () => linePrefix(view, '> '))}
+      {item('Bulleted list', () => linePrefix(view, '- '))}
+      {item('Numbered list', () => linePrefix(view, '', true))}
+      <hr />
+      {item('Cut', clip.cut, '⌘X', !has)}
+      {item('Copy', clip.copy, '⌘C', !has)}
+      {item('Paste', clip.paste, '⌘V')}
+      {item('Select all', () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }), '⌘A')}
+    </div>
+  )
 }
 
 function Who({ kind, name, conversation, onOpenChat }: { kind: string; name: string | null; conversation: string | null; onOpenChat: (id: string) => void }) {

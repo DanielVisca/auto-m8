@@ -89,3 +89,24 @@
   body.printing-doc .doc-print { display: block; font: 12pt/1.6 Charter, Georgia, serif; color: #000; max-width: 100%; }
   body.printing-doc .doc-print a { color: #000; }
 }
+
+/* Selection: a tint of the accent that keeps text readable in light and dark. */
+.writing .cm-editor .cm-selectionBackground, .writing .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 28%, transparent) !important; }
+.writing .cm-content ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+/* Live preview. */
+.cm-md-bullet { color: var(--muted); padding-right: 2px; }
+.cm-md-note { color: var(--muted); font-size: .88em; font-style: italic; opacity: .8; }
+.cm-md-quote { border-left: 3px solid var(--line); padding-left: 12px !important; color: var(--muted); }
+
+/* Right-click menu in the editor. */
+.doc-menu { position: fixed; z-index: 1000; min-width: 240px; max-width: 320px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.3); display: flex; flex-direction: column; font: 13px/1.3 -apple-system, system-ui, sans-serif; }
+.doc-menu > button { display: flex; justify-content: space-between; gap: 16px; text-align: left; border: none; background: none; color: inherit; padding: 5px 10px; border-radius: 6px; }
+.doc-menu > button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.doc-menu > button:disabled { opacity: .4; }
+.doc-menu kbd { color: var(--muted); font: inherit; font-size: 12px; }
+.doc-menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 2px; }
+.doc-menu-note { color: var(--muted); font-size: 12px; padding: 4px 10px 2px; }
+.doc-menu .doc-menu-fix { font-weight: 600; }
+.doc-menu-row { display: flex; gap: 2px; padding: 2px 4px; }
+.doc-menu-row button { flex: 1; border: none; background: none; color: inherit; padding: 5px 0; border-radius: 6px; }
+.doc-menu-row button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }

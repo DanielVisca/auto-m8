@@ -57,7 +57,7 @@ import { allLabels, applyRules, markSeen, setTitle, deleteRule, detail, editLabe
 import { ask, briefing, generateBrief, home, today } from './brief.ts'
 import { indexStatus, onChange, onTick, posthogStatus, scanAll, startIndexer, syncMyPrs, syncPrs, syncTasks } from './indexer.ts'
 import { clearAnthropicKey, clearPangramKey, clearPosthogKey, pangramKey, posthogKey, setAnthropicKey, setPangramKey, setPosthogKey } from './keychain.ts'
-import { addComment, addResearch, agentEdit, deleteComment, deleteResearch, DOCS_DIR, getDoc, listDocs, newDoc, onDocs, openDoc, pangramBalance, pangramCheck, resolveComment, restoreVersion, saveDoc, snapshot, toSlack, updateDoc, version as docVersion, type Author as DocAuthor } from './docs.ts'
+import { addComment, addResearch, agentEdit, deleteComment, deleteResearch, DOCS_DIR, getDoc, listDocs, newDoc, onDocs, openDoc, dictionaryWords, editDictionary, pangramBalance, pangramCheck, resolveComment, watchDoc, restoreVersion, saveDoc, snapshot, toSlack, updateDoc, version as docVersion, type Author as DocAuthor } from './docs.ts'
 import { runStoreCommand, scouts, skills, tasks } from './posthog.ts'
 import { onError, recentErrors, recordError, resolveErrors } from './errors.ts'
 import { taskOutput } from './taskOutput.ts'
@@ -600,7 +600,9 @@ const authorOf = (b: Row): DocAuthor => {
 const docTry = async <T>(f: () => T | Promise<T>) => { try { return await f() } catch (e: any) { return { error: e.message } } }
 route('GET', '/api/docs', () => ({ docs: listDocs(), dir: DOCS_DIR }))
 route('POST', '/api/docs', async (_m, req) => { const b = await body(req); return docTry(() => b.path ? openDoc(b.path) : newDoc(b.title)) })
-route('GET', '/api/docs/:id', m => docTry(() => getDoc(m[1])))
+route('GET', '/api/docs/:id', m => docTry(() => { watchDoc(m[1]); return getDoc(m[1]) }))
+route('GET', '/api/writing/words', () => ({ words: dictionaryWords() }))
+route('POST', '/api/writing/words', async (_m, req) => { const b = await body(req); return editDictionary(typeof b.add === 'string' ? b.add : undefined, typeof b.remove === 'string' ? b.remove : undefined) })
 route('POST', '/api/docs/:id', async (m, req) => { const b = await body(req); return docTry(() => updateDoc(m[1], b)) })
 route('POST', '/api/docs/:id/save', async (m, req) => { const b = await body(req); return docTry(() => saveDoc(m[1], String(b.text ?? ''), Number(b.rev), authorOf(b), Array.isArray(b.anchors) ? b.anchors : [])) })
 route('POST', '/api/docs/:id/edit', async (m, req) => { const b = await body(req); return docTry(() => agentEdit(m[1], String(b.old_text ?? ''), String(b.new_text ?? ''), authorOf({ author: { kind: 'agent', ...b.author } }))) })

@@ -5,7 +5,7 @@
 // Agents reach all of it through the auto-m8 MCP `doc` tool; docguard.ts stops their file tools from
 // writing a locked doc behind its back.
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, unwatchFile, watchFile, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { all, db, get, run } from './db.ts'
 import { DATA_DIR, HOME } from './settings.ts'
@@ -271,4 +271,37 @@ export async function pangramBalance(key: string): Promise<number | null> {
     const n = Number(r?.available_balance_usd)
     return Number.isFinite(n) ? n : null
   } catch { return null }
+}
+
+// Live from the file itself: while a doc is open somewhere, its file is watched (a stat every second),
+// so an edit from any app or agent reaches every open editor, which merges it under your cursor.
+const watched = new Map<string, { path: string; seen: number }>()
+export function watchDoc(id: string) {
+  const d = docRow(id)
+  if (!d) return
+  const w = watched.get(id)
+  if (w) { w.seen = Date.now(); return }
+  watched.set(id, { path: d.path, seen: Date.now() })
+  watchFile(d.path, { interval: 1000 }, () => {
+    const cur = docRow(id)
+    if (!cur) return
+    const before = cur.rev
+    if (sync(cur).d.rev !== before) changed(id)
+  }).unref()
+}
+// Docs nobody has looked at for 10 minutes stop being watched.
+setInterval(() => {
+  for (const [id, w] of watched) if (Date.now() - w.seen > 10 * 60_000) { unwatchFile(w.path); watched.delete(id) }
+}, 60_000).unref()
+
+// Your dictionary for the spelling check, shared by every window.
+const WORDS_FILE = join(DATA_DIR, 'writing-words.json')
+export function dictionaryWords(): string[] { try { return JSON.parse(readFileSync(WORDS_FILE, 'utf8')) } catch { return [] } }
+export function editDictionary(add?: string, remove?: string) {
+  const words = new Set(dictionaryWords())
+  if (add?.trim()) words.add(add.trim())
+  if (remove) words.delete(remove)
+  writeFileSync(WORDS_FILE, JSON.stringify([...words].sort()))
+  changed()
+  return { words: [...words].sort() }
 }
