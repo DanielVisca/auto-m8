@@ -4,9 +4,9 @@
 .ws-gates .ws-gate-open { text-decoration: line-through; opacity: 0.7; }
 .ws { border: 1px solid var(--border, rgba(127,127,127,0.25)); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
 .ws-blocked { opacity: 0.7; }
-.ws-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ws-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
 .ws-key { font-family: ui-monospace, monospace; font-size: 11px; opacity: 0.7; white-space: nowrap; }
-.ws-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-name { font-weight: 600; flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
 .ws-badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; white-space: nowrap; background: rgba(127,127,127,0.15); }
 .ws-badge-done, .ws-badge-met { background: rgba(46,160,67,0.18); color: #2ea043; }
 .ws-badge-blocked { background: rgba(210,153,34,0.18); color: #b7861b; }
@@ -29,9 +29,11 @@
 .ws-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; border-radius: 4px; background: rgba(127,127,127,0.1); }
 .ws-chip.ws-blocked { opacity: 0.6; }
 .ws-bar-mini { width: 40px; height: 4px; display: inline-block; }
-.plan-tile { padding: 8px 10px; overflow: auto; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; }
+.plan-tile { padding: 8px 10px; overflow: hidden auto; min-width: 0; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; }
 .plan-goal { display: flex; gap: 8px; align-items: baseline; }
-.plan-goal button { text-align: left; }
+.plan-goal { min-width: 0; }
+.plan-goal button { text-align: left; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+.plan-tile > .muted { overflow-wrap: anywhere; }
 .plan-prs { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .ws-prs { display: flex; flex-direction: column; gap: 2px; padding-left: 2px; border-left: 2px solid rgba(127,127,127,0.25); margin-top: 2px; }
 .ws-pr { display: flex; gap: 8px; align-items: baseline; padding-left: 6px; min-width: 0; }

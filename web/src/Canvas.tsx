@@ -14,7 +14,9 @@ type Tile = { id: string; folder_id: string; kind: 'web' | 'chat' | 'term' | 'no
 const COLS = 12, ROW = 56, GAP = 8
 const ICON: Record<Tile['kind'], string> = { web: '◍', chat: '💬', term: '⌘_', note: '✎', code: '✦', browser: '◐', plan: '◎' }
 
-export function Canvas({ folderId, ttlSeconds, conversations, cwd, onOpen }: { folderId: string; ttlSeconds?: number | null; conversations: Conversation[]; cwd?: string | null; onOpen: (id: string) => void }) {
+// fit: the board sits in a panel beside or instead of a chat. Beside a chat it always stacks in one
+// column; a board with a single tile lets that tile fill the panel instead of its grid height.
+export function Canvas({ folderId, ttlSeconds, conversations, cwd, onOpen, fit }: { folderId: string; ttlSeconds?: number | null; conversations: Conversation[]; cwd?: string | null; onOpen: (id: string) => void; fit?: 'side' | 'full' }) {
   const { data, reload } = useLive<{ tiles: Tile[] }>(`/api/canvas/${encodeURIComponent(folderId)}`, ['canvas' as any])
   const host = useRef<HTMLDivElement>(null)
   const activityHost = useRef<HTMLDivElement>(null)
@@ -48,7 +50,8 @@ export function Canvas({ folderId, ttlSeconds, conversations, cwd, onOpen }: { f
     return () => ro.disconnect()
   }, [])
   const tiles = data?.tiles ?? []
-  const stacked = W < 480 // narrow window: one column, in board order, no dragging
+  const stacked = W < 480 || fit === 'side' || (!!fit && tiles.length === 1) // narrow or in a chat panel: one column, in board order, no dragging
+  const fill = stacked && !!fit // the last tile grows to the bottom of the panel
   const add = (t: Partial<Tile>) => post('/api/canvas/tile', { folder_id: folderId, w: 6, h: 5, ...t }).then(reload)
   const submit = async () => {
     const v = ask.trim()
@@ -64,7 +67,7 @@ export function Canvas({ folderId, ttlSeconds, conversations, cwd, onOpen }: { f
   const colW = (W - GAP * (COLS - 1)) / COLS
   const height = stacked ? undefined : Math.max(...tiles.map(t => (t.y + t.h) * (ROW + GAP)), 200)
   return (
-    <div className="canvas" ref={activityHost}>
+    <div className={`canvas${fill ? ' fill' : ''}`} ref={activityHost}>
       <div className="canvas-add row-flex">
         <input className="grow" value={ask} disabled={making} placeholder={making ? 'Claude is making your tile… (~30s)' : '✦ Describe a tile, or paste a URL'}
           title="e.g. “PRs waiting on review, by repo, refresh every 5 min”"

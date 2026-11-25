@@ -127,7 +127,7 @@ export function WithBoard({ conversationId, chat, onOpen }: { conversationId: st
       <button className="icon" title="Hide the board" onClick={() => set({ board_id: null })}>×</button>
     </div>
   )
-  const board = <div className="with-board-board">{head}<div className="scroll"><Canvas folderId={b.id} ttlSeconds={b.ttl_seconds} conversations={recent} onOpen={onOpen} /></div></div>
+  const board = <div className="with-board-board">{head}<div className="scroll"><Canvas folderId={b.id} ttlSeconds={b.ttl_seconds} conversations={recent} onOpen={onOpen} fit={cb.layout} /></div></div>
   if (cb.layout === 'full') return <div className={`with-board full ${peek ? 'peek' : ''}`}>{board}{peek && <div className="with-board-chat">{chat}</div>}</div>
   return <div className="with-board side"><div className="with-board-chat">{chat}</div>
     <Splitter side="right" width={width.width} onWidth={width.setWidth} onReset={width.reset} />

@@ -1188,6 +1188,9 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .with-board-board > .scroll { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
 .board-strip { gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .with-board-board .canvas-add { display: none; }
+.canvas.fill { min-height: 100%; }
+.canvas.fill > .board.stacked { flex: 1 0 auto; }
+.canvas.fill > .board.stacked > .tile:last-child { flex: 1 0 auto; }
 .tile-fresh { margin-left: auto; white-space: nowrap; }
 .tile-fresh.ok { color: var(--ok); }
 
