@@ -29,7 +29,6 @@
 .browser-dock.pip .browserview { height: auto; position: relative; }
 .browser-dock.pip .browser-stage { cursor: zoom-in; }
 .browser-dock.pip .browser-stage.taken { cursor: pointer; }
-.browser-dock.pip .browser-stage.fit { max-height: 260px; }
 .browserview.mini .pip-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; padding: 2px 6px; gap: 2px; background: color-mix(in srgb, var(--bg) 88%, transparent); opacity: 0; transition: opacity .15s; }
 .browserview.mini:hover .pip-head { opacity: 1; }
 .browserview.mini .pip-head button.icon { padding: 0 5px; font-size: 13px; }
@@ -99,3 +98,28 @@
 .browser-feed.collapsed .feed-head { border-bottom: none; padding-top: 6px; padding-bottom: 6px; }
 .feed-latest { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .feed-latest.run { color: var(--accent); }
+/* PiP activity: beside or below the picture. Beside, the picture and the panel share a row. */
+.browserview.mini.feed-left, .browserview.mini.feed-right { display: grid; grid-template-rows: 1fr; align-items: stretch; }
+.browserview.mini.feed-right { grid-template-columns: minmax(0, 1fr) 300px; }
+.browserview.mini.feed-left { grid-template-columns: 300px minmax(0, 1fr); }
+.browserview.mini.feed-left .browser-stage, .browserview.mini.feed-right .browser-stage { grid-row: 1; align-self: center; width: 100%; }
+.browserview.mini.feed-right .browser-stage { grid-column: 1; }
+.browserview.mini.feed-left .browser-stage { grid-column: 2; }
+.browserview.mini.feed-right .browser-feed { grid-column: 2; grid-row: 1; }
+.browserview.mini.feed-left .browser-feed { grid-column: 1; grid-row: 1; }
+.browserview.mini .pip-head, .browserview.mini .browser-approval { grid-column: 1 / -1; }
+.browser-feed.at-left, .browser-feed.at-right { height: auto; min-height: 0; border-top: none; }
+.browser-feed.at-right { border-left: 1px solid var(--line); }
+.browser-feed.at-left { border-right: 1px solid var(--line); }
+.browser-feed.at-below { height: 190px; }
+.browserview.mini .browser-feed .feed-head { padding-left: 6px; }
+.browser-feed.at-left .feed-row .track, .browser-feed.at-right .feed-row .track { width: 22%; }
+.browser-feed.at-left .feed-row .ago, .browser-feed.at-right .feed-row .ago { display: none; }
+.feed-side { display: inline-flex; gap: 0; margin-left: 4px; }
+.feed-side button.icon { padding: 0 4px; font-size: 12px; opacity: .55; }
+.feed-side button.icon.on { opacity: 1; color: var(--accent); }
+/* PiP with its picture sized: the stage fills its cell. */
+.chat .browser-dock.pip.sized.with-feed .browserview { height: 100%; }
+/* The PiP's hover bar covers the picture only, not the activity beside it. */
+.browserview.mini.feed-right .pip-head { right: 300px; }
+.browserview.mini.feed-left .pip-head { left: 300px; }

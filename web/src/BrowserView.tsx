@@ -48,11 +48,14 @@ function keyOf(e: React.KeyboardEvent): { type: 'key'; key: string } | { type: '
 export type DockMode = 'bottom' | 'side' | 'pip'
 // mode/onMode: the dock's layout buttons. fit: tell the agent's window to take this view's shape (side
 // panel). mini: picture in picture, a small live picture with its buttons on hover.
-export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit, mini, feedOn, onFeed }: { owner: string; compact?: boolean; onCollapse?: () => void; cap?: number | null; mode?: DockMode; onMode?: (m: DockMode) => void; fit?: boolean; mini?: boolean; feedOn?: boolean; onFeed?: (on: boolean) => void }) {
+export type FeedSide = 'below' | 'left' | 'right'
+export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit, mini, feedOn, onFeed, feedSide = 'below', onFeedSide }: { owner: string; compact?: boolean; onCollapse?: () => void; cap?: number | null; mode?: DockMode; onMode?: (m: DockMode) => void; fit?: boolean; mini?: boolean; feedOn?: boolean; onFeed?: (on: boolean) => void; feedSide?: FeedSide; onFeedSide?: (s: FeedSide) => void }) {
   const img = useRef<HTMLImageElement>(null)
   const root = useRef<HTMLDivElement>(null)
   const [chrome, setChrome] = useState(0) // header and approval rows above the page
   const chromeRef = useRef(0); chromeRef.current = chrome
+  const feedOnRef = useRef(feedOn); feedOnRef.current = feedOn
+  const feedSideRef = useRef(feedSide); feedSideRef.current = feedSide
   const [feedH, setFeedH] = useState(0)
   const stage = useRef<HTMLDivElement>(null)
   const sock = useRef<WebSocket | null>(null)
@@ -131,7 +134,8 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
     const check = () => {
       clearTimeout(t)
       t = setTimeout(() => {
-        const w = el.clientWidth, h = el.clientHeight - chromeRef.current - (feedBox.current?.offsetHeight ?? 0)
+        const beside = feedOnRef.current && feedSideRef.current !== 'below'
+        const w = el.clientWidth - (beside ? feedBox.current?.offsetWidth ?? 0 : 0), h = el.clientHeight - chromeRef.current - (beside ? 0 : feedBox.current?.offsetHeight ?? 0)
         if (w < 100 || h < 100) return
         const r = w / h, last = sentRatio.current, key = `${r.toFixed(3)}:${w}`
         if (last != null && Math.abs(r - last) / last < 0.04 && sentKey.current.split(':')[1] === String(w)) return
@@ -143,7 +147,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
     ro.observe(el); check()
     el.addEventListener('perch-refit', check)
     return () => { ro.disconnect(); clearTimeout(t); el.removeEventListener('perch-refit', check) }
-  }, [fit, owner, feedOn])
+  }, [fit, owner, feedOn, feedSide])
   // Something else (another view of this window) changed its shape: put the panel's shape back, at
   // most every 10s so two views can't fight over it.
   useEffect(() => { if (fit) root.current?.dispatchEvent(new Event('perch-refit')) }, [feedH]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -208,9 +212,10 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
   })
 
   return (
-    <div ref={root} className={`browserview ${compact ? 'compact' : ''} ${mini ? 'mini' : ''}`}>
+    <div ref={root} className={`browserview ${compact ? 'compact' : ''} ${mini ? 'mini' : ''} ${feedOn ? `feed-${feedSide}` : ''}`}>
       {mini ? <div className="view-head pip-head">
         <div className="grow title ellipsis small" title={url}>🌐 {st.title || hostOf(url) || 'Agent browser'}{taken && <span className="term-ask"> · you have control</span>}</div>
+        {onFeed && <button className={`icon ${feedOn ? 'on' : ''}`} title={feedOn ? 'Hide activity' : 'Show activity: what the agent does here'} onClick={() => onFeed(!feedOn)}>≡</button>}
         {onMode && <button className="icon" title="Dock at the side" onClick={() => onMode('side')}>◨</button>}
         {onMode && <button className="icon" title="Dock below the chat" onClick={() => onMode('bottom')}>⬓</button>}
         <button className="icon" title="Close the window (the agent is told)" onClick={() => act(() => api.send('DELETE', `/api/browser/${enc(owner)}`))}>×</button>
@@ -232,7 +237,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
       </div>}
       <ApprovalBar approvals={st.approvals} />
       {err && <div className="muted small pad-x bad">{err}</div>}
-      <div ref={stage} className={`browser-stage ${taken ? 'taken' : ''} ${ratio ? 'fit' : ''}`} tabIndex={0} style={ratio ? { aspectRatio: String(ratio), maxHeight: cap ? Math.max(80, cap - chrome - (feedOn ? feedH : 0)) : undefined } : undefined}
+      <div ref={stage} className={`browser-stage ${taken ? 'taken' : ''} ${ratio ? 'fit' : ''}`} tabIndex={0} style={ratio ? { aspectRatio: String(ratio), maxHeight: cap ? Math.max(80, cap - chrome - (feedOn && feedSide === 'below' ? feedH : 0)) : undefined } : undefined}
         onClick={e => { if (mini && !taken) { onMode?.('side'); return } if (!taken) return; const p = toPage(e.clientX, e.clientY); if (p) { stage.current?.focus(); send({ type: 'click', ...p }) } }}
         onKeyDown={e => { if (!taken) return; const k = keyOf(e); if (!k) return; e.preventDefault(); e.stopPropagation(); send(k) }}
         onPaste={e => { if (!taken) return; const text = e.clipboardData.getData('text'); if (text) { e.preventDefault(); send({ type: 'text', text }) } }}>
@@ -240,7 +245,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
         {!hasFrame && <div className="browser-empty muted small">{conn === 'none' ? 'No browser window for this chat right now.' : 'Waiting for the first picture…'}</div>}
         {!taken && hasFrame && !mini && <div className="browser-hint" onClick={() => setPaused(true)}>Take over to click and type</div>}
       </div>
-      {feedOn && <BrowserFeed items={feedItems} boxRef={feedBox} onHeight={setFeedH} />}
+      {feedOn && <BrowserFeed items={feedItems} boxRef={feedBox} onHeight={setFeedH} store={mini ? 'perch.pipFeed' : 'perch.browserFeed'} side={mini ? feedSide : undefined} onSide={mini ? onFeedSide : undefined} />}
     </div>
   )
 }
@@ -296,7 +301,9 @@ function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1:
 
 // The activity panel: what the agent does in this window as spans on one timeline, newest at the
 // bottom; sticks to the bottom unless you scroll up. Click a row with › to see its details and steps.
-function BrowserFeed({ items, boxRef, onHeight }: { items: FeedItem[]; boxRef: React.RefObject<HTMLDivElement | null>; onHeight: (h: number) => void }) {
+// store: where its collapsed state and height are remembered (the side panel and PiP keep their own).
+// side/onSide: in PiP, which side of the picture it sits on, chosen from its header.
+function BrowserFeed({ items, boxRef, onHeight, store = 'perch.browserFeed', side, onSide }: { items: FeedItem[]; boxRef: React.RefObject<HTMLDivElement | null>; onHeight: (h: number) => void; store?: string; side?: FeedSide; onSide?: (s: FeedSide) => void }) {
   const list = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const [now, setNow] = useState(Date.now())
@@ -312,7 +319,7 @@ function BrowserFeed({ items, boxRef, onHeight }: { items: FeedItem[]; boxRef: R
   const t0 = Math.max(t1 - WINDOW_MAX, Math.min(t1 - 10_000, ...items.map(i => i.at)))
   const concerns = items.reduce((n, i) => n + (i.concern ? 1 : 0) + (i.children?.filter(c => c.concern).length ?? 0), 0)
   // Collapse to its header (click it); drag the line above it to any height. Both remembered.
-  const CKEY = 'perch.browserFeed.collapsed', HKEY = 'perch.browserFeed.height'
+  const CKEY = `${store}.collapsed`, HKEY = `${store}.height`
   const [collapsed, setCollapsedState] = useState(() => { try { return localStorage.getItem(CKEY) === '1' } catch { return false } })
   const setCollapsed = (v: boolean) => { setCollapsedState(v); try { localStorage.setItem(CKEY, v ? '1' : '0') } catch {} }
   const [height, setHeightState] = useState<number | null>(() => { try { return Number(localStorage.getItem(HKEY)) || null } catch { return null } })
@@ -337,15 +344,18 @@ function BrowserFeed({ items, boxRef, onHeight }: { items: FeedItem[]; boxRef: R
   }
   const latest = items[items.length - 1]
   return (
-    <div ref={boxRef} className={`browser-feed ${collapsed ? 'collapsed' : ''}`} style={!collapsed && height ? { height } : undefined}>
-      <div className="feed-grip" onPointerDown={drag} onDoubleClick={() => { setHeightState(null); try { localStorage.removeItem(HKEY) } catch {} }} title="Drag to resize the activity panel; drag it all the way down to collapse it, up to open it. Double-click for the default size." />
+    <div ref={boxRef} className={`browser-feed ${collapsed ? 'collapsed' : ''} ${side ? `at-${side}` : ''}`} style={!collapsed && height && side !== 'left' && side !== 'right' ? { height } : undefined}>
+      {side !== 'left' && side !== 'right' && <div className="feed-grip" onPointerDown={drag} onDoubleClick={() => { setHeightState(null); try { localStorage.removeItem(HKEY) } catch {} }} title="Drag to resize the activity panel; drag it all the way down to collapse it, up to open it. Double-click for the default size." />}
       <div className="feed-head" onClick={() => setCollapsed(!collapsed)} title={collapsed ? 'Show the activity panel' : 'Collapse the activity panel'}>
         <span className="chev">{collapsed ? '›' : '⌄'}</span>
         <span className="ttl">Activity</span>
         {concerns > 0 && <span className="feed-concerns">⚠ {concerns} to look at</span>}
         {collapsed && latest && <span className={`feed-latest ${latest.running ? 'run' : ''}`}>{latest.running ? '● ' : ''}{latest.text}</span>}
         <span className="grow" />
-        {!collapsed && <><span className="axis"><span>{fmtMs(t1 - t0)} ago</span><span>now</span></span>
+        {onSide && <span className="feed-side" onClick={e => e.stopPropagation()}>
+          {(['left', 'below', 'right'] as FeedSide[]).map(p => <button key={p} className={`icon ${side === p ? 'on' : ''}`} title={`Activity ${p === 'below' ? 'below' : `on the ${p}`}`} onClick={() => onSide(p)}>{p === 'left' ? '◧' : p === 'below' ? '⬓' : '◨'}</button>)}
+        </span>}
+        {!collapsed && side !== 'left' && side !== 'right' && <><span className="axis"><span>{fmtMs(t1 - t0)} ago</span><span>now</span></span>
         <span className="dur-h" /><span className="ago-h" /></>}
       </div>
       {!collapsed && <div ref={list} className="browser-feed-list" onScroll={e => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24 }}>
@@ -392,6 +402,13 @@ export function BrowserDock({ owner, approvals, mode, onMode }: { owner: string;
   // resized, the agent's window takes its shape too, like the side panel, so the picture has no bars.
   const PKEY = 'perch.browserDock.pip'
   const [pip, setPipState] = useState<{ w: number; h: number | null; right: number; top: number }>(() => { try { return { w: 340, h: null, right: 18, top: 52, ...JSON.parse(localStorage.getItem(PKEY) ?? '{}') } } catch { return { w: 340, h: null, right: 18, top: 52 } } })
+  // PiP activity: off until you open it (≡ in its top bar); then below, left or right of the picture.
+  const [pipFeed, setPipFeedState] = useState(() => { try { return localStorage.getItem('perch.pipFeed.on') === '1' } catch { return false } })
+  const setPipFeed = (v: boolean) => { setPipFeedState(v); try { localStorage.setItem('perch.pipFeed.on', v ? '1' : '0') } catch {} }
+  const [pipSide, setPipSideState] = useState<FeedSide>(() => { try { return (localStorage.getItem('perch.pipFeed.side') as FeedSide) || 'right' } catch { return 'right' } })
+  const setPipSide = (v: FeedSide) => { setPipSideState(v); try { localStorage.setItem('perch.pipFeed.side', v) } catch {} }
+  const PIP_FEED_W = 300, PIP_FEED_H = 190
+  const extraW = pipFeed && pipSide !== 'below' ? PIP_FEED_W : 0, extraH = pipFeed && pipSide === 'below' ? PIP_FEED_H : 0
   const setPip = (p: typeof pip) => { setPipState(p); try { localStorage.setItem(PKEY, JSON.stringify(p)) } catch {} }
   // The chat's size: the saved PiP is fitted inside it (smaller, nearer the corner) when the chat is
   // narrower or shorter than when you placed it, instead of hanging off its edge.
@@ -405,10 +422,10 @@ export function BrowserDock({ owner, approvals, mode, onMode }: { owner: string;
   }, [mode])
   const shown = (() => {
     if (!chatBox) return pip
-    const w = Math.max(160, Math.min(pip.w, chatBox.w - 24))
+    const w = Math.max(160, Math.min(pip.w, chatBox.w - 24 - extraW))
     const h = pip.h == null ? null : Math.max(100, Math.min(pip.h * (w / pip.w), chatBox.h - 140))
-    const right = Math.max(8, Math.min(pip.right, chatBox.w - w - 8))
-    const top = Math.max(8, Math.min(pip.top, chatBox.h - (h ?? w * 0.62) - 110))
+    const right = Math.max(8, Math.min(pip.right, chatBox.w - w - extraW - 8))
+    const top = Math.max(8, Math.min(pip.top, chatBox.h - (h ?? w * 0.62) - extraH - 110))
     return { w, h, right, top }
   })()
   const pipDrag = (e: React.PointerEvent, kind: 'move' | 'size') => {
@@ -467,10 +484,11 @@ export function BrowserDock({ owner, approvals, mode, onMode }: { owner: string;
     addEventListener('pointermove', move); addEventListener('pointerup', up)
   }
   if (mode === 'pip') return (
-    <div ref={box} className={`browser-dock pip ${shown.h ? 'sized' : ''}`} style={{ width: shown.w, height: shown.h ?? undefined, right: shown.right, top: shown.top }}
+    <div ref={box} className={`browser-dock pip ${shown.h ? 'sized' : ''} ${pipFeed ? `with-feed feed-${pipSide}` : ''}`} style={{ width: shown.w + extraW, height: shown.h != null ? shown.h + extraH : undefined, right: shown.right, top: shown.top }}
       onPointerDown={e => { if ((e.target as HTMLElement).closest('.pip-head')) pipDrag(e, 'move') }}>
       <ApprovalBar approvals={approvals} />
-      <BrowserView owner={owner} compact mini mode={mode} onMode={onMode} cap={shown.h} fit={!!shown.h} />
+      <BrowserView owner={owner} compact mini mode={mode} onMode={onMode} cap={shown.h != null ? shown.h + extraH : null} fit={!!shown.h}
+        feedOn={pipFeed} onFeed={setPipFeed} feedSide={pipSide} onFeedSide={setPipSide} />
       <div className="pip-resize" onPointerDown={e => { e.stopPropagation(); pipDrag(e, 'size') }} onDoubleClick={() => setPip({ ...pip, w: 340, h: null })} title="Drag to resize. Double-click for the default size." />
     </div>
   )
