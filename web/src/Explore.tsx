@@ -483,6 +483,9 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
   const [data, setData] = useState('')
   // "What is this": the team's own words now, a short AI summary when it's ready (cached per version of the folder).
   const [sum, setSum] = useState<any>(null)
+  // Usage side note: only for PostHog app products with traffic; nothing otherwise.
+  const [use, setUse] = useState<any>(null)
+  useEffect(() => { let gone = false; setUse(null); api.get(`/api/explore/usage?${qs({ repo, id })}`).then(x => !gone && setUse(x)).catch(() => {}); return () => { gone = true } }, [repo, id])
   useEffect(() => {
     let gone = false, tries = 0, t: ReturnType<typeof setTimeout>
     setSum(null)
@@ -544,6 +547,7 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
         {sum?.status === 'generating' && <div className="muted"><i className="spin" /> writing a short summary…</div>}
         {sum?.status === 'error' && !sum?.own && <div className="muted tiny" title={sum.error}>No summary yet (couldn't write one).</div>}
       </div>
+      {use?.applies && <UsageLine u={use} />}
       <div className="ex-actions small">
         <button className="small" onClick={onAsk} title="Ask the chat about this concept; it gets the map's evidence and is told to cite files">Ask</button>
         <button className="small" onClick={() => onFocus(d.concept.id)} title="Re-center the map on this concept">Focus</button>
@@ -636,6 +640,25 @@ function EdgeCard({ c, repo, onClose }: { c: { e: Edge; x: number; y: number; pi
         {!e.evidence.length && <div className="muted tiny">Added in this dream, so there's no code behind it yet.</div>}
       </div>
       {!c.pinned && <div className="muted tiny">Click the link to pin this and open files.</div>}
+    </div>
+  )
+}
+
+// One quiet line: weekly users now, its 26-week shape as a sparkline, and where it ranks among products.
+function UsageLine({ u }: { u: any }) {
+  const pts: number[] = u.weeks.map((w: any) => w.users)
+  const max = Math.max(1, ...pts), W = 90, H = 18
+  const d = pts.map((v, i) => `${i ? 'L' : 'M'}${(i / Math.max(1, pts.length - 1)) * W},${H - (v / max) * (H - 2) - 1}`).join(' ')
+  const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n)
+  const shape = `${u.trend}${u.spiky ? ', spiky' : ''}${u.change != null && u.trend !== 'steady' ? ` (${u.change > 0 ? '+' : ''}${Math.round(u.change * 100)}%)` : ''}`
+  const tip = `${u.source}\nWeekly users, last ${pts.length} complete weeks (from ${u.weeks[0].week})${u.rank ? `\nRank among ${u.of} products by users in the last 4 weeks: #${u.rank}` : ''}\n${u.weeks.map((w: any) => `${w.week}: ${k(w.users)}`).join('\n')}`
+  return (
+    <div className="ex-usage small muted" title={tip}>
+      <span>≈<b>{k(u.latest)}</b> weekly users</span>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}><path d={d} fill="none" stroke="var(--accent)" strokeWidth="1.5" /></svg>
+      <span>{shape}</span>
+      {u.rank && <span>· #{u.rank} of {u.of} products</span>}
+      {pts.length < 20 && <span>· pages since {u.weeks[0].week.slice(0, 7)}</span>}
     </div>
   )
 }

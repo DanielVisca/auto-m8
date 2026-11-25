@@ -66,6 +66,7 @@ import { deleteRoutine, fire, listRoutines, saveRoutine, startScheduler } from '
 import { DATA_DIR, settings, updateSettings } from './settings.ts'
 import { clickhouseDisks, connectors as exploreConnectors, dataFor as exploreData, listRepos, prewarmRuntime, whereItRuns } from './explorer-runtime.ts'
 import { summaryFor as exploreSummary, warmSummaries } from './explorer-summary.ts'
+import { usageFor as exploreUsage } from './explorer-usage.ts'
 import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
 import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
@@ -987,6 +988,7 @@ route('GET', '/api/explore/timeline', (_m, _r, _s, q) => exploreTimeline(String(
 route('GET', '/api/explore/node', (_m, _r, _s, q) => exploreNode(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
 route('POST', '/api/explore/dream', async (_m, req) => { const b = await body(req); return exploreDream(String(b.repo ?? ''), b.focus ?? null, Array.isArray(b.ops) ? b.ops : []) })
 route('POST', '/api/explore/open', async (_m, req) => { const b = await body(req); return exploreOpen(String(b.repo ?? ''), String(b.file ?? ''), Number(b.line) || undefined) })
+route('GET', '/api/explore/usage', (_m, _r, _s, q) => exploreUsage(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
 route('GET', '/api/explore/summary', (_m, _r, _s, q) => exploreSummary(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
 route('POST', '/api/explore/summary/warm', async (_m, req) => { const b = await body(req); return warmSummaries(String(b.repo ?? ''), Array.isArray(b.ids) ? b.ids.map(String) : []) })
 route('GET', '/api/explore/repos', () => listRepos())

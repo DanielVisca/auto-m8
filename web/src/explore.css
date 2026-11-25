@@ -133,3 +133,5 @@ a.ex-chip { cursor: pointer; }
 .ex-what-md ul { margin: 2px 0 2px 16px; padding: 0; }
 .ex-what-md li { margin: 1px 0; }
 .ex-what-md code { font-size: 11px; padding: 0 4px; border-radius: 4px; background: var(--bg3); }
+.ex-usage { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; cursor: help; }
+.ex-usage svg { flex: none; }
