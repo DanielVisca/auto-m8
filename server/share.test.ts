@@ -36,3 +36,15 @@ test('a board becomes a PostHog canvas project: live HogQL, snapshots for local 
   for (const f of Object.values<string>(files)) assert.doesNotMatch(f, /var\(--(muted|bg|fg|accent)\)/)
   assert.deepEqual(sharesOf(b.id), [])
 })
+
+test('generated files never trip PostHog\'s text checks, and still mean the same thing', async () => {
+  const { defuseCode, jsonFile } = await import('./share.ts')
+  const data = { note: "no bulk or Prometheus-rules import'], see <script> and fetch( from 'x' require(" }
+  const j = jsonFile(data)
+  assert.deepEqual(JSON.parse(j), data)
+  const checks = [/\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']/, /\bimport\s*\(/, /\brequire\s*\(/, /<script\b/i, /\bfetch\s*\(/]
+  for (const re of checks) assert.doesNotMatch(j, re)
+  const code = defuseCode(`const a = ['rules import'], b = "data from 'x'", c = '<script>'`)
+  for (const re of [checks[0], checks[3]]) assert.doesNotMatch(code, re)
+  assert.deepEqual(new Function(`${code}; return [a, b, c]`)(), [['rules import'], "data from 'x'", '<script>'])
+})

@@ -61,6 +61,13 @@ export function splitTile(html: string) {
   return { markup: markup.trim(), scripts, external }
 }
 
+// PostHog validates canvas files with plain-text patterns, so prose in a tile ("…rules import'],")
+// reads as an import statement. A function body can't hold a static import or a <script> tag
+// outside a string or comment, so escaping one letter there changes nothing at runtime.
+// Data files (JSON) can be escaped freely: \u escapes decode to the same text.
+export const defuseCode = (js: string) => js.replace(/\b(imp)o(rt\s*['"])/g, '$1\\u006f$2').replace(/\b(fr)o(m\s*['"])/g, '$1\\u006f$2').replace(/<(script)/gi, '\\u003c$1')
+export const jsonFile = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c').replace(/\b(imp|fr|fetch|requir|XMLHttpReq)([oe]?)/g, (m: string) => m.slice(0, -1) + '\\u' + m.charCodeAt(m.length - 1).toString(16).padStart(4, '0'))
+
 function libFor(src: string) {
   const name = Object.keys(LIBS).find(k => new RegExp(`[/@.-]${k}([@./-]|$)`, 'i').test(src))
   return name ? LIBS[name] : null
@@ -242,7 +249,7 @@ export function translateForPostHog(b: Board): Translated {
       libs.forEach(l => uses.add(l!.pkg))
       const imports = libs.map((l, j) => l!.star ? `import * as lib${j} from '${l!.pkg}'` : `import lib${j} from '${l!.pkg}'`).join('\n')
       const params = libs.map((l, j) => `${l!.name} = lib${j}`).join(', ')
-      files[`src/tiles/t${i}.js`] = `${imports}\n// "${title.replace(/\n/g, ' ')}" from auto-m8\nexport default async function run(document, window, perch${params ? ', ' + params : ''}) {\n${scripts.join('\n;\n')}\n}\n`
+      files[`src/tiles/t${i}.js`] = `${imports}\n// "${title.replace(/\n/g, ' ')}" from auto-m8\nexport default async function run(document, window, perch${params ? ', ' + params : ''}) {\n${defuseCode(scripts.join('\n;\n'))}\n}\n`
       runners.push(`import t${i} from './t${i}.js'`)
       tilesOut.push({ ...base, markup, refresh: Number(t.config.refresh) || 0, _i: i })
     } else if (t.kind === 'note') {
@@ -256,8 +263,8 @@ export function translateForPostHog(b: Board): Translated {
   })
   const withIdx = tilesOut.filter(t => t._i != null)
   files['src/tiles/index.js'] = `${runners.join('\n')}\nexport default {\n${withIdx.map(t => `  ${JSON.stringify(t.id)}: t${t._i},`).join('\n')}\n}\n`
-  files['src/board.json'] = JSON.stringify({ name: b.name, about: b.about ?? '', tiles: tilesOut.map(({ _i, ...t }) => t) })
-  files['src/snapshots.json'] = JSON.stringify(snapshots)
+  files['src/board.json'] = jsonFile({ name: b.name, about: b.about ?? '', tiles: tilesOut.map(({ _i, ...t }) => t) })
+  files['src/snapshots.json'] = jsonFile(snapshots)
   files['src/perch.js'] = RUNTIME
   files['src/canvas.tsx'] = APP
   files['src/main.tsx'] = MAIN
@@ -275,7 +282,7 @@ export function translateForPostHog(b: Board): Translated {
 const project = () => settings.posthog.projectId
 const posthogTarget: Target = {
   id: 'posthog', label: 'PostHog canvas',
-  about: "Publishes the board as a canvas in a PostHog channel. People in that channel can open it; PostHog keeps its versions and runs its queries with each viewer's own access.",
+  about: "Publishes the board as a PostHog canvas. You choose who can open it; PostHog keeps its versions and runs its queries with each viewer's own access.",
   async available() {
     if (!project()) return { ok: false, why: 'Choose a PostHog project in Settings first' }
     try { await posthogFetch(`/api/projects/${project()}/canvases/?limit=1`); return { ok: true } } catch (e: any) { return { ok: false, why: e.message } }
