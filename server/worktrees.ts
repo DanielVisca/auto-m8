@@ -174,10 +174,12 @@ export function inventory(opts: { fresh?: boolean } = {}): Promise<Worktree[]> {
   if (!opts.fresh && cache) { if (Date.now() - cache.at > 10 * 60_000) refresh().catch(() => {}); return Promise.resolve(cache.list) }
   return refresh()
 }
+const listPaths = () => roots().flatMap(r => readdirSync(r).filter(n => !n.startsWith('.')).map(n => join(r, n))).filter(p => { try { return statSync(p).isDirectory() } catch { return false } })
+
 function refresh(): Promise<Worktree[]> {
   if (inflight) return inflight
   inflight = (async () => {
-    const paths = roots().flatMap(r => readdirSync(r).filter(n => !n.startsWith('.')).map(n => join(r, n))).filter(p => { try { return statSync(p).isDirectory() } catch { return false } })
+    const paths = listPaths()
     // `git status` on the PostHog monorepo takes seconds and is disk-bound: two at a time, reusing
     // what hasn't changed since the last pass.
     const out: Worktree[] = []
@@ -246,22 +248,34 @@ let sweeping = false
 
 // Removes every worktree with no reason to stay. dryRun lists what would go.
 export async function sweep(opts: { dryRun?: boolean } = {}): Promise<SweepResult & { wouldRemove?: Worktree[] }> {
-  const list = await inventory({ fresh: !opts.dryRun || (snapshotAge() ?? Infinity) > 10 * 60_000 })
-  const go = list.filter(w => !w.keep)
   const freeNow = await freeGb(roots()[0] ?? '/')
-  if (opts.dryRun) return { at: Date.now(), removed: [], kept: list.length - go.length, failed: [], freeGb: freeNow, wouldRemove: go }
-  // Another sweep is mid-way (removing a PostHog checkout takes a while); say so rather than hand back an old result as if it were this one.
-  if (sweeping) return { ...(lastSweep ?? { at: Date.now(), removed: [], kept: list.length, failed: [], freeGb: freeNow }), inProgress: true }
+  if (opts.dryRun) {
+    const list = await inventory({ fresh: (snapshotAge() ?? Infinity) > 10 * 60_000 })
+    const go = list.filter(w => !w.keep)
+    return { at: Date.now(), removed: [], kept: list.length - go.length, failed: [], freeGb: freeNow, wouldRemove: go }
+  }
+  // Another sweep is mid-way; say so rather than hand back an old result as if it were this one.
+  if (sweeping) return { ...(lastSweep ?? { at: Date.now(), removed: [], kept: 0, failed: [], freeGb: freeNow }), inProgress: true }
   sweeping = true
   const removed: SweepResult['removed'] = [], failed: SweepResult['failed'] = []
+  let kept = 0
   try {
-    for (const w of go) {
-      try { const r = await remove(w.path, { onlyIfIdle: true, force: w.kind === 'pr' && w.prState !== 'OPEN' }); if (r.ok) removed.push({ path: w.path, note: r.note }); else if (!r.note.startsWith('kept:')) failed.push({ path: w.path, error: r.note }) }
-      catch (e: any) { failed.push({ path: w.path, error: String(e?.message ?? e).slice(0, 300) }) }
+    // Check and remove one checkout at a time, least recently touched first, instead of reading all
+    // ~200 first: that read takes longer than the gap between server restarts, so sweeps that
+    // waited for it never got to remove anything.
+    const paths = listPaths().map(p => { try { return { p, t: statSync(p).mtimeMs } } catch { return { p, t: 0 } } }).sort((a, b) => a.t - b.t).map(x => x.p)
+    for (const path of paths) {
+      try {
+        const w = await inspect(path, { reuse: true })
+        if (w.keep) { kept++; continue }
+        const r = await remove(path, { onlyIfIdle: true, force: w.kind === 'pr' && w.prState !== 'OPEN' })
+        if (r.ok) { removed.push({ path, note: r.note }); console.log(`worktrees: removed ${basename(path)} (${r.note})`) }
+        else { kept++; if (!r.note.startsWith('kept:')) failed.push({ path, error: r.note }) }
+      } catch (e: any) { failed.push({ path, error: String(e?.message ?? e).slice(0, 300) }) }
     }
   } finally { sweeping = false }
-  lastSweep = { at: Date.now(), removed, kept: list.length - go.length, failed, freeGb: await freeGb(roots()[0] ?? '/') }
-  if (removed.length || failed.length) console.log(`worktrees: removed ${removed.length}, kept ${lastSweep.kept}, failed ${failed.length}`)
+  lastSweep = { at: Date.now(), removed, kept, failed, freeGb: await freeGb(roots()[0] ?? '/') }
+  if (removed.length || failed.length) console.log(`worktrees: sweep removed ${removed.length}, kept ${kept}, failed ${failed.length}`)
   return lastSweep
 }
 
