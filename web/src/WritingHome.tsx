@@ -10,8 +10,9 @@ type Doc = { id: string; path: string; title: string; status: 'draft' | 'final';
 type ShelfPost = { slug: string; title: string; point: string; status: string; words: number; draft: string; worksheet: string | null; updated_at: number; excerpt: string; image: string | null }
 type Idea = { file: string; path: string; title: string; point: string; captured: string; updated_at: number }
 type Dest = { id: string; name: string; status: 'ready' | 'planned'; how: string }
+type Pinned = { path: string; title: string; status: string | null; words: number; open_comments: number; worksheet: string | null; updated_at: number; excerpt: string; image: string | null }
 export type WritingData = {
-  docs: Doc[]; dir: string; reviews: number; destinations: Dest[]
+  docs: Doc[]; dir: string; reviews: number; destinations: Dest[]; pinned?: Pinned[]
   shelf: null | { dir: string; readme: string | null; posts: ShelfPost[]; ideas: Idea[]; last_run: { file: string; path: string; at: number } | null }
 }
 export const useWriting = () => useLive<WritingData>('/api/explore/writing', ['docs'], undefined, 60_000).data
@@ -52,6 +53,9 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
   const mine = docs.filter(d => match(d.title + d.path))
   const reviewing = docs.filter(d => (d.open_comments ?? 0) > 0)
   const review = (p: string) => onStart(`Review my draft ${tilde(p)} with the auto-m8 doc tool. Leave comments only and don't edit the text: point out unclear sentences, claims that need a source (check the worksheet next to it if there is one), AI tells, and anything a reader without context would trip on.`)
+  const pinnedPaths = new Set((data?.pinned ?? []).map(p => p.path))
+  const pin = (path: string, on: boolean) => post('/api/explore/writing/pin', { path, on }).catch(() => {})
+  const Pin = ({ path }: { path: string }) => { const on = pinnedPaths.has(path); return <button className={`small wh-pin ${on ? 'on' : ''}`} onClick={e => { e.stopPropagation(); pin(path, !on) }} title={on ? 'Unpin' : 'Pin to Working on'}>{on ? '📌 Pinned' : '📌'}</button> }
   const develop = (i: Idea) => onStart(`Use the perch-blog-workshop skill to turn this captured idea into a short draft with an evidence worksheet: ${tilde(i.path)}. One point, my voice, no publishing.`)
 
   if (!data) return <div className="page wh"><h2>Writing</h2><div className="muted">Loading…</div></div>
@@ -75,6 +79,25 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
       </div>
       {only && <div className="small wh-only">Showing only {({ docs: 'your docs', drafts: 'drafted posts', ideas: 'ideas', published: 'published pages', review: 'docs waiting on review' } as const)[only]} · <button className="link small" onClick={() => setOnly(null)}>Show everything</button></div>}
 
+      {(!only || only === 'docs' || only === 'drafts') && (data.pinned?.length ?? 0) > 0 && <section className="wh-sec">
+        <h3>Working on <span className="muted small">pinned; 📌 on any doc or draft adds it here</span></h3>
+        <div className="wh-grid">{data.pinned!.filter(p => match(p.title + p.path)).map(p => (
+          <div key={p.path} className="wh-card wh-pinned">
+            <button className="wh-card-main" onClick={() => open({ path: p.path })} title={tilde(p.path)}>
+              <b>{p.title}</b>
+              <Preview text={p.excerpt} image={p.image} />
+              <span className="small wh-meta">{p.status && <span className={`chip small ${ready(p.status) || p.status === 'final' ? 'final' : ''}`}>{p.status}</span>}{p.open_comments > 0 && <span>💬 {p.open_comments}</span>}<span className="muted">{p.words} words · edited {ago(p.updated_at)}</span></span>
+            </button>
+            <div className="wh-card-actions">
+              <button className="small" onClick={() => open({ path: p.path })}>Edit</button>
+              {p.worksheet && <button className="small" onClick={() => open({ path: p.worksheet! })}>Evidence</button>}
+              <button className="small" onClick={() => review(p.path)}>Ask for review</button>
+              <Pin path={p.path} />
+            </div>
+          </div>))}
+        </div>
+      </section>}
+
       {show('published') && <Published pub={pub} expanded={only === 'published'} />}
 
       {only === 'review' && !reviewing.length && <section className="wh-sec"><h3>Waiting on you</h3><div className="muted small">No open review comments. Ask for review on a doc or draft and its comments land here.</div></section>}
@@ -95,7 +118,7 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
                 <span className="small wh-meta"><span className={`chip small ${d.status}`}>{d.status}</span>{d.agent_text === 'blocked' && <span className="chip small" title="Agents may comment and research, not write">✍ yours only</span>}{!!d.open_comments && <span>💬 {d.open_comments}</span>}<span className="muted">{ago(d.updated_at)}</span></span>
                 <span className="muted small ellipsis">{tilde(d.path)}</span>
               </button>
-              <div className="wh-card-actions"><button className="small" onClick={() => review(d.path)}>Ask for review</button></div>
+              <div className="wh-card-actions"><button className="small" onClick={() => review(d.path)}>Ask for review</button><Pin path={d.path} /></div>
             </div>))}
           {!mine.length && <div className="muted small">{q ? 'Nothing matches.' : 'No docs yet.'}</div>}
         </div>
@@ -117,6 +140,7 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
                 <button className="small" onClick={() => open({ path: p.draft })}>Edit</button>
                 {p.worksheet && <button className="small" onClick={() => open({ path: p.worksheet! })}>Evidence</button>}
                 <button className="small" onClick={() => review(p.draft)}>Ask for review</button>
+                <Pin path={p.draft} />
               </div>
             </div>))}
             {!posts.length && <div className="muted small">{q ? 'Nothing matches.' : 'No drafts yet.'}</div>}
@@ -269,11 +293,28 @@ function ViewsChart({ weeks, pages }: { weeks: number[]; pages: PubPage[] }) {
     </div>
   )
 }
+// Click a column header to sort by it: first click biggest (or newest, or A→Z) first, second click the
+// other way, third click back to the order the pages came in.
+type PubSortKey = 'title' | 'total' | 'views30' | 'visitors30' | 'reads30' | 'published_at'
+const PUB_COLS: { key: PubSortKey; label: string; title?: string }[] = [
+  { key: 'title', label: 'Page' }, { key: 'total', label: '26 weeks', title: 'Sort by total views over 26 weeks' },
+  { key: 'views30', label: '30d views' }, { key: 'visitors30', label: '30d visitors' },
+  { key: 'reads30', label: '30d reads', title: 'Scrolled 60%+ and stayed 30s+' }, { key: 'published_at', label: 'Published' },
+]
 function Published({ pub, expanded }: { pub: Pub | null; expanded?: boolean }) {
   const [open, setAll] = useState(false), all = open || !!expanded
+  const [sort, setSort] = useState<{ key: PubSortKey; dir: 'desc' | 'asc' } | null>(null)
+  const cycle = (key: PubSortKey) => setSort(s => !s || s.key !== key ? { key, dir: key === 'title' ? 'asc' : 'desc' } : (s.dir === (key === 'title' ? 'asc' : 'desc')) ? { key, dir: key === 'title' ? 'desc' : 'asc' } : null)
   if (!pub) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Finding what you published…</div></section>
   if (pub.error) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Couldn't list published pages: {pub.error}</div></section>
   const pages = pub.pages, v30 = pages.reduce((n, p) => n + p.views30, 0), tot = pages.reduce((n, p) => n + p.total, 0)
+  const sorted = !sort ? pages : [...pages].sort((a, b) => {
+    const k = sort.key, m = sort.dir === 'asc' ? 1 : -1
+    if (k === 'title') return m * a.title.localeCompare(b.title)
+    // pages with no date sort last either way
+    if (k === 'published_at' && (a.published_at == null || b.published_at == null)) return (a.published_at == null ? 1 : 0) - (b.published_at == null ? 1 : 0)
+    return m * (((a[k] as number) ?? 0) - ((b[k] as number) ?? 0))
+  })
   return (
     <section className="wh-sec">
       <h3>Published <span className="muted small">{pages.length} pages on {pub.host} you created or have a byline on · {fmt(v30)} views in 30 days · {fmt(tot)} in 26 weeks</span>
@@ -287,8 +328,11 @@ function Published({ pub, expanded }: { pub: Pub | null; expanded?: boolean }) {
       </div>}
       {pub.weeks.length > 0 && <ViewsChart weeks={pub.weeks} pages={pages} />}
       <div className="wh-pub">
-        <div className="wh-pub-row wh-pub-head muted small"><span>Page</span><span>26 weeks</span><span>30d views</span><span>30d visitors</span><span title="Scrolled 60%+ and stayed 30s+">30d reads</span><span>Published</span></div>
-        {pages.slice(0, all ? 200 : 6).map(p => (
+        <div className="wh-pub-row wh-pub-head muted small">{PUB_COLS.map(c => (
+          <button key={c.key} className={`wh-sort ${sort?.key === c.key ? 'on' : ''}`} title={c.title ?? `Sort by ${c.label.toLowerCase()}`} onClick={() => cycle(c.key)}>
+            {c.label}<span className="arrow">{sort?.key === c.key ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}</span>
+          </button>))}</div>
+        {sorted.slice(0, all ? 200 : 6).map(p => (
           <a key={p.file} className="wh-pub-row" href={p.url} target="_blank" rel="noreferrer" title={p.url}>
             <span className="ellipsis"><b>{p.title}</b> <span className={`chip small ${p.kind === 'article' ? 'final' : ''}`}>{p.byline ? 'your post' : p.kind}</span> <span className="muted small">{p.path}</span></span>
             <Spark v={p.weekly} />

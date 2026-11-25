@@ -261,7 +261,7 @@ const tools = [
     inputSchema: { type: 'object', properties: {
       conversation_id: { type: 'string', description: 'Your own conversation id' }, brief: { type: 'string' },
       name: { type: 'string', description: 'Short label, e.g. "review PR 1234"' }, cwd: { type: 'string', description: 'Directory to work in; defaults to yours' },
-      mode: { type: 'string', enum: ['plan', 'acceptEdits'], description: 'plan = read-only, acceptEdits (default) = may edit files' },
+      mode: { type: 'string', enum: ['plan', 'acceptEdits'], description: "plan = read-only; acceptEdits (default) = may edit files and run commands, in your own permission mode" },
       engine: { type: 'string', description: "Which model runs the helper. Claude and Codex are peers with the same auto-m8 tools, MCP servers, instructions and memory, and each can delegate to the other: 'auto' (default, auto-m8 picks and falls back if one is capped), 'claude' (Sonnet), 'claude:opus', 'claude:haiku', 'codex', or 'codex:<model>'. Use the other one when you want an independent second opinion or when yours is slow or capped." },
       worktree: { type: 'boolean', description: "Give the helper its own git worktree and branch (perch/helper-<id>) made from your repo's HEAD, so parallel helpers editing code never collide with you or each other. Use it whenever two or more helpers, or you and a helper, change files in the same repo at once. Your uncommitted changes are not in it. Its report names the branch; you merge it. Up to 6 at once on this Mac." },
       workstream: { type: 'string', description: "A workstream key in your conversation's project: links the helper to it so the project view shows who works on what" },

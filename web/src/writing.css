@@ -199,3 +199,11 @@ button.wh-stat.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .wh-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 8px; }
 .wh-sum > div { display: flex; flex-direction: column; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); }
 .wh-sum b { font-size: 22px; }
+/* Sortable column headers: click to sort, again to reverse, a third time for the original order. */
+.wh-pub-head .wh-sort { all: unset; cursor: pointer; color: inherit; font: inherit; white-space: nowrap; }
+.wh-pub-head .wh-sort:hover, .wh-pub-head .wh-sort.on { color: var(--fg); }
+.wh-pub-head .wh-sort:nth-child(3), .wh-pub-head .wh-sort:nth-child(4), .wh-pub-head .wh-sort:nth-child(5) { text-align: right; }
+.wh-pub-head .wh-sort .arrow { color: var(--accent); }
+.wh-pin { margin-left: auto; }
+.wh-pin.on { border-color: var(--accent); color: var(--accent); }
+.wh-pinned { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }

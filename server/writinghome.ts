@@ -8,6 +8,8 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { listDocs, DOCS_DIR } from './docs.ts'
+import { DATA_DIR } from './settings.ts'
+import { writeFileSync } from 'node:fs'
 
 // The shelf folder: PERCH_WRITING_SHELF, else ~/Documents/blog-workshop when it exists.
 export const shelfDir = () => process.env.PERCH_WRITING_SHELF || join(homedir(), 'Documents', 'blog-workshop')
@@ -91,10 +93,30 @@ export const DESTINATIONS = [
   { id: 'hook', name: 'Custom hook', status: 'planned', how: 'Give a URL and an optional secret. Publish POSTs JSON { title, markdown, html, path, status } signed with the secret, so any CMS, Zapier, n8n or your own script can take it from there.' },
 ] as const
 
+// Pinned: the pieces you're working on now, newest pin first. Paths, so any markdown file can be
+// pinned (a doc, a shelf draft, a file you opened from the finder). Missing files drop out.
+const PIN_FILE = () => join(DATA_DIR, 'writing-pins.json')
+export function pins(): string[] { try { const v = JSON.parse(readFileSync(PIN_FILE(), 'utf8')); return Array.isArray(v) ? v.filter(x => typeof x === 'string') : [] } catch { return [] } }
+export function setPin(path: string, on: boolean) {
+  path = String(path ?? '').replace(/^~(?=\/|$)/, HOME)
+  if (!isAbsolute(path) || !TEXT.test(path)) throw new Error('Only markdown or text files can be pinned')
+  const next = [...(on ? [path] : []), ...pins().filter(p => p !== path)].slice(0, 24)
+  writeFileSync(PIN_FILE(), JSON.stringify(next))
+  return { pins: next }
+}
+function pinned(shelf: ReturnType<typeof readShelf>, docs: any[]) {
+  return pins().filter(p => existsSync(p)).map(path => {
+    const text = readText(path), post = shelf?.posts.find(x => x.draft === path), doc = docs.find(d => d.path === path)
+    return { path, title: post?.title || doc?.title || heading(text) || basename(path).replace(/\.\w+$/, ''), status: post?.status ?? doc?.status ?? null,
+      words: words(text), open_comments: doc?.open_comments ?? 0, worksheet: post?.worksheet ?? null, updated_at: mtime(path), ...preview(text, path) }
+  })
+}
+
 export function writingHome() {
   const docs = listDocs().map((d: any) => ({ ...d, ...(d.exists ? preview(readText(d.path), d.path) : { excerpt: '', image: null }) }))
+  const shelf = readShelf()
   return {
-    docs, dir: DOCS_DIR, shelf: readShelf(),
+    docs, dir: DOCS_DIR, shelf, pinned: pinned(shelf, docs),
     reviews: docs.filter((d: any) => d.open_comments > 0).length,
     destinations: DESTINATIONS,
   }
