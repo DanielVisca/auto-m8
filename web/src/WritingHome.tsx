@@ -206,12 +206,14 @@ function DocRow({ d, onOpen, onReview }: { d: Doc; onOpen: () => void; onReview?
 }
 
 // Explore landing tile art: the most recent titles as stacked pages.
-export function WritingArt({ data }: { data?: WritingData }) {
+export function WritingArt({ data, posts = [] }: { data?: WritingData; posts?: string[] }) {
   const seen = new Set<string>()
   const titles = [...(data?.docs ?? []).map(d => ({ k: d.path, t: d.title || 'Untitled', at: d.updated_at })), ...(data?.shelf?.posts ?? []).map(p => ({ k: p.draft, t: p.title, at: p.updated_at }))]
-    .sort((a, b) => b.at - a.at).filter(x => !seen.has(x.k) && !!seen.add(x.k)).slice(0, 4)
-  if (!titles.length) return <span className="muted">No writing yet</span>
-  return <div className="wh-art">{titles.map((x, i) => <div key={i} className="wh-page"><b>{x.t}</b><i /><i /><i /></div>)}</div>
+    .sort((a, b) => b.at - a.at).filter(x => !seen.has(x.k) && !!seen.add(x.k))
+  // Published posts lead, marked, then the most recent drafts.
+  const pages = [...posts.map(t => ({ k: t, t, at: 0, live: true })), ...titles.map(x => ({ ...x, live: false }))].slice(0, 4)
+  if (!pages.length) return <span className="muted">No writing yet</span>
+  return <div className="wh-art">{pages.map((x, i) => <div key={i} className={`wh-page ${x.live ? 'live' : ''}`}>{x.live && <span className="wh-live">published</span>}<b>{x.t}</b><i /><i /><i /></div>)}</div>
 }
 
 // ── Published: pages on the site repo you created or have a byline on, with their views ──
@@ -277,7 +279,7 @@ function Published({ pub }: { pub: Pub | null }) {
         <div className="wh-pub-row wh-pub-head muted small"><span>Page</span><span>26 weeks</span><span>30d views</span><span>30d visitors</span><span>Published</span></div>
         {pages.slice(0, all ? 200 : 6).map(p => (
           <a key={p.file} className="wh-pub-row" href={p.url} target="_blank" rel="noreferrer" title={p.url}>
-            <span className="ellipsis"><b>{p.title}</b> <span className={`chip small ${p.kind === 'article' ? 'final' : ''}`}>{p.byline ? 'byline' : p.kind}</span> <span className="muted small">{p.path}</span></span>
+            <span className="ellipsis"><b>{p.title}</b> <span className={`chip small ${p.kind === 'article' ? 'final' : ''}`}>{p.byline ? 'your post' : p.kind}</span> <span className="muted small">{p.path}</span></span>
             <Spark v={p.weekly} />
             <span>{fmt(p.views30)}</span><span>{fmt(p.visitors30)}</span>
             <span className="muted small">{p.published_at ? new Date(p.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</span>

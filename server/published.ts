@@ -105,5 +105,5 @@ export async function published() {
   if ('pending' in v) return { ...found, repo: REPO(), host: HOST(), pending_views: true, weeks: [], pages: found.pages.map(p => ({ ...p, weekly: [], views30: 0, visitors30: 0, total: 0 })), insight: insightUrl(paths) }
   if ('error' in (v as any)) return { ...found, repo: REPO(), host: HOST(), views_error: (v as any).error, weeks: [], pages: found.pages.map(p => ({ ...p, weekly: [], views30: 0, visitors30: 0, total: 0 })), insight: insightUrl(paths) }
   return { ...found, repo: REPO(), host: HOST(), weeks: v.weeks, insight: insightUrl(paths),
-    pages: found.pages.map(p => ({ ...p, ...v.byPath[p.path] })).sort((a, b) => b.views30 - a.views30 || b.total - a.total) }
+    pages: found.pages.map(p => ({ ...p, ...v.byPath[p.path] })).sort((a, b) => Number(b.byline) - Number(a.byline) || b.views30 - a.views30 || b.total - a.total) }
 }

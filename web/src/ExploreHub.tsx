@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ago, post, shell, toast, useLive } from './api'
 import type { Repo } from './ExploreRuntime'
-import { useWriting, WritingArt } from './WritingHome'
+import { usePublished, useWriting, WritingArt } from './WritingHome'
 import './explorehub.css'
 
 type ChatRef = { id: string; title: string; role: string; at: number }
@@ -115,6 +115,7 @@ export function ExploreHub(nav: Nav) {
   const products = useLive<{ products: Product[] }>('/api/explore/competitors', ['product-research']).data?.products ?? []
   const repos = useCodebases()
   const writing = useWriting()
+  const published = usePublished()
   const recent = useMemo(() => { try { return JSON.parse(localStorage.getItem('perch.explore.repos') ?? '[]') as string[] } catch { return [] } }, [])
   useThumbs(canvases)
   const shown = [...canvases].sort((a, b) => (b.opened_at ?? b.updated_at) - (a.opened_at ?? a.updated_at)).slice(0, 4)
@@ -146,9 +147,9 @@ export function ExploreHub(nav: Nav) {
           <span className="small">Architecture map: what each part is built on, and how it grew.</span>
         </button>
         <button className="exh-tile" onClick={() => nav.onSection('writing')}>
-          <div className="exh-tile-art"><WritingArt data={writing} /></div>
+          <div className="exh-tile-art"><WritingArt data={writing} posts={published?.pages?.filter(p => p.byline).map(p => p.title)} /></div>
           <b>Writing</b>
-          <span className="muted small">{writing?.docs.length ?? 0} docs · {writing?.shelf?.posts.length ?? 0} drafted posts · {writing?.shelf?.ideas.length ?? 0} ideas{writing?.reviews ? ` · ${writing.reviews} waiting on review` : ''}</span>
+          <span className="muted small">{published?.pages ? `${published.pages.length} published · ${published.pages.reduce((n, p) => n + p.views30, 0).toLocaleString()} views in 30d · ` : ''}{writing?.docs.length ?? 0} docs · {writing?.shelf?.posts.length ?? 0} drafted posts · {writing?.shelf?.ideas.length ?? 0} ideas{writing?.reviews ? ` · ${writing.reviews} waiting on review` : ''}</span>
           <span className="small">Write, review, draft and share posts, blogs and write-ups.</span>
         </button>
       </div>

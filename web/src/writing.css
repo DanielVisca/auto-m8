@@ -190,3 +190,5 @@
 .wh-pub-row > span:nth-child(3), .wh-pub-row > span:nth-child(4) { text-align: right; }
 .wh-spark { width: 100%; height: 22px; }
 .wh-spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.wh-page.live { border-color: var(--accent); }
+.wh-live { font-size: 8px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); font-weight: 700; }
