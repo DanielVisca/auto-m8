@@ -430,7 +430,7 @@ function setMini(on) {
   return beforeMini ? 'mini' : 'none'
 }
 
-// Tuck: perch slides off the nearest outer edge of the screen it's on (left, right, top or bottom),
+// Tuck: perch slides off the nearest outer side edge of the screen it's on (left or right, never top or bottom),
 // leaving a small tab flush against that edge. An edge that touches another display doesn't count:
 // a tab there floats in the middle of the desktop (a laptop left of a monitor makes the monitor's
 // left edge a seam). Click the tab (or press the show/hide shortcut) and it slides back out to
@@ -470,7 +470,8 @@ function tuckSpot(b, d, others, blocked = new Set()) {
     top: others.some(o => near(o.y + o.height, f.y) && overlap(x, x + TAB.long, o.x, o.x + o.width)),
     bottom: others.some(o => near(o.y, f.y + f.height) && overlap(x, x + TAB.long, o.x, o.x + o.width)),
   }
-  const dist = { left: b.x - a.x, right: a.x + a.width - (b.x + b.width), top: b.y - a.y, bottom: a.y + a.height - (b.y + b.height) }
+  // Only the side edges: a tab on the top or bottom gets lost under the menu bar and the Dock.
+  const dist = { left: b.x - a.x, right: a.x + a.width - (b.x + b.width) }
   const free = Object.keys(dist).filter(e => !seam[e] && !blocked.has(e))
   const edge = (free.length ? free : Object.keys(dist)).sort((p, q) => dist[p] - dist[q])[0]
   const over = seam[edge] ? 0 : TAB.over
