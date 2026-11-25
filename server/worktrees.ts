@@ -6,8 +6,8 @@
 // Removal never loses work: a worktree with uncommitted changes is kept (or stashed first when an
 // agent forces it), a branch survives its worktree, and a detached HEAD with commits nowhere else
 // gets a perch-rescue/<name> branch before its checkout goes.
-import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { execFile, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -177,7 +177,7 @@ export function inventory(opts: { fresh?: boolean } = {}): Promise<Worktree[]> {
 function refresh(): Promise<Worktree[]> {
   if (inflight) return inflight
   inflight = (async () => {
-    const paths = roots().flatMap(r => readdirSync(r).map(n => join(r, n))).filter(p => { try { return statSync(p).isDirectory() } catch { return false } })
+    const paths = roots().flatMap(r => readdirSync(r).filter(n => !n.startsWith('.')).map(n => join(r, n))).filter(p => { try { return statSync(p).isDirectory() } catch { return false } })
     // `git status` on the PostHog monorepo takes seconds and is disk-bound: two at a time, reusing
     // what hasn't changed since the last pass.
     const out: Worktree[] = []
@@ -207,12 +207,37 @@ export async function remove(path: string, opts: { force?: boolean; onlyIfIdle?:
     await git(path, ['branch', '-f', rescue, 'HEAD'])
     notes.push(`kept its ${w.unique} commits on branch ${rescue}`)
   }
-  await git(w.repo, ['worktree', 'remove', '--force', path], 300_000)
-  await git(w.repo, ['worktree', 'prune']).catch(() => {})
+  await discard(w.repo, path)
   if (cache) cache.list = cache.list.filter(x => x.path !== path)
   if (w.noise && !w.dirty) notes.push(`dropped ${w.noise}`)
   if (w.branch) notes.push(`branch ${w.branch} kept`)
   return { ok: true, note: notes.join('; ') || 'removed' }
+}
+
+// `git worktree remove` deletes a PostHog checkout file by file: 3 to 6 minutes each, so a sweep of
+// 60 took hours and server restarts kept cutting it short. Moving the folder into .trash/ is instant
+// (same disk), `git worktree prune` then forgets it, and the delete runs in the background at low
+// priority. Everything worth keeping was saved before this (stash, rescue branch; branches live in
+// the main repo), and .trash/ is emptied again at startup in case a delete was interrupted.
+const TRASH = '.trash'
+async function discard(repo: string, path: string) {
+  const trash = join(dirname(path), TRASH)
+  mkdirSync(trash, { recursive: true })
+  await git(repo, ['worktree', 'unlock', path]).catch(() => {})
+  const dest = join(trash, `${basename(path)}-${Date.now()}`)
+  renameSync(path, dest)
+  await git(repo, ['worktree', 'prune'])
+  deleteInBackground([dest])
+}
+function deleteInBackground(paths: string[]) {
+  if (!paths.length) return
+  spawn('nice', ['-n', '19', 'rm', '-rf', ...paths], { detached: true, stdio: 'ignore' }).unref()
+}
+function emptyTrash() {
+  for (const r of roots()) {
+    const t = join(r, TRASH)
+    try { deleteInBackground(readdirSync(t).map(n => join(t, n))) } catch {}
+  }
 }
 
 export type SweepResult = { at: number; removed: { path: string; note: string }[]; kept: number; failed: { path: string; error: string }[]; freeGb: number | null; inProgress?: boolean }
@@ -266,6 +291,7 @@ export async function createHelper(cwd: string, id: string) {
 }
 
 export function startSweeping() {
+  emptyTrash()
   // First pass two minutes after start (not to compete with startup), then hourly.
   setTimeout(() => { sweep().catch(e => console.error('worktrees sweep', e)) }, 2 * 60_000).unref()
   setInterval(() => { sweep().catch(e => console.error('worktrees sweep', e)) }, H).unref()

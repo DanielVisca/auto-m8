@@ -30,6 +30,9 @@ test('a helper worktree gets its own branch and survives removal as a branch', a
   const r = await remove(w.dir)
   assert.ok(r.ok, r.note); assert.ok(!existsSync(w.dir))
   assert.match(sh(dir, 'log', '--oneline', 'perch/helper-0123abcd'), /helper work/)
+  // git forgets the checkout right away; its files go to .trash/ and are deleted in the background.
+  assert.ok(!sh(dir, 'worktree', 'list').includes('app-helper-0123abcd'))
+  assert.ok(existsSync(join(dir, '..', '.perch-worktrees', '.trash')))
 })
 
 test('a dirty worktree is kept unless forced, and forcing stashes the changes', async () => {
