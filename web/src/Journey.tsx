@@ -4,7 +4,8 @@ import { ago, post, toast, useLive } from './api'
 
 type Check = { id: string; ok: boolean | null; label: string; detail: string }
 type Round = { n: number; at: number; comments: number; reviewers: { who: string; bot: boolean; states: string[] }[]; answer: { commits: number; rebases: number; replies: number; labels: string[]; at: number | null } }
-type J = { url: string; state: string; merged: number | null; ready: boolean; queued: { by: string; at: number } | null; checks: Check[]; opened: { at: number; commits: number }; rounds: Round[]; totals: { rounds: number; agentRounds: number; humanReviewers: string[] } }
+type Ship = { line: string | null; merge: string; how: string; on: string; off: string | null }
+type J = { url: string; state: string; merged: number | null; ready: boolean; queued: { by: string; at: number } | null; ship?: Ship; checks: Check[]; opened: { at: number; commits: number }; rounds: Round[]; totals: { rounds: number; agentRounds: number; humanReviewers: string[] } }
 
 const mark = (ok: boolean | null) => ok === true ? <span className="ok-text">✓</span> : ok === false ? <span className="bad">✗</span> : <span className="warn">•</span>
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
@@ -15,6 +16,7 @@ export function ReadyCard({ url }: { url: string }) {
   if (error) return <section className="card"><div className="muted small">{error}</div></section>
   if (!j) return <section className="card"><div className="muted small">Checking whether it’s ready…</div></section>
   const left = j.checks.filter(c => c.ok !== true)
+  const ship: Ship = j.ship ?? { line: null, merge: 'trunk', how: 'Comments /trunk merge: Trunk merges it once it passes in the queue', on: 'Add to merge queue', off: 'Remove from queue' }
   const queue = async (on: boolean) => {
     setBusy(true)
     const r = await post<any>('/api/pr/queue', { pr: url, on })
@@ -27,10 +29,12 @@ export function ReadyCard({ url }: { url: string }) {
       <div className="row-flex">
         <h3 className="grow">{j.state === 'MERGED' ? `Merged ${ago(j.merged)} ago` : j.state === 'CLOSED' ? 'Closed' : j.queued ? `In the merge queue · added by ${j.queued.by} ${ago(j.queued.at)} ago` : j.ready ? '✓ Ready to merge' : `Not ready yet · ${plural(left.length, 'thing')} left`}</h3>
         {j.state === 'OPEN' && (j.queued
-          ? <button disabled={busy} onClick={() => queue(false)} title="Comments /trunk unmerge">{busy ? '…' : 'Remove from queue'}</button>
-          : <button className="primary" disabled={busy || !j.ready} onClick={() => queue(true)} title={j.ready ? 'Comments /trunk merge: Trunk merges it once it passes in the queue' : 'Every check below needs to pass first'}>{busy ? 'Adding…' : 'Add to merge queue'}</button>)}
+          ? ship.off && <button disabled={busy} onClick={() => queue(false)} title={ship.merge === 'trunk' ? 'Comments /trunk unmerge' : ship.off}>{busy ? '…' : ship.off}</button>
+          : <button className="primary" disabled={busy || !j.ready} onClick={() => queue(true)} title={j.ready ? ship.how : 'Every check below needs to pass first'}>{busy ? 'Working…' : ship.on}</button>)}
         <button className="icon" onClick={() => fetch(`/api/pr/journey?url=${encodeURIComponent(url)}&fresh=1`).then(reload)} title="Check again">↻</button>
       </div>
+      {ship.line && <div className="muted small ship-line" title="How this repo reviews, merges, tests, deploys and is verified, detected from its last 30 merged PRs">{ship.line}{' '}
+        <button className="link small" title="Detect it again now" onClick={() => fetch(`/api/ship-profile?repo=${encodeURIComponent(url.split('/').slice(3, 5).join('/'))}&refresh=1`).then(() => fetch(`/api/pr/journey?url=${encodeURIComponent(url)}&fresh=1`)).then(reload)}>↻</button></div>}
       {j.state === 'OPEN' && <div className="checklist">{j.checks.map(c => (
         <div key={c.id} className="small check-row">{mark(c.ok)}<span><b>{c.label}</b>{c.detail && <span className="muted"> · {c.detail}</span>}</span></div>))}</div>}
     </section>

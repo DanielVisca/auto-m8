@@ -35,7 +35,7 @@ export function Autopilot({ onOpen }: { onOpen: (id: string) => void }) {
         return (
         <div key={s.id} className="sugg">
           <div className="sugg-head">
-            <span className={`chip ${s.kind === 'consolidate' ? 'ok' : ''}`}>{{ routine: 'automation', rule: 'organising rule', attention: 'heads up', consolidate: 'consolidate' }[s.kind]}</span>
+            <span className={`chip ${s.kind === 'consolidate' ? 'ok' : ''}`}>{{ routine: 'automation', rule: 'organising rule', attention: 'heads up', consolidate: 'consolidate', ship: 'ship setup' }[s.kind]}</span>
             <b className="sugg-title">{s.title}</b>
           </div>
           <div className="muted small">{s.why}</div>

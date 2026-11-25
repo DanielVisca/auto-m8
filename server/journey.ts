@@ -2,10 +2,12 @@
 // Rounds: each round is feedback (agent or human reviews and comments) and then what answered it
 // (pushes, rebases, replies, a StampHog label). Readiness checks each condition on its own, on the
 // PR's current commit, so a green "ready" can be trusted: who approved, every thread addressed,
-// CI, conflicts. Queueing is PostHog's Trunk convention: a `/trunk merge` comment.
+// CI, conflicts. Queueing follows the repo's ship profile: a `/trunk merge` comment on PostHog's Trunk
+// repos, a bot's label or command, the GitHub merge queue, auto-merge, or a plain merge.
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { ghExec } from './gh.ts'
+import { observabilityTools, shipLine, shipProfile, type ShipProfile } from './shipprofile.ts'
 
 const exec = promisify(execFile)
 const parse = (url: string) => {
@@ -22,14 +24,16 @@ const TRUNK = /^\s*\/trunk\s+(merge|unmerge)\b/i
 const NOISE = /^(trunk-io|github-actions|scheduled-actions-posthog|vercel|codecov|sentry-io|netlify|dependabot|renovate)(\[bot\])?$/i
 
 const Q = `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
-  title number state isDraft mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName createdAt mergedAt author { login } repository { nameWithOwner }
+  id title number state isDraft mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName createdAt mergedAt author { login } repository { nameWithOwner }
+  labels(first:30){nodes{name}}
   reviewRequests(first:10){nodes{requestedReviewer{__typename ... on User{login} ... on Team{name}}}}
   commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){totalCount nodes{
     ... on CheckRun{name conclusion status} ... on StatusContext{context state}}}}}}}
   reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{login __typename}}}}}
   latestReviews(first:30){nodes{author{login __typename} state submittedAt commit{oid}}}
   timelineItems(first:250, itemTypes:[PULL_REQUEST_COMMIT, PULL_REQUEST_REVIEW, ISSUE_COMMENT, HEAD_REF_FORCE_PUSHED_EVENT, LABELED_EVENT,
-    READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, MERGED_EVENT, REVIEW_DISMISSED_EVENT]){nodes{ __typename
+    READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, MERGED_EVENT, REVIEW_DISMISSED_EVENT,
+    ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT, AUTO_MERGE_ENABLED_EVENT, AUTO_MERGE_DISABLED_EVENT]){nodes{ __typename
     ... on PullRequestCommit{commit{committedDate messageHeadline}}
     ... on PullRequestReview{author{login __typename} state submittedAt body comments{totalCount}}
     ... on IssueComment{author{login __typename} createdAt body}
@@ -39,15 +43,36 @@ const Q = `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pul
     ... on ConvertToDraftEvent{createdAt}
     ... on MergedEvent{createdAt}
     ... on ReviewDismissedEvent{createdAt}
+    ... on AddedToMergeQueueEvent{createdAt actor{login}}
+    ... on RemovedFromMergeQueueEvent{createdAt actor{login}}
+    ... on AutoMergeEnabledEvent{createdAt actor{login}}
+    ... on AutoMergeDisabledEvent{createdAt actor{login}}
   }}}}}`
 
 type Check = { id: string; ok: boolean | null; label: string; detail: string }
+
+// How this repo queues a PR, from its ship profile. No profile: PostHog's Trunk comment, as before.
+export type QueueVia = { kind: string; how: string; on: string; off: string | null; comment?: RegExp; label?: string; timeline?: [string, string] }
+export function queueVia(p: ShipProfile | null): QueueVia {
+  const e = p?.merge.enqueue
+  switch (p?.merge.kind) {
+    case undefined: case 'trunk': return { kind: 'trunk', how: 'Comments /trunk merge: Trunk merges it once it passes in the queue', on: 'Add to merge queue', off: 'Remove from queue', comment: TRUNK }
+    case 'mergify': case 'kodiak': case 'bors':
+      return e?.label ? { kind: p.merge.kind, how: `Adds the ${e.label} label: ${p.merge.kind} merges it`, on: 'Add to merge queue', off: 'Remove from queue', label: e.label }
+        : { kind: p.merge.kind, how: `Comments ${e?.comment}: ${p.merge.kind} merges it`, on: 'Add to merge queue', off: e?.dequeue ? 'Remove from queue' : null, comment: new RegExp(`^\\s*(${(e?.comment ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})${e?.dequeue ? `|^\\s*(${e.dequeue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})` : ''}`, 'i') }
+    case 'github-queue': case 'graphite': return { kind: p.merge.kind, how: 'Adds it to the GitHub merge queue', on: 'Add to merge queue', off: 'Remove from queue', timeline: ['AddedToMergeQueueEvent', 'RemovedFromMergeQueueEvent'] }
+    case 'auto-merge': return { kind: 'auto-merge', how: `Turns on auto-merge (${p.merge.method}): GitHub merges it once it can`, on: 'Enable auto-merge', off: 'Disable auto-merge', timeline: ['AutoMergeEnabledEvent', 'AutoMergeDisabledEvent'] }
+    default: return { kind: 'manual', how: `Merges it now (${p!.merge.method})`, on: 'Merge', off: null }
+  }
+}
 
 const cache = new Map<string, { at: number; data: any }>()
 export async function journey(url: string, fresh = false) {
   const hit = cache.get(url)
   if (hit && !fresh && Date.now() - hit.at < 60_000) return hit.data
   const pr = parse(url)
+  const profile = await shipProfile(`${pr.owner}/${pr.repo}`).catch(() => null)
+  const via = queueVia(profile)
   const get = async () => JSON.parse((await ghExec(['api', 'graphql', '-f', `query=${Q}`, '-F', `o=${pr.owner}`, '-F', `r=${pr.repo}`, '-F', `n=${pr.number}`], { maxBuffer: 20e6, timeout: 45_000 })).stdout).data.repository.pullRequest
   let p = await get()
   // GitHub works out conflicts lazily: the first ask often says UNKNOWN. Ask again shortly.
@@ -62,8 +87,9 @@ export async function journey(url: string, fresh = false) {
     if (n.__typename === 'PullRequestCommit') evs.push({ at: at(n.commit.committedDate), kind: 'commit', text: n.commit.messageHeadline })
     else if (n.__typename === 'PullRequestReview' && n.author?.login !== author && !NOISE.test(n.author?.login ?? '')) evs.push({ at: at(n.submittedAt), kind: 'review', who: n.author?.login, bot: isBot(n.author), state: n.state, comments: n.comments.totalCount + (n.body?.trim() ? 1 : 0) })
     else if (n.__typename === 'IssueComment') {
-      const m = String(n.body ?? '').match(TRUNK)
-      if (m) evs.push({ at: at(n.createdAt), kind: m[1].toLowerCase() === 'merge' ? 'queue' : 'unqueue', who: n.author?.login })
+      const m = via.comment ? String(n.body ?? '').match(via.comment) : null
+      // Trunk: group 1 is merge|unmerge. Others: group 1 is the enqueue command, group 2 the dequeue one.
+      if (m) evs.push({ at: at(n.createdAt), kind: via.kind === 'trunk' ? (m[1].toLowerCase() === 'merge' ? 'queue' : 'unqueue') : m[1] ? 'queue' : 'unqueue', who: n.author?.login })
       else if (n.author?.login === author) evs.push({ at: at(n.createdAt), kind: 'reply', who: author })
       else if (!NOISE.test(n.author?.login ?? '')) evs.push({ at: at(n.createdAt), kind: 'comment', who: n.author?.login, bot: isBot(n.author), comments: 1 })
     }
@@ -73,6 +99,7 @@ export async function journey(url: string, fresh = false) {
     else if (n.__typename === 'ConvertToDraftEvent') evs.push({ at: at(n.createdAt), kind: 'draft' })
     else if (n.__typename === 'MergedEvent') evs.push({ at: at(n.createdAt), kind: 'merged' })
     else if (n.__typename === 'ReviewDismissedEvent') evs.push({ at: at(n.createdAt), kind: 'dismissed' })
+    else if (via.timeline?.includes(n.__typename)) evs.push({ at: at(n.createdAt), kind: n.__typename === via.timeline[0] ? 'queue' : 'unqueue', who: n.actor?.login })
   }
   evs.sort((a, b) => a.at - b.at)
 
@@ -114,7 +141,9 @@ export async function journey(url: string, fresh = false) {
   const pending = ctx.filter((c: any) => (c.status && c.status !== 'COMPLETED') || c.state === 'PENDING' || c.state === 'EXPECTED').map((c: any) => c.name ?? c.context)
   const rollup = p.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null
   const lastQueue = [...evs].reverse().find(e => e.kind === 'queue' || e.kind === 'unqueue')
-  const queued = lastQueue?.kind === 'queue' && p.state === 'OPEN' ? { by: lastQueue.who, at: lastQueue.at } : null
+  const labelled = via.label && p.labels?.nodes?.some((l: any) => l.name === via.label) ? [...evs].reverse().find(e => e.kind === 'label' && e.text === via.label) : null
+  const queued = p.state !== 'OPEN' ? null : via.label ? (labelled ? { by: labelled.who, at: labelled.at } : null)
+    : lastQueue?.kind === 'queue' ? { by: lastQueue.who, at: lastQueue.at } : null
   const human = approvals.filter((a: any) => !a.bot)
   const checks: Check[] = [
     { id: 'draft', ok: !p.isDraft, label: p.isDraft ? 'Still a draft' : 'Ready for review', detail: p.isDraft ? 'Mark it ready first.' : '' },
@@ -138,20 +167,49 @@ export async function journey(url: string, fresh = false) {
     url, title: p.title, number: p.number, repo: p.repository.nameWithOwner, head: p.headRefName, base: p.baseRefName, draft: p.isDraft,
     requested: p.reviewRequests.nodes.map((n: any) => n.requestedReviewer?.login ?? n.requestedReviewer?.name).filter(Boolean),
     failing, pending: pending.length, openThreads: open, blocking, mergeable: p.mergeable, mergeState: p.mergeStateStatus,
-    state: p.state, merged: p.mergedAt ? at(p.mergedAt) : null, ready, queued, checks, opened, rounds: roundsOut,
+    state: p.state, merged: p.mergedAt ? at(p.mergedAt) : null, ready, queued, checks, opened, rounds: roundsOut, nodeId: p.id,
+    ship: { line: profile ? shipLine(profile, await observabilityTools().catch(() => null)) : null, merge: via.kind, how: via.how, on: via.on, off: via.off },
     totals: { rounds: roundsOut.length, agentRounds: roundsOut.filter(r => r.reviewers.every((x: any) => x.bot)).length, humanReviewers: [...new Set(roundsOut.flatMap(r => r.reviewers.filter((x: any) => !x.bot).map((x: any) => x.who)))] },
   }
   cache.set(url, { at: Date.now(), data })
   return data
 }
 
-// Add to (or take out of) the Trunk merge queue. Only offered when every check passes.
+// Add to (or take out of) the repo's merge queue, the way its ship profile says it merges. Only
+// offered when every check passes.
 export async function queue(url: string, on: boolean) {
   const j = await journey(url, true)
   if (on && !j.ready) return { ok: false, message: `Not ready yet: ${j.checks.filter((c: Check) => c.ok !== true).map((c: Check) => c.label.toLowerCase()).join('; ')}.` }
-  await ghExec(['pr', 'comment', url, '--body', on ? '/trunk merge' : '/trunk unmerge'], { timeout: 30_000 })
-  cache.delete(url)
-  return { ok: true, message: on ? `#${url.split('/').pop()} is in the Trunk merge queue.` : `#${url.split('/').pop()} is out of the merge queue.` }
+  const pr = parse(url)
+  const profile = await shipProfile(`${pr.owner}/${pr.repo}`).catch(() => null)
+  const n = `#${pr.number}`
+  const done = (message: string) => { cache.delete(url); return { ok: true, message } }
+  const kind = profile?.merge.kind ?? 'trunk', e = profile?.merge.enqueue ?? {}, method = profile?.merge.method ?? 'squash'
+  const gql = (q: string) => ghExec(['api', 'graphql', '-f', `query=${q}`, '-F', `id=${j.nodeId}`], { timeout: 30_000 })
+  if (kind === 'trunk') {
+    await ghExec(['pr', 'comment', url, '--body', on ? '/trunk merge' : '/trunk unmerge'], { timeout: 30_000 })
+    return done(on ? `${n} is in the Trunk merge queue.` : `${n} is out of the merge queue.`)
+  }
+  if (e.label) {
+    await ghExec(['pr', 'edit', url, on ? '--add-label' : '--remove-label', e.label], { timeout: 30_000 })
+    return done(on ? `${n} has the ${e.label} label: ${kind} merges it.` : `${n} no longer has the ${e.label} label.`)
+  }
+  if (e.comment) {
+    if (!on && !e.dequeue) return { ok: false, message: `${kind} has no dequeue command here.` }
+    await ghExec(['pr', 'comment', url, '--body', on ? e.comment : e.dequeue!], { timeout: 30_000 })
+    return done(on ? `${n}: commented ${e.comment}.` : `${n}: commented ${e.dequeue}.`)
+  }
+  if (e.graphql === 'enqueuePullRequest') {
+    await gql(on ? 'mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){clientMutationId}}' : 'mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}')
+    return done(on ? `${n} is in the GitHub merge queue.` : `${n} is out of the merge queue.`)
+  }
+  if (e.graphql === 'enablePullRequestAutoMerge') {
+    await ghExec(['pr', 'merge', url, on ? '--auto' : '--disable-auto', ...(on ? [`--${method}`] : [])], { timeout: 30_000 })
+    return done(on ? `${n} merges automatically once it can.` : `${n}: auto-merge is off.`)
+  }
+  if (!on) return { ok: false, message: 'Nothing to take it out of: this repo merges by hand.' }
+  await ghExec(['pr', 'merge', url, `--${method}`], { timeout: 60_000 })
+  return done(`${n} is merged.`)
 }
 
 // ---------- merge plan: what order, and what's needed from whom ----------
