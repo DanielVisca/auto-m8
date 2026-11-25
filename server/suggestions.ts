@@ -8,7 +8,7 @@ import { settings } from './settings.ts'
 import { status } from './status.ts'
 import { track } from './telemetry.ts'
 
-db.exec(`create table if not exists suggestions (kind text not null, key text not null, text text not null, action text,
+db.exec(`create table if not exists unblock_cards (kind text not null, key text not null, text text not null, action text,
   created_at integer, shown_at integer, acted_at integer, dismissed_at integer, primary key (kind, key))`)
 db.exec(`create table if not exists feature_usage (feature text primary key, n integer not null default 0, first_at integer, last_at integer)`)
 
@@ -20,22 +20,22 @@ export const nudgesOn = () => !!settings.nudges?.enabled
 
 // Adds a card, or refreshes its text. A dismissed or acted-on card never comes back.
 export function add(kind: string, key: string, text: string, action: Action) {
-  run(`insert into suggestions (kind, key, text, action, created_at) values (?, ?, ?, ?, ?)
+  run(`insert into unblock_cards (kind, key, text, action, created_at) values (?, ?, ?, ?, ?)
        on conflict(kind, key) do update set text = excluded.text, action = excluded.action where dismissed_at is null and acted_at is null`,
     kind, key.slice(0, 80), text.slice(0, 200), JSON.stringify(action), Date.now())
 }
 
 export function active(limit = 3): Suggestion[] {
   if (!nudgesOn()) return []
-  const rows = all<any>('select * from suggestions where dismissed_at is null and acted_at is null order by created_at desc limit ?', limit)
-  for (const r of rows) if (!r.shown_at) { run('update suggestions set shown_at = ? where kind = ? and key = ?', Date.now(), r.kind, r.key); track('suggestion_shown', { kind: r.kind }) }
+  const rows = all<any>('select * from unblock_cards where dismissed_at is null and acted_at is null order by created_at desc limit ?', limit)
+  for (const r of rows) if (!r.shown_at) { run('update unblock_cards set shown_at = ? where kind = ? and key = ?', Date.now(), r.kind, r.key); track('suggestion_shown', { kind: r.kind }) }
   return rows.map(r => ({ kind: r.kind, key: r.key, text: r.text, action: JSON.parse(r.action ?? '{}') }))
 }
 export function dismiss(kind: string, key: string) {
-  if (run('update suggestions set dismissed_at = ? where kind = ? and key = ? and dismissed_at is null', Date.now(), kind, key).changes) track('suggestion_dismissed', { kind })
+  if (run('update unblock_cards set dismissed_at = ? where kind = ? and key = ? and dismissed_at is null', Date.now(), kind, key).changes) track('suggestion_dismissed', { kind })
 }
 export function acted(kind: string, key: string) {
-  if (run('update suggestions set acted_at = ? where kind = ? and key = ? and acted_at is null', Date.now(), kind, key).changes) track('suggestion_acted', { kind })
+  if (run('update unblock_cards set acted_at = ? where kind = ? and key = ? and acted_at is null', Date.now(), kind, key).changes) track('suggestion_acted', { kind })
 }
 
 // Local counts of the main surfaces (for the "never used search" signal), plus feature_used.
