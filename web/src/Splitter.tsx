@@ -30,14 +30,29 @@ export function Splitter({ side, width, onWidth, onReset, onCollapse, collapseBe
   return <div className={`splitter ${side} ${drag ? 'on' : ''}`} onPointerDown={e => { e.preventDefault(); setDrag(true) }} onDoubleClick={onReset} title="Drag to resize · double-click to reset" />
 }
 
-// The tab left at the window edge when a column is collapsed: click it, or drag it out, to bring the column back.
-export function EdgeHandle({ side, onOpen, title }: { side: 'left' | 'right'; onOpen: () => void; title: string }) {
+// The tab left at the window edge when a column is collapsed. Click it to bring the column back at its
+// remembered width; drag it to pull the column out, its width following the pointer. Letting go while it is
+// still narrower than collapseBelow puts it away again.
+export function EdgeHandle({ side, onOpen, title, onWidth, onClose, collapseBelow = 150 }: { side: 'left' | 'right'; onOpen: () => void; title: string; onWidth?: (w: number) => void; onClose?: () => void; collapseBelow?: number }) {
   const down = (e: React.PointerEvent) => {
     e.preventDefault()
     const x0 = e.clientX
     let opened = false
-    const move = (m: PointerEvent) => { if (!opened && (side === 'left' ? m.clientX - x0 : x0 - m.clientX) > 24) { opened = true; onOpen() } }
-    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); if (!opened) onOpen() }
+    const dist = (x: number) => side === 'left' ? x : innerWidth - x
+    const move = (m: PointerEvent) => {
+      if (!opened && (side === 'left' ? m.clientX - x0 : x0 - m.clientX) > 24) {
+        opened = true
+        if (onWidth) document.body.classList.add('resizing')
+        onOpen()
+      }
+      if (opened && onWidth) onWidth(dist(m.clientX))
+    }
+    const up = (u: PointerEvent) => {
+      removeEventListener('pointermove', move); removeEventListener('pointerup', up)
+      document.body.classList.remove('resizing')
+      if (!opened) return onOpen()
+      if (onWidth && onClose && dist(u.clientX) < collapseBelow) onClose()
+    }
     addEventListener('pointermove', move); addEventListener('pointerup', up)
   }
   return <div className={`edge-handle ${side} no-drag`} onPointerDown={down} title={title} role="button" aria-label={title} />

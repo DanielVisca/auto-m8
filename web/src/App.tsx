@@ -387,7 +387,7 @@ export function App() {
       <div className="body">
         {listOpen && !zenWriting && sidebar}
         {listOpen && !zenWriting && <Splitter side="left" width={side.width} onWidth={side.setWidth} onReset={side.reset} onCollapse={() => setListOpen(false)} />}
-        {!listOpen && !zenWriting && <EdgeHandle side="left" onOpen={() => setListOpen(true)} title="Show sidebar  ⌘\" />}
+        {!listOpen && !zenWriting && <EdgeHandle side="left" onOpen={() => setListOpen(true)} onWidth={side.setWidth} onClose={() => setListOpen(false)} title="Show sidebar  ⌘\" />}
         <main className="main">
           <div className={`main-top drag ${listOpen && !zenWriting ? '' : 'no-side'}`}>
             {!listOpen && !zenWriting && <button className="icon no-drag" onClick={() => setListOpen(true)} title="Show sidebar  ⌘\">☰</button>}
