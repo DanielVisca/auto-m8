@@ -448,9 +448,12 @@ async function startChat(b: Row) {
   const att = attachmentParts(b.attachments ?? [])
   if (att.note) prompt = `${att.note}\n\n${prompt}`
   const inFolder = b.folderId ? get<Row>('select * from folders where id = ?', b.folderId) : null
+  // Only the web app (its outbox always sends a clientKey) or a caller that says so counts as you. Agents and scripts
+  // curling this endpoint (smoke tests, probes) start agent chats, which stay out of your lists. Send by to label them.
+  const by = typeof b.by === 'string' && /^[a-z][a-z-]{1,30}$/.test(b.by) ? b.by : b.clientKey ? 'you' : 'agent'
   // You writing in a thread an agent started makes it yours: it joins your lists.
-  if (b.id) run(`update perch_started set by = 'you' where id = ? and coalesce(by, '') != 'you'`, b.id)
-  const id = send({ by: 'you', id: b.id, cwd: b.cwd ?? inFolder?.cwd ?? undefined, prompt, selectionText: String(b.prompt ?? ''), images: att.images, mode: b.mode, context: b.context !== false, turbo: typeof b.turbo === 'boolean' ? b.turbo : undefined, engine: typeof b.engine === 'string' ? b.engine : undefined })
+  if (b.id && by === 'you') run(`update perch_started set by = 'you' where id = ? and coalesce(by, '') != 'you'`, b.id)
+  const id = send({ by, id: b.id, cwd: b.cwd ?? inFolder?.cwd ?? undefined, prompt, selectionText: String(b.prompt ?? ''), images: att.images, mode: b.mode, context: b.context !== false, turbo: typeof b.turbo === 'boolean' ? b.turbo : undefined, engine: typeof b.engine === 'string' ? b.engine : undefined })
   if (inFolder && !b.id) editLabels([id], [inFolder.label])
   for (const other of b.contextIds ?? []) link(id, other, 'context')
   // A new chat started while focused belongs to the focus: give it the area's label.

@@ -292,7 +292,7 @@ async function investigate(st: State, s: B.Session, key: string, keys?: string[]
     ``, `Re-derive these numbers yourself before concluding (they come from a quick element match, which can be off). Find out whether something is broken or slow for users here, why, and what the fix is. Watch a replay or two if they help. If you find a real bug, fix it in a PR.`,
   ].join('\n')
   const port = process.env.PERCH_PORT ?? 4777
-  const r = await fetch(`http://127.0.0.1:${port}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify({ prompt, noRoute: true }) })
+  const r = await fetch(`http://127.0.0.1:${port}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify({ prompt, noRoute: true, by: 'you' }) })
   if (!r.ok) throw new Error(`auto-m8 ${r.status}`)
   return ((await r.json()) as any).id as string
 }
