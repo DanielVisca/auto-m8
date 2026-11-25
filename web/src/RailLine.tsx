@@ -7,11 +7,11 @@ import { PrPreviewCard } from './PrPreview'
 import { openPr } from './PrPill'
 
 type Proof = { state: string; live?: string; healthy?: string; used?: string; works?: string; contained?: string }
-type Train = { url: string; number: number; title: string; repo: string; station: string; holder: string; red?: boolean; working?: boolean; size?: number | null; signal: string[]; decision?: { title: string } | null; proof?: Proof | null; outcome?: string; verifyDueAt?: number | null; detail?: string }
+export type Train = { url: string; number: number; title: string; repo: string; station: string; holder: string; red?: boolean; working?: boolean; size?: number | null; signal: string[]; decision?: { title: string } | null; proof?: Proof | null; outcome?: string; verifyDueAt?: number | null; detail?: string }
 type Ry = { at: number; stations: string[]; trains: Train[]; lanes: { live: boolean }[]; scouts: { runs: { status: string }[] }[]; crossing: { since: number | null }[] }
 
 export const HOLDER: Record<string, [string, string]> = { you: ['#f59e0b', 'you'], agent: ['#8b5cf6', 'agent driving'], ci: ['#94a3b8', 'CI running'], reviewer: ['#06b6d4', 'waiting on reviewer'], merge: ['#22c55e', 'ready to merge'], prod: ['#3b82f6', 'in production / checks'], idle: ['#6b7280', 'parked'] }
-const STN: Record<string, string> = { draft: 'draft', ci: 'CI', review: 'review', approved: 'approved', deploy: 'deploy + check 1', check2: '+2h check', verified: 'verified', proven: 'proven' }
+export const STN: Record<string, string> = { draft: 'draft', ci: 'CI', review: 'review', approved: 'approved', deploy: 'deploy + check 1', check2: '+2h check', verified: 'verified', proven: 'proven' }
 const ORDER: Record<string, number> = { you: 0, agent: 1, merge: 2, reviewer: 3, ci: 4, prod: 5, idle: 6 }
 const PROOF: Record<string, string> = { pass: '✅', concern: '⚠️', no_signal: '🔇', pending: '⏳', n_a: '➖' }
 
@@ -27,7 +27,7 @@ const trainText = (t: Train) => [
   `${t.repo} · ${STN[t.station] ?? t.station}${t.red ? ' (stuck)' : ''}`,
   `held by: ${HOLDER[t.holder]?.[1] ?? t.holder}${t.working ? ' (agent working now)' : ''}`,
   t.size != null ? `diff: ${t.size} lines` : '',
-  t.signal.length ? `held by after: ${t.signal.map(u => '#' + u.split('/').pop()).join(', ')}` : '',
+  t.signal.length ? `waiting on after: ${t.signal.map(u => '#' + u.split('/').pop()).join(', ')}` : '',
   t.decision ? `DECISION: ${t.decision.title}` : '',
   t.proof ? `proof: ${t.proof.state.replace('_', ' ')} · ${(['live', 'healthy', 'used', 'works', 'contained'] as const).map(k => `${k} ${PROOF[t.proof![k] ?? ''] ?? '·'}`).join(' ')}` : '',
   t.outcome ?? '', t.verifyDueAt ? `next check ${ago(t.verifyDueAt)}` : '', t.detail ? `— ${t.detail.slice(0, 200)}` : '',
@@ -45,7 +45,9 @@ function useWidth() {
   return [ref, w] as const
 }
 
-export function RailLine() {
+// Clicking a station (its name, its circle or the empty space in its column) selects it, so the list
+// and summary under the chart show those PRs, the same way a click on the flow chart filters them.
+export function RailLine({ picked, onPick }: { picked?: string | null; onPick?: (station: string | null, trains: Train[]) => void } = {}) {
   const { data: D, error } = useLive<Ry>('/api/railyard', ['prflow' as any], undefined, 60_000)
   const [ref, W] = useWidth()
   // Hovering a dot opens the same PR preview card as PR pills, with the line's own context on top.
@@ -55,6 +57,9 @@ export function RailLine() {
   useEffect(() => () => clearTimeout(timer.current), [])
   const enter = (t: Train, el: Element) => { clearTimeout(timer.current); timer.current = setTimeout(() => { anchor.current = el as HTMLElement; setHover(t) }, 350) }
   const leave = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setHover(null), 250) }
+  // Keep the picked station's PR list in step with the live data as it refreshes.
+  const pickedKey = D && picked ? D.trains.filter(t => t.station === picked).map(t => t.url + t.holder + t.signal.length).join() : ''
+  useEffect(() => { if (D && picked && onPick) onPick(picked, D.trains.filter(t => t.station === picked)) }, [pickedKey])
   if (!D) return <div ref={ref} className="muted small pad">{error ?? 'Loading the line…'}</div>
   const st = D.stations, step = W / st.length, pad = step / 2
   const at: Record<string, Train[]> = Object.fromEntries(st.map(s => [s, []]))
@@ -80,13 +85,16 @@ export function RailLine() {
         <line x1={pad} x2={W - pad} y1={y0} y2={y0} stroke="var(--line)" strokeWidth={6} strokeLinecap="round" />
         {st.map((s, i) => {
           const x = pad + i * step
+          const on = picked === s, pick = () => onPick?.(on ? null : s, on ? [] : at[s])
           return (
-            <g key={s}>
+            <g key={s} style={picked && !on ? { opacity: 0.4 } : undefined}>
+              {onPick && <rect x={x - step / 2 + 2} y={0} width={step - 4} height={Ht} rx={6} className="clickable" onClick={pick}
+                fill={on ? 'var(--accent)' : 'transparent'} fillOpacity={on ? 0.08 : 0}><title>{on ? 'Show what needs you again' : `Show the ${at[s].length} PRs at ${STN[s] ?? s} below`}</title></rect>}
               {s === 'deploy' && <><line x1={x - step / 2} x2={x - step / 2} y1={4} y2={Ht - 4} stroke="var(--line)" strokeDasharray="3 4" /><text x={x - step / 2 + 4} y={Ht - 4} fontSize={10.5} fill="var(--muted)">merge ↦ production</text></>}
-              <circle cx={x} cy={y0} r={8} fill="var(--bg)" stroke="var(--fg)" strokeWidth={2.5} />
+              <circle cx={x} cy={y0} r={8} fill={on ? 'var(--accent)' : 'var(--bg)'} stroke={on ? 'var(--accent)' : 'var(--fg)'} strokeWidth={2.5} style={{ pointerEvents: 'none' }} />
               {/* Two lines (name, count) so neighbouring labels never run into each other. */}
-              <text x={x} y={11} textAnchor="middle" fontSize={11} fontWeight={600} fill="var(--fg)">{STN[s] ?? s}</text>
-              <text x={x} y={24} textAnchor="middle" fontSize={10.5} fill="var(--muted)">{at[s].length}</text>
+              <text x={x} y={11} textAnchor="middle" fontSize={11} fontWeight={600} fill={on ? 'var(--accent)' : 'var(--fg)'} style={{ pointerEvents: 'none' }}>{STN[s] ?? s}</text>
+              <text x={x} y={24} textAnchor="middle" fontSize={10.5} fill="var(--muted)" style={{ pointerEvents: 'none' }}>{at[s].length}</text>
               {at[s].map((t, k) => {
                 const col = k % perRow, row = Math.floor(k / perRow)
                 const cx = x + (col - (Math.min(perRow, at[s].length) - 1) / 2) * 22, cy = y0 + 30 + row * 24, rr = r(t)
@@ -114,7 +122,7 @@ export function RailLine() {
       )}
       <div className="flow-legend small">
         {Object.values(HOLDER).map(([c, l]) => <span key={l}><i className="sw" style={{ background: c }} />{l}</span>)}
-        <span className="muted">· pulsing = agent driving · red ring = stuck · ▮ = held by an after: · size = diff</span>
+        <span className="muted">· pulsing = agent driving · red ring = stuck · ▮ = waiting on an after: PR to pass its first prod check · click a station to list it · size = diff</span>
       </div>
     </div>
   )

@@ -6,9 +6,9 @@ import { ago, post, useLive } from './api'
 import { AgentRun } from './Search'
 import { PrBadge } from './List'
 import { AgentStack, usePrAgents } from './Agents'
-import { RailLine } from './RailLine'
+import { HOLDER, RailLine, STN, type Train } from './RailLine'
 
-type P = { areaKey?: string; url: string; number: number; title: string; repo: string; area: string; review: Review; outcome: Outcome; why: string; last: number; checks: string | null; created: number; merged: number | null; draft: boolean; conversation: string | null }
+type P = { areaKey?: string; url: string; number: number; title: string; repo: string; area: string; review: Review; outcome: Outcome; why: string; last: number; checks: string | null; created: number; merged: number | null; draft: boolean; conversation: string | null; reason?: string }
 type Review = 'draft' | 'waiting' | 'changes' | 'approved' | 'none'
 type Outcome = 'merged' | 'moving' | 'needs-you' | 'stalled' | 'stale' | 'abandoned'
 type Flow = { days: number; prs: P[]; medianMergeHours: number | null; fetchedAt: number; refreshing?: boolean }
@@ -54,6 +54,8 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
   const [sel, setSel] = useState<Sel>(null)
   const [summary, setSummary] = useState<{ id: string; key: string } | null>(null)
   const [hover, setHover] = useState<Sel>(null)
+  // A station picked on the line view: its PRs fill the list and the summary, like a flow selection.
+  const [line, setLine] = useState<{ station: string; trains: Train[] } | null>(null)
   // Which picture the chart card shows: the flow (where PRs end up) or the Railyard's line (where open PRs sit now).
   const [viz, setViz] = useState<'flow' | 'line'>(() => { try { return localStorage.getItem('perch.prflow.viz') === 'line' ? 'line' : 'flow' } catch { return 'flow' } })
   const save = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch {} }
@@ -72,15 +74,25 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
 
   const n = (o: Outcome) => prs.filter(p => p.outcome === o).length
   const shown = prs.filter(p => matches(p, sel))
-  const attention = sel ? shown : prs.filter(p => ['needs-you', 'stalled', 'stale'].includes(p.outcome))
+  const byUrl = new Map(prs.map(p => [p.url, p]))
+  // Line trains as list rows: reuse the flow's row when the PR is in range, and say where it sits on the line.
+  const fromTrain = (t: Train): P => {
+    const where = [`${HOLDER[t.holder]?.[1] ?? t.holder}${t.red ? ', stuck' : ''}`, t.signal.length ? `waiting on ${t.signal.map(u => '#' + u.split('/').pop()).join(', ')}` : '', t.decision ? `decision: ${t.decision.title}` : '', t.proof ? `proof ${t.proof.state.replace('_', ' ')}` : ''].filter(Boolean).join(' · ')
+    const p = byUrl.get(t.url)
+    const merged = ['deploy', 'check2', 'verified', 'proven'].includes(t.station)
+    return { ...(p ?? { url: t.url, number: t.number, title: t.title, repo: t.repo, area: t.repo, areaKey: t.repo, review: 'none' as Review, last: Date.now(), checks: null, created: 0, merged: null, draft: t.station === 'draft', conversation: null }),
+      outcome: p?.outcome ?? (merged ? 'merged' : 'moving'), why: where, reason: p?.why || t.detail }
+  }
+  const lineOn = viz === 'line' && line
+  const attention = lineOn ? line.trains.map(fromTrain) : sel ? shown : prs.filter(p => ['needs-you', 'stalled', 'stale'].includes(p.outcome))
   const order: Outcome[] = ['needs-you', 'stalled', 'moving', 'stale', 'merged', 'abandoned']
-  attention.sort((a, b) => order.indexOf(a.outcome) - order.indexOf(b.outcome) || a.last - b.last)
+  if (!lineOn) attention.sort((a, b) => order.indexOf(a.outcome) - order.indexOf(b.outcome) || a.last - b.last)
   const h = data.medianMergeHours
-  const label = sel ? [sel.area, OUTCOMES.find(o => o.id === sel.outcome)?.label].filter(Boolean).join(' → ') : 'Needs your attention'
+  const label = lineOn ? `The line → ${STN[line.station] ?? line.station}` : sel ? [sel.area, OUTCOMES.find(o => o.id === sel.outcome)?.label].filter(Boolean).join(' → ') : 'Needs your attention'
   const summarize = async () => {
     // What shipped in the same areas, so the agent can say what sets this selection apart.
     const areas = new Set(attention.map(p => p.areaKey))
-    const contrast = sel?.outcome !== 'merged' ? prs.filter(p => p.outcome === 'merged' && areas.has(p.areaKey)).slice(0, 60) : []
+    const contrast = !lineOn && sel?.outcome !== 'merged' ? prs.filter(p => p.outcome === 'merged' && areas.has(p.areaKey)).slice(0, 60) : []
     const r = await post<{ id: string }>('/api/insights/prs/summarize', { label, prs: attention, contrast })
     setSummary({ id: r.id, key: label })
   }
@@ -108,9 +120,9 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
       <section className="card">
         <div className="row-flex flow-viz-head">
           <span className="grow muted small">{viz === 'flow' ? 'Where PRs opened in this range ended up' : 'The line, now: every open PR at its station · colour = who holds it'}</span>
-          <div className="seg">{([['flow', 'Flow'], ['line', 'The line']] as const).map(([k, l]) => <button key={k} className={viz === k ? 'on' : ''} onClick={() => { setViz(k); save('perch.prflow.viz', k) }}>{l}</button>)}</div>
+          <div className="seg">{([['flow', 'Flow'], ['line', 'The line']] as const).map(([k, l]) => <button key={k} className={viz === k ? 'on' : ''} onClick={() => { setViz(k); save('perch.prflow.viz', k); setLine(null); setSel(null) }}>{l}</button>)}</div>
         </div>
-        {viz === 'line' ? <RailLine /> : <>
+        {viz === 'line' ? <RailLine picked={line?.station ?? null} onPick={(station, trains) => setLine(station ? { station, trains } : null)} /> : <>
         <Sankey prs={prs} sel={sel} hover={hover} setHover={setHover} onPick={s => setSel(cur => JSON.stringify(cur) === JSON.stringify(s) ? null : s)} />
         <div className="flow-legend small">
           {OUTCOMES.map(o => <span key={o.id} title={o.hint}><i className={`sw o-${o.id}`} />{o.icon} {o.label}</span>)}
@@ -121,19 +133,23 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
         <div className="row-flex">
           <h3 className="grow">{label}</h3>
           {attention.length > 0 && summary?.key !== label && <button className="link small" onClick={summarize} title="A short read of these PRs: what got done, what was dropped, and the patterns">✦ Summarize</button>}
-          {sel && <button className="link small" onClick={() => setSel(null)}>show what needs you</button>}
+          {(lineOn || sel) && <button className="link small" onClick={() => lineOn ? setLine(null) : setSel(null)}>show what needs you</button>}
         </div>
         {summary?.key === label && <div className="pr-summary"><button className="icon pr-summary-x" onClick={() => setSummary(null)} title="Close the summary">×</button><AgentRun id={summary.id} onOpen={onOpen} /></div>}
         {!attention.length && <div className="muted small">Nothing here.</div>}
-        {attention.slice(0, 60).map(p => (
+        {attention.slice(0, 60).map(p => {
+          // Hovering the tag or the PR says why this one is here, e.g. "CI is red", not the category's definition.
+          const reason = p.reason ?? p.why
+          const tip = reason || OUTCOMES.find(o => o.id === p.outcome)?.hint
+          return (
           <div key={p.url} className="line flow-row">
-            <span className={`flow-tag o-${p.outcome}`} title={OUTCOMES.find(o => o.id === p.outcome)?.hint}>{OUTCOMES.find(o => o.id === p.outcome)?.icon} {OUTCOMES.find(o => o.id === p.outcome)?.label}</span>
-            <span className="grow ellipsis"><PrBadge pr={{ url: p.url, number: p.number, title: p.title, repo: p.repo, state: p.outcome === 'merged' ? 'MERGED' : p.outcome === 'abandoned' ? 'CLOSED' : 'OPEN', draft: p.draft ? 1 : 0, review: null, checks: p.checks } as any} full /></span>
+            <span className={`flow-tag o-${p.outcome}`} title={tip}>{OUTCOMES.find(o => o.id === p.outcome)?.icon} {OUTCOMES.find(o => o.id === p.outcome)?.label}</span>
+            <span className="grow ellipsis" title={reason || undefined}><PrBadge pr={{ url: p.url, number: p.number, title: p.title, repo: p.repo, state: p.outcome === 'merged' ? 'MERGED' : p.outcome === 'abandoned' ? 'CLOSED' : 'OPEN', draft: p.draft ? 1 : 0, review: null, checks: p.checks } as any} full /></span>
             {['needs-you', 'stalled', 'stale'].includes(p.outcome) && <Watched url={p.url} />}
             <span className="muted small nowrap">{p.area} · {p.why || (p.merged ? `merged ${ago(p.merged)} ago` : `${ago(p.last)} ago`)}</span>
             {p.conversation && <button className="link small" onClick={() => onOpen(p.conversation!)}>open</button>}
           </div>
-        ))}
+        )})}
         {attention.length > 60 && <div className="muted small">+{attention.length - 60} more</div>}
       </section>
     </div>
