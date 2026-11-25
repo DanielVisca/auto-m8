@@ -373,7 +373,7 @@ ipcMain.handle('popout', (_e, url) => {
 let thumbBusy = Promise.resolve(), thumbWin = null, thumbIdle = null
 function thumbWindow() {
   if (thumbWin && !thumbWin.isDestroyed()) return thumbWin
-  thumbWin = new BrowserWindow({ show: false, width: 1440, height: 900, paintWhenInitiallyHidden: true,
+  thumbWin = new BrowserWindow({ show: false, width: 1280, height: 720, paintWhenInitiallyHidden: true,
     webPreferences: { offscreen: true, preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true } })
   thumbWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   thumbWin.webContents.setAudioMuted(true)

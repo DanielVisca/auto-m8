@@ -1,12 +1,12 @@
 // Durable product research. Browser recordings are disposable; these observations are not.
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { all, db, get, run } from './db.ts'
 import { DATA_DIR } from './settings.ts'
 
 export type ResearchStatus = 'queued' | 'documented' | 'observed' | 'tested' | 'blocked' | 'not_found'
-export type ResearchProduct = { id: string; name: string; url: string; docs_url: string; trial_url: string; scope: string; context: string; sandbox: number; created_at: number; data_scale: string; method: string }
+export type ResearchProduct = { id: string; name: string; url: string; docs_url: string; trial_url: string; scope: string; context: string; sandbox: number; created_at: number; data_scale: string; method: string; archived_at: number | null }
 export type ResearchItem = { id: string; product_id: string; key: string; title: string; kind: 'page' | 'feature' | 'workflow'; url: string; parent_id: string | null; capability: string; status: ResearchStatus; notes: string; updated_at: number }
 export type ResearchEvidence = { id: string; item_id: string; source: 'docs' | 'product' | 'sandbox'; summary: string; url: string; captured_at: number; screenshot: string | null; data: any }
 export const onResearch = new Set<() => void>()
@@ -32,6 +32,7 @@ create table if not exists research_evidence (
 create index if not exists research_evidence_item on research_evidence(item_id, captured_at);
 `)
 // What we sent to a trial and at what scale, and how it was explored (skill, scout or manual), for Explore.
+if (!all<any>('pragma table_info(research_products)').some(x => x.name === 'archived_at')) db.exec('alter table research_products add column archived_at integer')
 for (const c of ['data_scale', 'method']) if (!all<any>('pragma table_info(research_products)').some(x => x.name === c)) db.exec(`alter table research_products add column ${c} text not null default ''`)
 
 export function required(value: unknown, name: string, max = 8000): string {
@@ -132,6 +133,26 @@ export function addEvidence(id: string, a: { source: ResearchEvidence['source'];
     db.exec('release research_capture')
   } catch (e) { db.exec('rollback to research_capture; release research_capture'); throw e }
   changed(); return evidenceFor(id).find(e => e.id === eid)!
+}
+// Archive hides a product from Explore's main list and keeps everything. Delete removes the product,
+// its items, its evidence and their screenshot files.
+export function archiveProduct(id: string, archived: boolean) {
+  product(id)
+  run('update research_products set archived_at = ? where id = ?', archived ? Date.now() : null, id)
+  changed(); return product(id)
+}
+export function deleteProduct(id: string) {
+  product(id)
+  const shots = all<{ screenshot: string | null }>('select e.screenshot from research_evidence e join research_items i on i.id = e.item_id where i.product_id = ?', id)
+  db.exec('savepoint research_delete')
+  try {
+    run('delete from research_evidence where item_id in (select id from research_items where product_id = ?)', id)
+    run('delete from research_items where product_id = ?', id)
+    run('delete from research_products where id = ?', id)
+    db.exec('release research_delete')
+  } catch (e) { db.exec('rollback to research_delete; release research_delete'); throw e }
+  for (const s of shots) if (s.screenshot && /^[a-f0-9-]+\.jpg$/.test(s.screenshot)) try { rmSync(join(DIR, s.screenshot), { force: true }) } catch {}
+  changed(); return { ok: true, screenshots: shots.filter(s => s.screenshot).length }
 }
 export function screenshotFile(eid: string): string | null {
   const e = get<{ screenshot: string | null }>('select screenshot from research_evidence where id = ?', eid)

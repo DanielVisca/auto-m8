@@ -99,3 +99,9 @@
 .exh-code.tree text { fill: var(--fg); font-size: 9px; }
 .exh-tree-map { position: relative; width: 100%; height: 100%; }
 .exh-tree-map span { position: absolute; box-sizing: border-box; border: 1px solid var(--bg3); border-radius: 3px; background: color-mix(in srgb, var(--accent) 35%, var(--bg)); color: var(--fg); font-size: 9px; padding: 2px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Canvas previews keep the screenshot's 16:9 shape instead of a wide strip. */
+.exh-card .exh-thumb { height: auto; aspect-ratio: 16 / 9; }
+.exh-cell { min-width: 0; display: contents; }
+.exh-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
+.ctx > button.exh-danger, button.exh-danger { color: var(--bad); }
+.exh-danger-row { gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }

@@ -6,6 +6,8 @@ import { researchTool } from './productresearchbrowser.ts'
 type Route = (method: string, path: string, h: (m: RegExpMatchArray, req: IncomingMessage, res: ServerResponse, q: URLSearchParams) => any) => void
 export function researchRoutes(route: Route, body: (req: IncomingMessage) => Promise<any>) {
   route('GET', '/api/product-research', () => R.overview())
+  route('POST', '/api/product-research/products/:id/archive', async (m, req) => { try { return R.archiveProduct(decodeURIComponent(m[1]), (await body(req)).archived !== false) } catch (e: any) { return { error: e.message } } })
+  route('POST', '/api/product-research/products/:id/delete', m => { try { return R.deleteProduct(decodeURIComponent(m[1])) } catch (e: any) { return { error: e.message } } })
   route('GET', '/api/product-research/items/:id', m => R.detail(decodeURIComponent(m[1])))
   route('POST', '/api/product-research/tool', async (_m, req, res) => {
     try { return await researchTool(await body(req)) }

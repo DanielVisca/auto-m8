@@ -1,13 +1,13 @@
 // Explore's landing page: pick what to explore (canvases, competitor products, codebases), then a
 // sortable gallery of each, with an info panel that links back to the chats behind every item.
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ago, post, shell, useLive } from './api'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ago, post, shell, toast, useLive } from './api'
 import type { Repo } from './ExploreRuntime'
 import './explorehub.css'
 
 type ChatRef = { id: string; title: string; role: string; at: number }
 type Canvas = { id: string; name: string; about: string | null; pinned: number; created_by: string | null; updated_at: number; opened_at: number | null; thumb_at: number | null; ttl_seconds: number | null; expires_at: number | null; kinds: Record<string, number>; errors: number; tiles: { id: string; kind: string; title: string; x: number; y: number; w: number; h: number }[]; chats: ChatRef[] }
-type Product = { id: string; name: string; url: string; docs_url: string; trial_url: string; scope: string; context: string; sandbox: boolean; created_at: number; data_scale: string; method: string; items: number; status: Record<string, number>; covered: number; coverage: number; depth: string; first_at: number | null; last_at: number | null; evidence: number; screenshots: number; cover: string | null; chats: ChatRef[] }
+type Product = { id: string; archived_at: number | null; name: string; url: string; docs_url: string; trial_url: string; scope: string; context: string; sandbox: boolean; created_at: number; data_scale: string; method: string; items: number; status: Record<string, number>; covered: number; coverage: number; depth: string; first_at: number | null; last_at: number | null; evidence: number; screenshots: number; cover: string | null; chats: ChatRef[] }
 type Ev = { id: string; item_id: string; source: string; summary: string; url: string; captured_at: number; shot: boolean; friction: string | null; expected: string | null; chat: string | null; conv: string | null }
 type Item = { id: string; title: string; kind: string; url: string; status: string; notes: string; capability: string; depth: number; evidence: Ev[] }
 
@@ -149,10 +149,29 @@ export function ExploreHub(nav: Nav) {
 }
 
 // ── Gallery shell: search, sort, filter, grid, info panel ────────────────────────────────────
-function Gallery<T extends { id: string }>({ title, intro, items, sorts, filters, search, card, info, actions, onSection }: {
+// Right-click on a card: its actions, closed by Escape, a click elsewhere or picking one.
+type MenuItem = { label: string; run: () => unknown; danger?: boolean } | 'sep'
+function CardMenu({ at, title, items, onClose }: { at: { x: number; y: number }; title: string; items: MenuItem[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose() }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const t = setTimeout(() => addEventListener('mousedown', close), 0)
+    addEventListener('keydown', esc)
+    return () => { clearTimeout(t); removeEventListener('mousedown', close); removeEventListener('keydown', esc) }
+  }, [onClose])
+  return <div className="ctx" ref={ref} role="menu" style={{ left: Math.min(at.x, innerWidth - 240), top: Math.min(at.y, innerHeight - 40 - items.length * 30) }} onContextMenu={e => e.preventDefault()}>
+    <div className="ctx-head ellipsis">{title}</div>
+    {items.map((it, i) => it === 'sep' ? <hr key={i} className="exh-sep" /> : <button key={i} role="menuitem" className={it.danger ? 'exh-danger' : ''} onClick={() => { onClose(); it.run() }}>{it.label}</button>)}
+  </div>
+}
+
+function Gallery<T extends { id: string }>({ title, intro, items, sorts, filters, search, card, info, actions, onSection, menu, name }: {
   title: string; intro: string; items: T[]; sorts: [string, (a: T, b: T) => number][]; filters: [string, (t: T) => boolean][]; search: (t: T) => string
   card: (t: T, select: () => void, selected: boolean) => ReactNode; info: (t: T) => ReactNode; actions?: ReactNode; onSection: Nav['onSection']
+  menu?: (t: T, select: () => void) => MenuItem[]; name?: (t: T) => string
 }) {
+  const [ctx, setCtx] = useState<{ id: string; x: number; y: number } | null>(null)
   const key = `perch.explore.gallery.${title}`
   const saved = (() => { try { return JSON.parse(localStorage.getItem(key) ?? '{}') } catch { return {} } })()
   const [sort, setSort] = useState<string>(saved.sort ?? sorts[0][0])
@@ -176,7 +195,8 @@ function Gallery<T extends { id: string }>({ title, intro, items, sorts, filters
         <label className="small muted">Sort <select className="small" value={sort} onChange={e => setSort(e.target.value)}>{sorts.map(([s]) => <option key={s}>{s}</option>)}</select></label>
       </div>
       <div className={`exh-body ${picked ? 'with-info' : ''}`}>
-        <div className="exh-grid">{list.map(t => card(t, () => setSel(sel === t.id ? null : t.id), sel === t.id))}{!list.length && <div className="muted">Nothing matches.</div>}</div>
+        <div className="exh-grid">{list.map(t => <div key={t.id} className="exh-cell" onContextMenu={menu ? e => { e.preventDefault(); setCtx({ id: t.id, x: e.clientX, y: e.clientY }) } : undefined}>{card(t, () => setSel(sel === t.id ? null : t.id), sel === t.id)}</div>)}{!list.length && <div className="muted">Nothing matches.</div>}</div>
+        {ctx && menu && (() => { const t = items.find(x => x.id === ctx.id); return t ? <CardMenu at={ctx} title={name?.(t) ?? t.id} items={menu(t, () => setSel(t.id))} onClose={() => setCtx(null)} /> : null })()}
         {picked && <aside className="exh-info"><button className="link small exh-close" onClick={() => setSel(null)} aria-label="Close info">✕</button>{info(picked)}</aside>}
       </div>
     </div>
@@ -194,6 +214,20 @@ export function CanvasGallery(nav: Nav) {
     filters={[['All', () => true], ['Kept', c => c.ttl_seconds == null], ['Temporary', c => c.ttl_seconds != null], ['On Home', c => !!c.pinned]]}
     search={c => [c.name, c.about ?? '', ...c.tiles.map(t => t.title), ...c.chats.map(x => x.title)].join(' ')}
     actions={<button className="small" onClick={() => nav.onOpenBoard('')}>Manage boards</button>}
+    name={c => c.name}
+    menu={(c, select) => {
+      const save = (patch: any) => post<any>(`/api/boards/${encodeURIComponent(c.id)}`, patch).then(r => r?.error && toast(r.error))
+      return [
+        { label: 'Open', run: () => nav.onOpenBoard(c.id) },
+        { label: 'Info', run: select },
+        ...(c.chats[0] ? [{ label: `Open chat: ${c.chats[0].title.slice(0, 40)}`, run: () => nav.onOpenChat(c.chats[0].id) }] : []),
+        'sep',
+        { label: c.pinned ? 'Unpin from Home' : 'Pin to Home', run: () => save({ pinned: !c.pinned }) },
+        ...(c.ttl_seconds != null ? [{ label: 'Keep permanently', run: () => save({ temporary: false }) }] : []),
+        'sep',
+        { label: 'Delete…', danger: true, run: () => { if (confirm(`Delete the canvas “${c.name}” and its ${c.tiles.length} tile${c.tiles.length === 1 ? '' : 's'}? This can't be undone.`)) post<any>(`/api/boards/${encodeURIComponent(c.id)}/delete`, {}).then(r => r?.error ? toast(r.error) : toast('Canvas deleted', { kind: 'ok' })) } },
+      ]
+    }}
     card={(c, select, selected) => (
       <div key={c.id} className={`exh-card ${selected ? 'sel' : ''}`}>
         <button className="exh-card-main" onClick={() => nav.onOpenBoard(c.id)} title={c.about ?? c.name}>
@@ -229,6 +263,26 @@ export function CanvasGallery(nav: Nav) {
 const NEW_RESEARCH = 'Research a competitor product with the product_research tool and the auto-m8 browser. Product: <name and URL>. Set the product (url, docs_url, trial_url, scope, context, sandbox, and method = the skill or approach you use), map its pages, features and workflows as items, capture screenshots as evidence, and record data_scale: what data we sent to a trial and at what scale, or "none".'
 const continueResearch = (p: Product) => `Continue the product research on ${p.name} (product_id ${p.id}) with the product_research tool and the auto-m8 browser. Start with action=next, work through the queued items, capture evidence with screenshots, and explain any blockers. Coverage now: ${p.covered}/${p.items} items (${p.depth}). Keep method and data_scale on the product up to date.`
 
+// Archive keeps the research but hides it from the main list; delete removes it for good, after asking.
+const archive = (p: Product, on: boolean) => post<any>(`/api/product-research/products/${encodeURIComponent(p.id)}/archive`, { archived: on })
+  .then(r => r?.error ? toast(r.error) : toast(on ? `${p.name} archived. Find it under Archived.` : `${p.name} restored`, { kind: 'ok' }))
+const remove = (p: Product, after?: () => void) => {
+  if (!confirm(`Delete “${p.name}” for good?\n\nThis removes ${p.items} mapped item${p.items === 1 ? '' : 's'}, ${p.evidence} capture${p.evidence === 1 ? '' : 's'} and ${p.screenshots} screenshot${p.screenshots === 1 ? '' : 's'}. It can't be undone. Archive it instead to keep the research but hide it.`)) return
+  post<any>(`/api/product-research/products/${encodeURIComponent(p.id)}/delete`, {}).then(r => { if (r?.error) return toast(r.error); toast(`${p.name} deleted`, { kind: 'ok' }); after?.() })
+}
+function productMenu(p: Product, nav: Nav, select?: () => void): MenuItem[] {
+  return [
+    { label: 'Open map', run: () => nav.onSection(`competitor:${p.id}`) },
+    ...(p.screenshots ? [{ label: '▶ Tour', run: () => nav.onSection(`competitor:${p.id}:tour`) }] : []),
+    ...(select ? [{ label: 'Info', run: select }] : []),
+    { label: 'Continue research', run: () => nav.onStart(continueResearch(p)) },
+    { label: 'Open product ↗', run: () => window.open(p.url, '_blank') },
+    'sep',
+    p.archived_at ? { label: 'Unarchive', run: () => archive(p, false) } : { label: 'Archive', run: () => archive(p, true) },
+    { label: 'Delete…', danger: true, run: () => remove(p) },
+  ]
+}
+
 function Coverage({ p }: { p: Product }) {
   const order: [string, string][] = [['tested', 'ok'], ['observed', 'accent'], ['documented', 'doc'], ['blocked', 'bad'], ['not_found', 'bad'], ['queued', 'q']]
   return <div className="exh-cov" title={order.filter(([s]) => p.status[s]).map(([s]) => `${p.status[s]} ${s}`).join(' · ')}>
@@ -261,7 +315,9 @@ export function CompetitorGallery(nav: Nav) {
   return <Gallery<Product> title="Competitor products" intro="Products we mapped with the research tool: how far we got, how, and what's left. Open one for its map and a quick screenshot tour."
     onSection={nav.onSection} items={items}
     sorts={[['Last explored', (a, b) => (b.last_at ?? 0) - (a.last_at ?? 0)], ['Most complete', (a, b) => b.coverage - a.coverage], ['Least complete', (a, b) => a.coverage - b.coverage], ['Most screenshots', (a, b) => b.screenshots - a.screenshots], ['Name', (a, b) => a.name.localeCompare(b.name)]]}
-    filters={[['All', () => true], ['Trial', p => p.sandbox], ['Tested', p => !!p.status.tested], ['Has blockers', p => !!(p.status.blocked || p.status.not_found)], ['Not started', p => !p.evidence]]}
+    filters={[['All', p => !p.archived_at], ['Trial', p => !p.archived_at && p.sandbox], ['Tested', p => !p.archived_at && !!p.status.tested], ['Has blockers', p => !p.archived_at && !!(p.status.blocked || p.status.not_found)], ['Not started', p => !p.archived_at && !p.evidence], ['Archived', p => !!p.archived_at]]}
+    name={p => p.name}
+    menu={(p, select) => productMenu(p, nav, select)}
     search={p => [p.name, p.url, p.scope, p.method, p.data_scale, ...p.chats.map(c => c.title)].join(' ')}
     actions={<button className="small" onClick={() => nav.onStart(NEW_RESEARCH)}>+ Research a product</button>}
     card={(p, select, selected) => (
@@ -271,7 +327,7 @@ export function CompetitorGallery(nav: Nav) {
           <b className="ellipsis">{p.name}</b>
           <Coverage p={p} />
           <span className="muted small">{pct(p.coverage)} covered · {p.depth} · {p.last_at ? `explored ${ago(p.last_at)}` : 'not explored'}</span>
-          <span className="exh-tags">{p.sandbox ? <i>trial</i> : null}{p.data_scale ? <i className="ellipsis">data: {p.data_scale}</i> : null}{p.status.blocked ? <i className="warn">{p.status.blocked} blocked</i> : null}</span>
+          <span className="exh-tags">{p.archived_at ? <i>archived</i> : null}{p.sandbox ? <i>trial</i> : null}{p.data_scale ? <i className="ellipsis">data: {p.data_scale}</i> : null}{p.status.blocked ? <i className="warn">{p.status.blocked} blocked</i> : null}</span>
         </button>
         <button className="exh-i" onClick={select} title="Info" aria-label={`Info about ${p.name}`}>ⓘ</button>
       </div>
@@ -287,6 +343,10 @@ export function CompetitorGallery(nav: Nav) {
           <button onClick={() => nav.onSection(`competitor:${p.id}`)}>Open map</button>
           {p.screenshots > 0 && <button onClick={() => nav.onSection(`competitor:${p.id}:tour`)}>▶ Tour</button>}
           <button onClick={() => nav.onStart(continueResearch(p))}>Continue research</button>
+        </div>
+        <div className="row-flex exh-danger-row">
+          <button className="small" onClick={() => archive(p, !p.archived_at)}>{p.archived_at ? 'Unarchive' : 'Archive'}</button>
+          <button className="small exh-danger" onClick={() => remove(p)}>Delete…</button>
         </div>
       </div>
     )} />
@@ -304,7 +364,9 @@ export function CompetitorPage({ id, tour: startTour, ...nav }: Nav & { id: stri
   return (
     <div className="page exh exh-product">
       <Back onSection={nav.onSection} to="competitors" label="Competitor products" />
-      <div className="row-flex exh-head"><h2 className="grow">{data.name}</h2><Links p={data} /><button className="small" onClick={() => nav.onStart(continueResearch(data))}>Continue research</button></div>
+      <div className="row-flex exh-head"><h2 className="grow">{data.name}</h2><Links p={data} /><button className="small" onClick={() => nav.onStart(continueResearch(data))}>Continue research</button>
+        <button className="small" onClick={() => archive(data, !data.archived_at)}>{data.archived_at ? 'Unarchive' : 'Archive'}</button>
+        <button className="small exh-danger" onClick={() => remove(data, () => nav.onSection('competitors'))}>Delete…</button></div>
       <div className="row-flex exh-sum small">
         <Coverage p={data} /><span>{data.covered}/{data.items} covered · {data.depth}</span>
         <span className="muted">{data.first_at ? `explored ${date(data.first_at)} → ${date(data.last_at)}` : 'not explored yet'}</span>
@@ -388,6 +450,12 @@ export function CodebaseGallery(nav: Nav) {
     sorts={[['Recently mapped', (a, b) => rank(a) - rank(b) || t(b.lastCommit) - t(a.lastCommit)], ['Last commit', (a, b) => t(b.lastCommit) - t(a.lastCommit)], ['Name', (a, b) => a.name.localeCompare(b.name)], ['Biggest', (a, b) => size(b) - size(a)]]}
     filters={[['All', () => true], ['Mapped', r => r.preview.kind === 'graph'], ['Not mapped', r => r.preview.kind !== 'graph']]}
     search={r => [r.name, r.org ?? '', r.path, r.branch ?? ''].join(' ')}
+    name={r => r.name}
+    menu={(r, select) => [
+      { label: r.preview.kind === 'graph' ? 'Open architecture map' : 'Map this repo', run: () => nav.onSection(r.path) },
+      { label: 'Info', run: select },
+      { label: 'Copy path', run: () => navigator.clipboard.writeText(r.path).then(() => toast('Path copied', { kind: 'ok' })) },
+    ]}
     card={(r, select, selected) => (
       <div key={r.path} className={`exh-card ${selected ? 'sel' : ''}`}>
         <button className="exh-card-main" onClick={() => nav.onSection(r.path)} title={r.path}>

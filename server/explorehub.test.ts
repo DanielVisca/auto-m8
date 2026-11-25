@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { test } from 'node:test'
 import { db, run } from './db.ts'
 import { createBoard, openedBoard, putTile, showBoard } from './boards.ts'
@@ -57,4 +58,25 @@ test('an unmapped repo previews as its top folders by file count', async () => {
   const p = await codePreview(process.cwd())
   assert.ok(p.kind === 'folders' || p.kind === 'graph')
   if (p.kind === 'folders') assert.ok(p.folders.some(f => f.name === 'server'))
+})
+
+test('archiving a competitor keeps its research; deleting removes items, evidence and screenshots', () => {
+  db.exec('delete from research_evidence; delete from research_items; delete from research_products')
+  const p = R.saveProduct({ name: 'Gone', url: 'https://app.gone.dev/', docs_url: 'https://gone.dev/docs', scope: 'x', context: 'y' })
+  const it = R.saveItem({ product_id: p.id, key: 'home', title: 'Home', url: 'https://app.gone.dev/' })
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(50)]).toString('base64')
+  const ev = R.addEvidence(it.id, { source: 'product', summary: 'seen', url: 'https://app.gone.dev/', data: {}, jpeg })
+  const shot = R.screenshotFile(ev.id)!
+  assert.ok(shot)
+  R.archiveProduct(p.id, true)
+  assert.ok(competitors().find(x => x.id === p.id)!.archived_at)
+  assert.equal(competitor(p.id).tree.length, 1)
+  R.archiveProduct(p.id, false)
+  assert.equal(competitors().find(x => x.id === p.id)!.archived_at, null)
+  assert.deepEqual(R.deleteProduct(p.id), { ok: true, screenshots: 1 })
+  assert.equal(competitors().length, 0)
+  assert.equal(db.prepare('select count(*) n from research_evidence').get()!.n, 0)
+  assert.equal(R.screenshotFile(ev.id), null)
+  assert.equal(existsSync(shot), false)
+  assert.throws(() => R.deleteProduct(p.id), /No such research product/)
 })
