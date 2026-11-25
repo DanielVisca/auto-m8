@@ -63,7 +63,7 @@ import { taskOutput } from './taskOutput.ts'
 import { isPaused, overview as pauseOverview, pauseAll, resumeAll } from './pause.ts'
 import { deleteRoutine, fire, listRoutines, saveRoutine, startScheduler } from './routines.ts'
 import { DATA_DIR, settings, updateSettings } from './settings.ts'
-import { clickhouseDisks, connectors as exploreConnectors, listRepos, prewarmRuntime, whereItRuns } from './explorer-runtime.ts'
+import { clickhouseDisks, connectors as exploreConnectors, dataFor as exploreData, listRepos, prewarmRuntime, whereItRuns } from './explorer-runtime.ts'
 import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
 import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
@@ -930,6 +930,11 @@ route('GET', '/api/explore/runtime', async (_m, _r, _s, q) => {
   const repos = await Promise.all(String(q.get('repos') ?? '').split(',').filter(Boolean).map(r => checkRepo(r)))
   const charts = repos.find(r => existsSync(join(r, 'apps')) && /charts/.test(r)) ?? null
   return whereItRuns(String(q.get('concept') ?? ''), { repos, charts, org: q.get('org') })
+})
+// Datastores and tiers: the ClickHouse clusters and tables that hold a concept's data, their size, disk and instance type.
+route('GET', '/api/explore/data', async (_m, _r, _s, q) => {
+  const repos = await Promise.all(String(q.get('repos') ?? '').split(',').filter(Boolean).map(r => checkRepo(r)))
+  return exploreData(String(q.get('concept') ?? ''), repos)
 })
 setTimeout(() => { if (!process.env.PERCH_NO_AGENT_SYNC) prewarmRuntime() }, 30_000).unref()
 route('POST', '/api/explore/dream/save', async (_m, req) => { const b = await body(req); return saveDream(b as any) })

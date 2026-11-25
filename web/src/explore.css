@@ -82,6 +82,7 @@
 .ex-facts { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; }
 .ex-facts th { text-align: right; font-weight: 600; color: var(--muted); }
 .ex-facts td { text-align: right; padding: 1px 4px; }
+.ex-tables th:first-child, .ex-tables td:first-child, .ex-tables td:nth-child(2), .ex-tables td:last-child { text-align: left; }
 .ex-facts td:first-child { text-align: left; color: var(--muted); }
 .ex-facts tr.off td { color: var(--warn); }
 .ex-sources .ex-title { display: flex; gap: 6px; align-items: center; }

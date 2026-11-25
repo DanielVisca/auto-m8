@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, post, sendChat, shortPath, toast } from './api'
 import { MiniChat } from './Mini'
-import { RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
+import { DataSection, RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
 import './explore.css'
 
 type Evidence = { file: string; line: number; text: string; github?: string | null; local?: string }
@@ -395,6 +395,7 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
       </div>
       {introduced && <div className="small ex-sec">First seen <b>{introduced.date.slice(0, 10)}</b>{introduced.approx ? ' ≈' : ''} by {introduced.commit.author}{introduced.commit.url && <> · <a href={introduced.commit.url} target="_blank" rel="noreferrer">{introduced.commit.pr ? `#${introduced.commit.pr}` : introduced.commit.sha.slice(0, 8)}</a></>} <span className="muted">{introduced.commit.subject}</span><div className="tiny muted">{introduced.source}</div></div>}
       <WhereItRuns concept={d.concept.id} repos={workspace} org={org} onLoaded={onRuntime} />
+      <DataSection concept={d.concept.id} repos={workspace} />
       {d.docs.length > 0 && <div className="ex-sec"><h5>Read first</h5>{d.docs.map((x: any) => <div key={x.file} className="small"><Loc x={x} /></div>)}</div>}
       {d.models.length > 0 && (
         <div className="ex-sec"><h5>Data models <span className="muted">{d.models.length}</span></h5>

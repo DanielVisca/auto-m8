@@ -99,7 +99,7 @@ export function SourcesPanel({ onClose, onOpenTerm }: { onClose: () => void; onO
             <div className="tiny">{ch.queries.map((q: any, i: number) => <a key={i} href={q.link} target="_blank" rel="noreferrer" title={q.query}>query {i + 1} ↗ </a>)}</div>
           </>}
       </div>
-      <div className="muted tiny ex-sec">Not wired yet: which ClickHouse cluster and tables a concept writes to (system.tables via the ClickHouse datasources), terraform instance types from posthog-cloud-infra, and AWS facts once SSO is connected.</div>
+      <div className="muted tiny ex-sec">Each concept's Data section reads ClickHouse system tables through these Grafana datasources, instance types from posthog-cloud-infra terraform, and confirms them with AWS when SSO is connected.</div>
     </div>
   )
 }
@@ -146,6 +146,66 @@ export function WhereItRuns({ concept, repos, org, onLoaded }: { concept: string
         </div>
       )}
       {!r.grafana && <div className="small muted">No Grafana connection, so no live numbers. Open Sources to see how to add one.</div>}
+    </div>
+  )
+}
+
+type TfHit = { key: string; value: string; file: string; line: number; context: string[]; matchedBy: string; link?: string }
+type DataTable = { db: string; table: string; engine: string; cluster?: string | null; how: string[]; ds: string; host: string; bytes?: number | null; rows?: number | null; parts?: number | null; sizeScope?: string; query?: string; link?: string }
+type DataCluster = { name: string; ds: string | null; shards: number | null; replicas: number | null; hosts: string[]; aws: string[]; terraform: TfHit[]
+  disk: { nodes: number; max?: number; median?: number; fullest?: { instance: string; disk: string; used: number; role: string | null }[]; query?: string; link?: string; source?: string; note?: string } }
+export type DataRes = { concept: string; tokens: string[]; grafana: string | null; clusters: DataCluster[]; tables: DataTable[]; problems: { source: string; error: string; fix?: string }[]
+  datasources?: { name: string; host: string; tables: number; link: string }[]; infra: { path: string; behind: number | null; lastFetch: string | null; sha: string; files: number; types: number } | null; code: { files: number; names: number }; matchedBy?: string }
+
+const bytes = (n: number | null | undefined) => n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${(n / 1e6).toFixed(0)} MB`
+
+// Datastores and tiers: which ClickHouse clusters and tables hold this concept's data, how big, how full, on what hardware.
+export function DataSection({ concept, repos }: { concept: string; repos: string[] }) {
+  const [r, setR] = useState<DataRes | { error: string } | null>(null)
+  const [all, setAll] = useState(false)
+  useEffect(() => {
+    setR(null)
+    let gone = false
+    api.get<DataRes>(`/api/explore/data?concept=${encodeURIComponent(concept)}&repos=${encodeURIComponent(repos.join(','))}`)
+      .then(x => { if (!gone) setR(x) }).catch(e => !gone && setR({ error: String(e?.message ?? e) }))
+    return () => { gone = true }
+  }, [concept, repos.join(',')]) // eslint-disable-line
+  if (!r) return <div className="ex-sec small muted"><h5>Data</h5><i className="spin" /> Asking ClickHouse (system tables) and Prometheus…</div>
+  if ('error' in r) return <div className="ex-sec small"><h5>Data</h5><span className="bad">{r.error}</span></div>
+  const tables = all ? r.tables : r.tables.slice(0, 8)
+  return (
+    <div className="ex-sec small">
+      <h5>Data <span className="muted" title={r.matchedBy}>· ClickHouse tables named in its code or like “{r.tokens.join('”, “')}”</span></h5>
+      {r.clusters.map(c => (
+        <div key={c.name} className="ex-dep">
+          <div><b>{c.name}</b> <span className="muted">cluster{c.shards != null ? ` · ${c.shards} shards, ${c.replicas} nodes` : ''}{c.ds ? ` · seen via ${c.ds}` : ''}</span></div>
+          {c.disk.nodes ? <div>Disk: fullest <a href={c.disk.link} target="_blank" rel="noreferrer" title={`${c.disk.source}\n${c.disk.query}`}><span className={c.disk.max! > 0.9 ? 'bad' : c.disk.max! > 0.8 ? 'warn' : ''}>{pct(c.disk.max)}</span></a>, median {pct(c.disk.median)} across {c.disk.nodes} nodes
+            <span className="muted"> ({c.disk.fullest?.slice(0, 3).map(f => `${f.instance} ${f.disk} ${pct(f.used)}`).join(', ')})</span></div>
+            : <div className="muted">Disk: {c.disk.note}</div>}
+          <div>Tier: {c.aws.length ? <><b>{c.aws.join(', ')}</b> <span className="muted">(AWS describe-instances, now)</span></> : !c.terraform.length && <span className="muted">no terraform block names this cluster or its nodes</span>}
+            {c.terraform.map((t, i) => <div key={i} className="ex-code"><b>{t.value}</b> <span className="muted">{t.key} · {t.matchedBy} · </span>{t.link ? <a href={t.link} target="_blank" rel="noreferrer">{t.file}:{t.line}</a> : `${t.file}:${t.line}`}</div>)}
+          </div>
+        </div>
+      ))}
+      {!r.tables.length && <div className="muted">No ClickHouse table is named in this concept's code or named like it{r.datasources?.length ? ` (searched ${r.datasources.map(d => `${d.name}: ${d.tables} tables`).join(', ')})` : ''}.</div>}
+      {r.tables.length > 0 && (
+        <table className="ex-facts ex-tables">
+          <thead><tr><th>table</th><th>engine</th><th>size</th><th>rows</th><th>found by</th></tr></thead>
+          <tbody>{tables.map(t => (
+            <tr key={`${t.ds}:${t.db}.${t.table}`}>
+              <td title={`${t.ds} → ${t.host}`}>{t.db}.{t.table}</td>
+              <td className="muted">{t.engine}{t.cluster ? ` → ${t.cluster}` : ''}</td>
+              <td>{t.link ? <a href={t.link} target="_blank" rel="noreferrer" title={`${t.sizeScope}\n${t.query}`}>{bytes(t.bytes)}</a> : '—'}</td>
+              <td>{t.rows == null ? '—' : fmt(t.rows)}</td>
+              <td className="muted tiny">{t.how.join('; ')}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+      {r.tables.length > 8 && <button className="link small" onClick={() => setAll(!all)}>{all ? 'fewer' : `+${r.tables.length - 8} more`}</button>}
+      {r.tables.length > 0 && <div className="tiny muted">Sizes are compressed bytes on disk from system.parts; hover for whether they're summed across every replica or on one node. Click for the query in Grafana.</div>}
+      {r.infra && <div className="tiny muted">Tiers from {shortPath(r.infra.path)}@{r.infra.sha} ({r.infra.files} ClickHouse terraform files){r.infra.behind ? <span className={r.infra.behind > 50 ? 'warn' : ''}> · {r.infra.behind.toLocaleString()} commits behind main, so instance types may be out of date: pull it</span> : ''}.</div>}
+      {r.problems.map((p, i) => <div key={i} className="tiny"><span className="bad">{p.source}:</span> {p.error}{p.fix && <> · fix: <code>{p.fix}</code></>}</div>)}
     </div>
   )
 }
