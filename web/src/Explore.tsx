@@ -380,7 +380,8 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
   const [d, setD] = useState<any>(null)
   const [more, setMore] = useState<Record<string, boolean>>({})
   const [open, setOpen] = useState<string | null>(null)
-  useEffect(() => { setD(null); api.get(`/api/explore/node?${qs({ repo, id })}`).then(setD).catch(e => setD({ error: String(e?.message ?? e) })) }, [repo, id])
+  // Ignore an answer for a concept you've already clicked away from (a slow cold load could overwrite the newer one).
+  useEffect(() => { let gone = false; setD(null); api.get(`/api/explore/node?${qs({ repo, id })}`).then(x => !gone && setD(x)).catch(e => !gone && setD({ error: String(e?.message ?? e) })); return () => { gone = true } }, [repo, id])
   if (!d) return <div className="card small muted"><i className="spin" /> Loading {id}…</div>
   if (d.error) return <div className="card bad small">{d.error}</div>
   const openLocal = (file: string, line?: number) => post('/api/explore/open', { repo, file, line }).catch(e => toast(String(e?.message ?? e), { kind: 'error' }))
