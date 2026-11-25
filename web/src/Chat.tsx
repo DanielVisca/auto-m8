@@ -308,9 +308,9 @@ function UserBubble({ text }: { text: string }) {
     return (inner.match(/https?:\/\/\S+/g) ?? []).filter(u => !isSlackLink(u)).map(u => `🔗 ${u}`).join('\n') + '\n'
   })
   // Pasted images and files: a small preview / chip instead of the raw path list.
-  const imgs: string[] = [], files: string[] = []
-  rest = rest.replace(/<attached-images>([\s\S]*?)<\/attached-images>\s*/g, (_m, inner: string) => { imgs.push(...(inner.match(/^- (.+)$/gm) ?? []).map(l => l.slice(2).trim())); return '' })
-  rest = rest.replace(/<attached-files>([\s\S]*?)<\/attached-files>\s*/g, (_m, inner: string) => { files.push(...(inner.match(/^- (\/\S+)/gm) ?? []).map(l => l.slice(2).trim())); return '' })
+  const imgs: string[] = [], files: string[] = [], labels: Record<string, string> = {}
+  rest = rest.replace(/<attached-images>([\s\S]*?)<\/attached-images>\s*/g, (_m, inner: string) => { for (const x of attachedItems(inner)) { imgs.push(x.path); if (x.label) labels[x.path] = x.label } return '' })
+  rest = rest.replace(/<attached-files>([\s\S]*?)<\/attached-files>\s*/g, (_m, inner: string) => { for (const x of attachedItems(inner)) { files.push(x.path); if (x.label) labels[x.path] = x.label } return '' })
   if (imgs.length) rest = rest.replace(/\n*🖼 \d+ images? attached\s*$/, '')
   if (imgs.length || files.length) rest = rest.replace(/^\(see the attached (?:image|file|\d+ attachments)\)$/, '')
   const prs: string[] = []
@@ -319,9 +319,9 @@ function UserBubble({ text }: { text: string }) {
     {urls.map((u, i) => <SlackLinkCard key={i} url={u} />)}
     {prs.length > 0 && <div className="pr-inline-row">{prs.map((u, i) => <PrPill key={i} url={u} />)}</div>}
     {(imgs.length > 0 || files.length > 0) && <div className="attach-row">
-      {imgs.map(p => <button key={p} className="attach-thumb" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={`${baseName(p)}\nClick to view`}>
-        <img src={`/api/files/raw?path=${encodeURIComponent(p)}`} alt={baseName(p)} loading="lazy" /></button>)}
-      {files.map(p => <button key={p} className="chip attach-file" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={p}>📄 {baseName(p).replace(/^[0-9a-f]{8}-/, '')}</button>)}
+      {imgs.map(p => <button key={p} className="attach-thumb" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={`${labels[p] ? `[${labels[p]}] ` : ''}${baseName(p)}\nClick to view`}>
+        {labels[p] && <b className="attach-label on-thumb">{labels[p]}</b>}<img src={`/api/files/raw?path=${encodeURIComponent(p)}`} alt={baseName(p)} loading="lazy" /></button>)}
+      {files.map(p => <button key={p} className="chip attach-file" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={p}>📄 {labels[p] && <b className="attach-label">{labels[p]}</b>} {baseName(p).replace(/^[0-9a-f]{8}-/, '')}</button>)}
     </div>}
     {rest && <div className="bubble">{rest}</div>}
   </>
@@ -896,10 +896,24 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
   const viewing = viewAt >= 0 ? images[viewAt] : null
   const step = (d: number) => images.length && setViewKey(images[(viewAt + d + images.length) % images.length].key!)
   // Files, images and long pastes: uploaded at once, sent as attachments with the message.
-  const attach = async (f: Blob, name: string, kind: 'image' | 'file', label: string, text?: string) => {
+  // Each attachment drops a "[Image 1]" / "[File 2]" marker at the cursor, so the agent sees where in
+  // the writing it was added; the label travels with the file and names it in the prompt.
+  const attachNums = useRef({ image: 0, file: 0 })
+  const markAt = (kinds: ('image' | 'file')[]) => {
+    const labels = kinds.map(k => `${k === 'image' ? 'Image' : 'File'} ${++attachNums.current[k]}`)
+    if (!labels.length) return labels
+    const el = ta.current
+    const at = Math.min(el?.selectionEnd ?? caret, text.length)
+    const before = text.slice(0, at), after = text.slice(at)
+    const ins = `${before && !/\s$/.test(before) ? ' ' : ''}${labels.map(l => `[${l}]`).join(' ')}${after && !/^\s/.test(after) ? ' ' : after ? '' : ' '}`
+    setText(before + ins + after); setCaret(at + ins.length)
+    requestAnimationFrame(() => { if (el) el.selectionStart = el.selectionEnd = at + ins.length })
+    return labels
+  }
+  const attach = async (f: Blob, name: string, kind: 'image' | 'file', label: string, text?: string, mark?: string) => {
     const key = Math.random().toString(36).slice(2)
     const thumb = kind === 'image' ? URL.createObjectURL(f) : undefined
-    setShared(s => [...s, { key, title: name, summary: label, context: '', loading: true, thumb, file: { path: '', name, kind, media_type: f.type } }])
+    setShared(s => [...s, { key, title: name, summary: label, context: '', loading: true, thumb, file: { path: '', name, kind, media_type: f.type, label: mark } }])
     if (thumb) setViewKey(k => k ?? key)
     try {
       const r = await post<any>('/api/attachments', text != null ? { name, text } : { name, base64: await toBase64(f) })
@@ -908,14 +922,16 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
     } catch (e: any) { setShared(s => s.map(x => x.key === key ? { ...x, loading: false, failed: true, summary: e.message ?? 'couldn’t attach it' } : x)) }
   }
   const takeFiles = (files: File[]) => {
-    for (const f of files.slice(0, 20)) {
-      if (/^image\//.test(f.type)) shrink(f).then(b => attach(b, f.name || `image-${Date.now()}.png`, 'image', `${Math.round(b.size / 1024)} KB image`))
-      else attach(f, f.name, 'file', `${f.size > 1e6 ? `${(f.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1024))} KB`}`)
-    }
+    const list = files.slice(0, 20), isImg = (f: File) => /^image\//.test(f.type)
+    const labels = markAt(list.map(f => isImg(f) ? 'image' : 'file'))
+    list.forEach((f, i) => {
+      if (isImg(f)) shrink(f).then(b => attach(b, f.name || `image-${Date.now()}.png`, 'image', `${Math.round(b.size / 1024)} KB image`, undefined, labels[i]))
+      else attach(f, f.name, 'file', `${f.size > 1e6 ? `${(f.size / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1024))} KB`}`, undefined, labels[i])
+    })
   }
   // Images pasted or dropped on Home's box arrive here once the new chat opens.
   useEffect(() => { if (!id && handedFiles.length) takeFiles(handedFiles.splice(0)) }, []) // eslint-disable-line
-  const takeLongText = (t: string) => attach(new Blob([t], { type: 'text/plain' }), `pasted-${new Date().toTimeString().slice(0, 8).replace(/:/g, '')}.${sniff(t)}`, 'file', `${t.split('\n').length} lines`, t)
+  const takeLongText = (t: string) => attach(new Blob([t], { type: 'text/plain' }), `pasted-${new Date().toTimeString().slice(0, 8).replace(/:/g, '')}.${sniff(t)}`, 'file', `${t.split('\n').length} lines`, t, markAt(['file'])[0])
   const [dragOver, setDragOver] = useState(false)
   const ta = useRef<HTMLTextAreaElement>(null)
 
@@ -985,6 +1001,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
     const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt, cwd: id ? undefined : cwd, mode, context, contextIds: pulled.map(p => p.id), folderId: folder?.id, shared: shared.filter(x => !x.loading && !x.file), attachments: files.map(x => x.file), turbo, engine })
     setPulled([])
     setShared([])
+    attachNums.current = { image: 0, file: 0 }
     setRelated([])
     if (!id || r.id !== id) onStarted(r.id) // a carried-over conversation continues in a new chat
   }
@@ -1046,8 +1063,8 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
         <div className="chips">
           {shared.map((x, i) => <span key={x.key ?? i} className={`chip shared${x.thumb ? ' has-thumb' : ''}${x.failed ? ' failed' : ''}${x.thumb && x.key === viewKey ? ' viewing' : ''}`} title={x.thumb ? 'Click to preview' : x.file?.path || x.summary}
             onClick={x.thumb ? () => setViewKey(k => k === x.key ? null : x.key!) : undefined}>
-            {x.thumb ? <img src={x.thumb} alt="" /> : x.loading ? '…' : x.file ? '📄' : x.url?.includes('/pull/') ? '⇅' : '🔗'} {x.title.slice(0, 56)}<span className="muted"> {x.loading && x.file ? 'attaching…' : x.summary}</span>
-            <button onClick={e => { e.stopPropagation(); if (x.key === viewKey) setViewKey(null); if (x.thumb) URL.revokeObjectURL(x.thumb); setShared(shared.filter((_, j) => j !== i)) }} title="Remove">×</button></span>)}
+            {x.thumb ? <img src={x.thumb} alt="" /> : x.loading ? '…' : x.file ? '📄' : x.url?.includes('/pull/') ? '⇅' : '🔗'} {x.file?.label && <b className="attach-label">{x.file.label}</b>} {x.title.slice(0, 56)}<span className="muted"> {x.loading && x.file ? 'attaching…' : x.summary}</span>
+            <button onClick={e => { e.stopPropagation(); if (x.key === viewKey) setViewKey(null); if (x.thumb) URL.revokeObjectURL(x.thumb); setShared(shared.filter((_, j) => j !== i)); const l = x.file?.label; if (l) setText(t => t.replace(` [${l}]`, '').replace(`[${l}] `, '').replace(`[${l}]`, '')) }} title="Remove">×</button></span>)}
         </div>
       )}
       {!dismissed && suggestions.length > 0 && (
@@ -1326,23 +1343,29 @@ function PlusMenu({ onAutoresearch, onResearch, onSkill, onLink }: { onAutoresea
 // Files from Home's start box, handed to the new chat it opens.
 export const handedFiles: File[] = []
 type Shared = { key?: string; url?: string; title: string; summary: string; context: string; loading?: boolean; failed?: boolean; thumb?: string
-  file?: { path: string; name: string; kind: 'image' | 'file'; media_type?: string; bytes?: number; lines?: number | null } }
+  file?: { path: string; name: string; kind: 'image' | 'file'; media_type?: string; bytes?: number; lines?: number | null; label?: string } }
 // A message copied out of a chat: its <attached-images>/<attached-files> blocks, the "🖼 1 image
 // attached" footer and "[Image: source: …]" markers become attachments again instead of raw markup.
+// "- [Image 1] /path/a.png" or "- /path/b.log (b.log, 3 lines)": the path, label and size note dropped.
+export const attachedItems = (inner: string) => (inner.match(/^- .+$/gm) ?? []).map(l => {
+  const label = /^- \[((?:Image|File) \d+)\] /.exec(l)?.[1]
+  return { label, path: l.slice(2).replace(/^\[(?:Image|File) \d+\] /, '').replace(/ \([^()]*\)$/, '').trim() }
+}).filter(x => x.path.startsWith('/'))
+export const attachedPaths = (inner: string) => attachedItems(inner).map(x => x.path)
 const IMG_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
 export function copiedMessage(t: string): { text: string; files: NonNullable<Shared['file']>[] } | null {
   if (!/<attached-(images|files)>/.test(t)) return null
   const files: NonNullable<Shared['file']>[] = []
   const name = (p: string) => (p.split('/').pop() ?? p).replace(/^[0-9a-f]{8}-/, '')
   let rest = t.replace(/<attached-images>([\s\S]*?)<\/attached-images>\s*/g, (_m, inner: string) => {
-    for (const l of inner.match(/^- (.+)$/gm) ?? []) {
-      const path = l.slice(2).trim(), ext = path.split('.').pop()?.toLowerCase() ?? ''
+    for (const path of attachedPaths(inner)) {
+      const ext = path.split('.').pop()?.toLowerCase() ?? ''
       files.push({ path, name: name(path), kind: 'image', media_type: IMG_TYPES[ext] ?? 'image/png' })
     }
     return ''
   })
   rest = rest.replace(/<attached-files>([\s\S]*?)<\/attached-files>\s*/g, (_m, inner: string) => {
-    for (const l of inner.match(/^- (\/\S+)/gm) ?? []) { const path = l.slice(2).trim(); files.push({ path, name: name(path), kind: 'file' }) }
+    for (const path of attachedPaths(inner)) files.push({ path, name: name(path), kind: 'file' })
     return ''
   })
   rest = rest.replace(/^\s*🖼\uFE0F? ?\d+ images? attached\s*$/gmu, '').replace(/^\s*\[Image: source: [^\]]*\]\s*$/gm, '')
