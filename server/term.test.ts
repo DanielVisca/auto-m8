@@ -11,9 +11,12 @@ import { closeTerm, createTerm, plainText, readTerm, sendTerm, termEvents, waitT
 
 test('plainText drops escape codes and applies carriage-return overwrites', () => {
   assert.equal(plainText('\x1b]2;title\x07\x1b[38;5;135mhi\x1b[39m there\r\n50%\r100%\n'), 'hi there\n100%\n')
+  // zsh redrawing the line as you type (syntax highlighting) must not read as "eecho"
+  assert.equal(plainText('$ e\x08echo hi\r\n'), '$ echo hi\n')
+  assert.equal(plainText('$ e\x1b[1Decho hi\x1b[K\r\n'), '$ echo hi\n')
 })
 
-test('an owned terminal: typed in, not run until Enter, then term_done for its owner', { timeout: 30_000 }, async () => {
+test('an owned terminal: waits for Run (or Enter), then term_done for its owner', { timeout: 30_000 }, async () => {
   const events: [string, string, string][] = []
   const f = (owner: string, id: string, ev: string) => { events.push([owner, id, ev]) }
   termEvents.add(f)
@@ -22,7 +25,10 @@ test('an owned terminal: typed in, not run until Enter, then term_done for its o
     await new Promise(r => setTimeout(r, 5000))
     assert.ok(!readTerm(t).output.includes('DONE_42'), 'prefill must not run by itself')
     assert.equal(readTerm(t).state, 'at prompt')
-    sendTerm(t, '', true) // the user presses Enter
+    assert.equal(t.pending, 'echo DONE_$((6*7))')
+    assert.ok(!readTerm(t).output.includes('200~'), 'no paste markers typed into the shell')
+    sendTerm(t, '', true) // the user presses Enter (same as Run)
+    assert.equal(t.pending, undefined)
     await waitTerm(t, 10_000)
     await new Promise(r => setTimeout(r, 3500))
     assert.ok(readTerm(t).output.includes('DONE_42'), readTerm(t).output.slice(-500))

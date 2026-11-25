@@ -166,7 +166,7 @@ export type Phase = {
   outcome?: string
   results: StepResult[]
 }
-export type StepResult = { label: string; excerpt: string; isError?: boolean }
+export type StepResult = { label: string; excerpt: string; isError?: boolean; tool?: Tool }
 type Tool = Extract<Block, { type: 'tool' }>
 
 const firstSentence = (s: string) => {
@@ -191,7 +191,7 @@ export function stepResult(t: Tool): StepResult {
   let excerpt = lines.slice(0, 3).join(' · ')
   if (excerpt.length > 240) excerpt = excerpt.slice(0, 237).trimEnd() + '…'
   if (lines.length > 3) excerpt += ` (+${lines.length - 3} lines)`
-  return { label, excerpt: t.result === undefined ? '…' : excerpt || 'no output', isError: t.isError }
+  return { label, excerpt: t.result === undefined ? '…' : excerpt || 'no output', isError: t.isError, tool: t }
 }
 const isPlan = (t: Tool) => /TodoWrite|update_plan/i.test(t.name)
 

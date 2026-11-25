@@ -11,6 +11,10 @@ export type Term = {
   p: pty.IPty; buf: string; exited: boolean; listeners: Set<(d: string) => void>; createdAt: number
   // An agent's terminal: the conversation that owns it gets woken when it finishes, waits for input or exits.
   owner?: string; needsUser?: string; shell: string
+  // A command waiting for the user to run it (Run button, or Enter at an empty prompt). It is never typed
+  // into the shell by itself: typing on a timer landed in whatever prompt was up (oh-my-zsh's update
+  // question) and left paste markers as text.
+  pending?: string; typedSince?: boolean
   lastOut: number; total: number; fg: string; quietReported: boolean; busyTicks: number; enterAt: number
 }
 export type TermState = 'at prompt' | 'running' | 'waiting for input' | 'exited'
@@ -30,10 +34,14 @@ export function createTerm(opts: { cwd?: string; cmd?: string; title?: string; c
   const shell = process.env.SHELL ?? '/bin/zsh'
   // A command runs in a login shell, then drops to an interactive shell so the tab stays useful.
   const args = opts.cmd ? ['-lc', `${opts.cmd}; exec ${shell} -l`] : ['-l']
-  const p = pty.spawn(shell, args, { name: 'xterm-256color', cols: 100, rows: 30, cwd, env: childEnv(opts.configDir, claudeEnv()) as any })
+  // No oh-my-zsh update question: it eats the first line typed into a fresh shell.
+  const env = { ...childEnv(opts.configDir, claudeEnv()), DISABLE_AUTO_UPDATE: 'true', DISABLE_UPDATE_PROMPT: 'true' }
+  const p = pty.spawn(shell, args, { name: 'xterm-256color', cols: 100, rows: 30, cwd, env: env as any })
   const t: Term = { id, title: opts.title ?? (opts.prefill ? opts.prefill.split('\n')[0].split(' ').slice(0, 3).join(' ') : opts.cmd ? opts.cmd.split(' ').slice(0, 3).join(' ') : cwd.split('/').pop()!), cwd, cmd: opts.cmd,
     conversationId: opts.conversationId, p, buf: '', exited: false, listeners: new Set(), createdAt: Date.now(),
-    owner: opts.owner, needsUser: opts.needsUser, shell: shell.split('/').pop()!, lastOut: Date.now(), total: 0, fg: '', quietReported: false, busyTicks: 0, enterAt: 0 }
+    owner: opts.owner, needsUser: opts.needsUser, shell: shell.split('/').pop()!, lastOut: Date.now(), total: 0, fg: '', quietReported: false, busyTicks: 0, enterAt: 0,
+    pending: opts.prefill && !opts.run ? opts.prefill : undefined }
+  if (!opts.run) opts.prefill = undefined
   p.onData(d => {
     t.buf = (t.buf + d).slice(-SCROLLBACK)
     t.total += d.length; t.lastOut = Date.now(); t.quietReported = false
@@ -42,7 +50,7 @@ export function createTerm(opts: { cwd?: string; cmd?: string; title?: string; c
   })
   // Type the prefill once the shell has drawn its prompt (output then quiet), or after 4s regardless.
   let prefillTimer: ReturnType<typeof setTimeout> | undefined
-  const typePrefill = () => { if (!opts.prefill || t.exited) return; const text = opts.prefill; opts.prefill = undefined; clearTimeout(prefillTimer); clearTimeout(fallback); t.p.write(opts.run ? `${text}\r` : pasteText(text)); if (opts.run) t.enterAt = Date.now() }
+  const typePrefill = () => { if (!opts.prefill || t.exited) return; const text = opts.prefill; opts.prefill = undefined; clearTimeout(prefillTimer); clearTimeout(fallback); t.p.write(`${text}\r`); t.enterAt = Date.now() }
   const armPrefill = () => { clearTimeout(prefillTimer); prefillTimer = setTimeout(typePrefill, 350) }
   const fallback = opts.prefill ? setTimeout(typePrefill, 4000) : undefined
   p.onExit(() => { t.exited = true; t.listeners.forEach(l => l('\r\n[process exited]\r\n')); changed(); if (t.owner) termEvent(t, 'term_exited') })
@@ -61,7 +69,7 @@ export function closeTerm(id: string) {
 
 export function listTerms() {
   return [...terms.values()].map(t => ({ id: t.id, title: t.title, cwd: t.cwd, cmd: t.cmd, conversationId: t.conversationId, exited: t.exited, createdAt: t.createdAt,
-    owner: t.owner, needsUser: t.needsUser, state: termState(t) }))
+    owner: t.owner, needsUser: t.needsUser, pending: t.pending, state: termState(t) }))
 }
 
 // ---------- agent-owned terminals: state, plain-text output, and events for the owner ----------
@@ -75,15 +83,32 @@ export function termState(t: Term): TermState {
 }
 
 // Terminal output as text an agent can read: escape codes out, carriage-return overwrites applied.
+// What the screen shows, line by line: applies carriage returns, backspaces and cursor moves the way a
+// terminal does, so a shell redrawing its line (zsh syntax highlighting) doesn't read as "eecho".
 export function plainText(raw: string) {
-  const noEsc = raw
-    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '') // OSC (titles, cwd)
-    .replace(/\x1b\[[0-9;?<>=!]*[ -\/]*[@-~]/g, '') // CSI
-    .replace(/\x1b[()][0-9A-Za-z]|\x1b[=>78DEHMcNO]/g, '')
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-    .replace(/\r+\n/g, '\n')
-  return noEsc.split('\n').map(line => { const parts = line.split('\r').filter((x, i, a) => x || i === a.length - 1); return parts.length ? parts[parts.length - 1] : '' })
-    .join('\n').replace(/\n{3,}/g, '\n\n')
+  const s = raw.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '').replace(/\x1b[()][0-9A-Za-z]|\x1b[=>78DEHMcNO]/g, '')
+  const lines: string[] = []
+  let line: string[] = [], col = 0
+  const re = /\x1b\[([0-9;?<>=!]*)[ -\/]*([@-~])|[\s\S]/g
+  for (let m: RegExpExecArray | null; (m = re.exec(s));) {
+    if (m[2]) {
+      const n = Math.max(1, parseInt(m[1]) || 1)
+      if (m[2] === 'D') col = Math.max(0, col - n)
+      else if (m[2] === 'C') col += n
+      else if (m[2] === 'G') col = n - 1
+      else if (m[2] === 'K' && (m[1] === '' || m[1] === '0')) line.length = Math.min(line.length, col)
+      else if (m[2] === 'K' && m[1] === '2') line = []
+      continue
+    }
+    const c = m[0]
+    if (c === '\n') { lines.push(line.join('').trimEnd()); line = []; col = 0 }
+    else if (c === '\r') col = 0
+    else if (c === '\b') col = Math.max(0, col - 1)
+    else if (c < ' ' || c === '\x7f') continue
+    else { while (line.length < col) line.push(' '); line[col++] = c }
+  }
+  lines.push(line.join('').trimEnd())
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
 export function readTerm(t: Term, opts: { since?: number; maxChars?: number } = {}) {
@@ -91,7 +116,7 @@ export function readTerm(t: Term, opts: { since?: number; maxChars?: number } = 
   // since is an offset in total bytes written; only what's still in the scrollback can be returned.
   const start = opts.since != null ? Math.max(0, t.buf.length - (t.total - opts.since)) : 0
   const text = plainText(t.buf.slice(start)).trimEnd()
-  return { state: termState(t), fg: fgOf(t), offset: t.total, output: text.length > max ? `…${text.slice(-max)}` : text, needsUser: t.needsUser }
+  return { state: termState(t), fg: fgOf(t), offset: t.total, output: text.length > max ? `…${text.slice(-max)}` : text, needsUser: t.needsUser, pending: t.pending }
 }
 
 // Block until the terminal settles (back at the prompt, waiting for input, exited) or the timeout.
@@ -110,11 +135,29 @@ export async function waitTerm(t: Term, ms: number) {
 
 export function sendTerm(t: Term, text: string, enter: boolean) {
   if (t.exited) throw new Error('That terminal has exited.')
+  if (t.pending && !text && enter && !t.typedSince) return runPending(t)
   t.p.write(enter ? `${text}\r` : text)
   if (enter || text.includes('\r')) t.enterAt = Date.now()
 }
 // Keystrokes from the user's window: Enter means a command was started, so its end is worth reporting.
-export function typedInto(t: Term, d: string) { if (d.includes('\r')) t.enterAt = Date.now() }
+// Enter at an empty prompt runs the pending command, so "press Enter" still works; other typing means
+// the user is doing it by hand, so Enter then just runs what they typed.
+export function typedInto(t: Term, d: string): boolean {
+  if (t.pending && d === '\r' && !t.typedSince) { runPending(t); return true }
+  if (t.pending && d !== '\r') t.typedSince = true
+  if (d.includes('\r')) { t.enterAt = Date.now(); t.typedSince = false }
+  return false
+}
+// Run the waiting command (the Run button). Pasted so multi-line commands run as one.
+export function runPending(t: Term) {
+  if (t.exited) throw new Error('That terminal has exited.')
+  if (!t.pending) throw new Error('Nothing waiting to run.')
+  const cmd = t.pending
+  t.pending = undefined; t.typedSince = false
+  t.p.write(cmd.includes('\n') ? `${pasteText(cmd)}\r` : `${cmd}\r`)
+  t.enterAt = Date.now()
+  changed()
+}
 
 // Events go to the owner's perch inbox (wired in main.ts), so it is woken once per burst.
 export const termEvents = new Set<(owner: string, termId: string, event: string, text: string) => void>()

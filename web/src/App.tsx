@@ -138,10 +138,12 @@ export function App() {
     const f = (e: Event) => openById((e as CustomEvent).detail)
     const r = (e: Event) => setView({ kind: 'search', q: (e as CustomEvent).detail, agent: 'deep' })
     const cmp = (e: Event) => setView({ kind: 'compare', ids: (e as CustomEvent).detail })
+    const term = (e: Event) => setView({ kind: 'term', id: (e as CustomEvent).detail })
+    addEventListener('perch-open-term', term)
     addEventListener('perch-compare', cmp)
     addEventListener('perch-open', f)
     addEventListener('perch-research', r)
-    return () => { removeEventListener('perch-open', f); removeEventListener('perch-research', r); removeEventListener('perch-compare', cmp) }
+    return () => { removeEventListener('perch-open-term', term); removeEventListener('perch-open', f); removeEventListener('perch-research', r); removeEventListener('perch-compare', cmp) }
   })
   // Traffic lights only where there is room for them.
   useEffect(() => { shell.buttons?.(mode === 'medium' || mode === 'wide') }, [mode])

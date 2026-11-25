@@ -28,7 +28,8 @@ export function TermView({ term, onClose, compact }: { term: TermInfo; onClose: 
     mq.addEventListener('change', onTheme)
     const themeObs = new MutationObserver(onTheme)
     themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-    t.focus()
+    // A terminal opened under a chat must not take the keyboard: you may be typing a message.
+    if (!compact) t.focus()
     // Keep a prefilled command visible as the shell draws it.
     if (compact) host.current!.scrollIntoView({ block: 'nearest' })
     return () => { ro.disconnect(); themeObs.disconnect(); ws.close(); t.dispose(); mq.removeEventListener('change', onTheme) }
@@ -37,9 +38,15 @@ export function TermView({ term, onClose, compact }: { term: TermInfo; onClose: 
   return (
     <div className={compact ? 'termview compact' : 'termview'}>
       <div className="view-head">
-        <div className="grow title">⌘_ {term.title}{compact && (term.needsUser ? <span className="term-ask"> · {term.needsUser}</span> : term.state === 'at prompt' ? <span className="muted small"> · press Enter to run</span> : null)}{term.owner && <span className="muted small" title="The agent in this chat owns this terminal: it reads the output and carries on when the command finishes."> · agent watching</span>} <span className="muted small">{term.cwd.replace(/^\/Users\/[^/]+/, '~')}</span></div>
+        <div className="grow title">⌘_ {term.title}{compact && term.needsUser && <span className="term-ask"> · {term.needsUser}</span>}{term.owner && <span className="muted small" title="The agent in this chat owns this terminal: it reads the output and carries on when the command finishes."> · agent watching</span>} <span className="muted small">{term.cwd.replace(/^\/Users\/[^/]+/, '~')}</span></div>
+        {compact && <button className="icon" title="Open as a full terminal (it keeps running, and stays in the chat too)" onClick={() => dispatchEvent(new CustomEvent('perch-open-term', { detail: term.id }))}>⤢</button>}
         <button className="icon" title={term.owner ? 'Close terminal (the agent is told it exited)' : 'Close terminal'} onClick={() => { api.send('DELETE', `/api/terms/${term.id}`); onClose() }}>×</button>
       </div>
+      {term.pending && !term.exited && <div className="term-pending">
+        <code title={term.pending}>{term.pending}</code>
+        <button className="icon" title="Copy" onClick={() => navigator.clipboard.writeText(term.pending!)}>⧉</button>
+        <button className="primary term-run" title="Run it in this terminal (Enter at the empty prompt does the same); the agent watches the output" onClick={() => api.send('POST', `/api/terms/${term.id}/run`)}>▶ Run</button>
+      </div>}
       <div className="xterm-host" ref={host} />
     </div>
   )

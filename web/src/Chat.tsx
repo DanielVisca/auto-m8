@@ -23,7 +23,7 @@ import { PR_URL, PrPill, PrRefs, bareRefs, knownPrs, linkPrRefs, type PrKnown } 
 import { agentSender, userBody } from '../../shared/messageOrigin'
 import { BlockerCard, knownBlocker } from './BlockerCard'
 import { blockerFor, blockerInText } from './blockers.ts'
-import { groupMessages, NEEDS_LOGIN, shortDuration, workPhases, workPulse, workSummary, type Entry, type Phase, type QueuedMessage, type WorkTurn } from './chatActivity'
+import { groupMessages, NEEDS_LOGIN, shortDuration, workPhases, workPulse, workSummary, type Entry, type Phase, type QueuedMessage, type StepResult, type WorkTurn } from './chatActivity'
 export { agentSender } from '../../shared/messageOrigin'
 import { CONV_SCHEME_RE, convIdOf, convLink, isConvLink, ourMcpTool } from '../../shared/brand.ts'
 export { NEEDS_LOGIN } from './chatActivity'
@@ -317,8 +317,7 @@ function UserBubble({ text }: { text: string }) {
 }
 
 const PULSE_TITLE = { active: 'Working', waiting: 'Working', quiet: 'Quiet', stalled: 'Possibly stalled' } as const
-const MOOD_LABEL = { smooth: 'Going smoothly', friction: 'Some friction', struggling: 'Struggling' } as const
-const MARK_TITLE = { ok: 'Step succeeded', err: 'Step failed', pending: 'Running now', repeat: 'Repeated an earlier step' } as const
+const MOOD_LABEL = { smooth: 'Smooth', friction: 'Friction', struggling: 'Struggling' } as const
 
 function WorkingCard({ turn, renderEntry, startedAt }: { turn: WorkTurn; renderEntry: (entry: Entry) => React.ReactNode; startedAt?: number }) {
   const [open, setOpen] = useState(false)
@@ -326,7 +325,8 @@ function WorkingCard({ turn, renderEntry, startedAt }: { turn: WorkTurn; renderE
   useEffect(() => { if (focus.index != null && turn.work.some(e => e.index === focus.index)) setOpen(true) }, [focus.n]) // eslint-disable-line
   const id = useId()
   const { preview, latestTool, steps, errors } = workSummary(turn.work)
-  const intents = useMemo(() => workPhases(turn.work, turn.running).length, [turn.work, turn.running])
+  const phases = useMemo(() => workPhases(turn.work, turn.running), [turn.work, turn.running])
+  const intents = phases.length
   const tool = latestTool && (typeof latestTool.input?.description === 'string' ? latestTool.input.description : toolLabel(latestTool.name))
   // Tick once a second while running, and note when anything in the turn last changed (streamed
   // text or a tool result doesn't always come with a new message timestamp).
@@ -346,23 +346,17 @@ function WorkingCard({ turn, renderEntry, startedAt }: { turn: WorkTurn; renderE
         {pulse?.startedAt && <span title={`Started ${new Date(pulse.startedAt).toLocaleTimeString()}`}>{shortDuration(now - pulse.startedAt)} · </span>}
         {intents > 1 && `${intents} intents · `}{steps > 0 && `${steps} step${steps === 1 ? '' : 's'}`}{errors > 0 && <span className="bad"> · {errors} failed</span>}
         {pulse && pulse.lastAt && <span className={pulse.state === 'stalled' ? 'bad' : pulse.state === 'quiet' ? 'warn' : ''} title="Time since the agent last did anything">
-          {' · '}{idle < 5000 ? 'active now' : pulse.state === 'waiting' ? `step running ${shortDuration(idle)}` : `last activity ${shortDuration(idle)} ago`}</span>}
+          {' · '}{idle < 5000 ? 'active now' : pulse.state === 'waiting' ? `step running ${shortDuration(idle)}` : `${shortDuration(idle)} ago`}</span>}
       </span>
+      {pulse && phases.length > 0 && <span className="work-health">
+        <IntentBar phases={phases} plan={pulse.plan} />
+        <span className={`work-mood mood-${pulse.mood}`} title={pulse.why}>{MOOD_LABEL[pulse.mood]}</span>
+      </span>}
       <span className={`work-chevron${open ? ' open' : ''}`} aria-hidden="true">›</span>
     </button>
     {turn.running && pulse && <div className="work-preview">
       <div className="work-update">{preview || 'Getting started…'}</div>
-      {tool && <div className="work-current">{latestTool?.result === undefined ? 'Using' : 'Latest'} · {tool}</div>}
-      {(pulse.plan || pulse.marks.length > 0) && <div className="work-pulse">
-        {pulse.plan && <span className="work-plan" title={pulse.plan.current ? `Now: ${pulse.plan.current}` : 'From the agent\'s own task list'}>
-          <span className="work-bar"><span style={{ width: `${Math.round(100 * pulse.plan.done / pulse.plan.total)}%` }} /></span>
-          {pulse.plan.done}/{pulse.plan.total} tasks
-        </span>}
-        {pulse.marks.length > 0 && <span className="work-marks" title={pulse.why ?? 'Recent steps: green went through, red failed, amber repeated an earlier step'}>
-          {pulse.marks.map((m, i) => <i key={i} className={`mark-${m}`} title={MARK_TITLE[m]} />)}
-        </span>}
-        <span className={`work-mood mood-${pulse.mood}`} title={pulse.why}>{MOOD_LABEL[pulse.mood]}{pulse.why ? ` · ${pulse.why}` : ''}</span>
-      </div>}
+      {tool && <div className="work-current" title={latestTool?.result === undefined ? 'Running now' : 'Latest step'}>↳ {tool}</div>}
     </div>}
     {turn.running && turn.queued.map(q => <QueuedLine key={q.index} q={q} renderEntry={renderEntry} />)}
     <div id={id} className="work-body" hidden={!open}>
@@ -384,6 +378,22 @@ function QueuedLine({ q, renderEntry }: { q: QueuedMessage; renderEntry: (entry:
     {open && renderEntry(q)}
   </div>
 }
+
+// One segment per intent: done ones coloured by how they went, the current one pulsing, then what's
+// left. The agent's own task list says how many tasks remain; without one there's no honest estimate,
+// so a single dashed segment says "more, unknown".
+const INTENT_MARK = { running: 'pending', done: 'ok', recovered: 'repeat', failed: 'err' } as const
+function IntentBar({ phases, plan }: { phases: Phase[]; plan?: { done: number; total: number; current?: string } }) {
+  const left = plan ? Math.max(0, plan.total - plan.done - (plan.current ? 1 : 0)) : undefined
+  const shown = phases.slice(-16)
+  const why = plan ? `${phases.length} intents so far · ${plan.done}/${plan.total} tasks done${plan.current ? ` · now: ${plan.current}` : ''}` : `${phases.length} intents so far · no task list, so how much is left is unknown`
+  return <span className="work-marks" title={why}>
+    {shown.map(p => <i key={p.key} className={`mark-${INTENT_MARK[p.state]}`} title={`${p.title} · ${p.steps} step${p.steps === 1 ? '' : 's'}${p.errors ? ` · ${p.errors} failed` : ''}`} />)}
+    {left === undefined ? <i className="mark-unknown" title="More may follow: the agent has no task list" />
+      : Array.from({ length: Math.min(left, 12) }, (_, i) => <i key={`l${i}`} className="mark-todo" title="Task not started yet" />)}
+  </span>
+}
+
 
 const PHASE_MARK = { running: '◌', done: '✓', recovered: '↻', failed: '✕' } as const
 const PHASE_TITLE = { running: 'Working on this now', done: 'Done, moved on', recovered: 'Hit failures, then moved on', failed: 'Stopped on a failure' } as const
@@ -424,15 +434,24 @@ function PhaseResults({ p, renderEntry }: { p: Phase; renderEntry: (entry: Entry
   if (!p.results.length && !p.outcome) return <>{p.entries.map(renderEntry)}</>
   return <div className="phase-results">
     {p.outcome && <div className="phase-outcome"><Markdown text={p.outcome} /></div>}
-    {p.results.length > 0 && <ul className="step-results">{p.results.map((r, i) =>
-      <li key={i} className={r.isError ? 'bad' : ''}>
-        <span className="step-mark" aria-label={r.isError ? 'failed' : 'done'}>{r.isError ? '✕' : '✓'}</span>
-        <span className="step-label">{r.label}</span>
-        <span className="step-excerpt" title={r.excerpt}>{r.excerpt}</span>
-      </li>)}</ul>}
-    <button className="link small muted phase-raw-toggle" onClick={() => setRaw(v => !v)}>{raw ? 'Hide' : 'Show'} {p.steps} tool call{p.steps === 1 ? '' : 's'}</button>
+    {p.results.length > 0 && <ul className="step-results">{p.results.map((r, i) => <StepRow key={i} r={r} />)}</ul>}
+    <button className="link small muted phase-raw-toggle" onClick={() => setRaw(v => !v)} title="Everything the agent wrote and ran for this intent, in order">{raw ? 'Hide' : 'Show'} full transcript</button>
     {raw && <div className="phase-raw">{p.entries.map(renderEntry)}</div>}
   </div>
+}
+
+// One step of a finished intent; open it to see the call itself (command, input, full output).
+function StepRow({ r }: { r: StepResult }) {
+  const [open, setOpen] = useState(false)
+  return <li className={`${r.isError ? 'bad' : ''}${open ? ' open' : ''}`}>
+    <button className="step-row" aria-expanded={open} disabled={!r.tool} onClick={() => setOpen(v => !v)} title={open ? 'Hide the call' : 'Show the call'}>
+      <span className="step-mark" aria-label={r.isError ? 'failed' : 'done'}>{r.isError ? '✕' : '✓'}</span>
+      <span className="step-label">{r.label}</span>
+      <span className="step-excerpt" title={r.excerpt}>{r.excerpt}</span>
+      {r.tool && <span className={`work-chevron step-chevron${open ? ' open' : ''}`} aria-hidden="true">›</span>}
+    </button>
+    {open && r.tool && <div className="step-call"><ToolViz b={r.tool} /></div>}
+  </li>
 }
 
 // Jump to a point in a thread (e.g. where a file was made): opens the folds that hide it, scrolls
@@ -704,7 +723,8 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
   // The conversation owns it: perch wakes the agent when the command finishes or waits for input.
   const root = useRef<HTMLDivElement>(null)
   const { data: termData, reload: reloadTerms } = useLive<{ terms: Term[] }>('/api/terms', ['terms'])
-  const dock = id ? (termData?.terms ?? []).filter(t => t.owner === id && !t.exited).sort((a, b) => b.createdAt - a.createdAt)[0] : undefined
+  // This chat's live terminals sit in the thread itself, after the latest message, so you watch the agent drive them.
+  const ownTerms = id ? (termData?.terms ?? []).filter(t => t.owner === id && !t.exited).sort((a, b) => a.createdAt - b.createdAt) : []
   // Its agent browser window (server/browser.ts) docks there too, with any action waiting on your approval.
   const { data: browserData } = useBrowser()
   const browserOwned = !!id && !!browserData?.sessions.some(s => s.owner === id)
@@ -743,6 +763,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
         {!id && <NewChatHint />}
         {id && !items.length && (loading !== null || conv?.source === 'posthog-code') && <div className="msg note">{loading ? `Loading… auto-m8 is busy, retrying (try ${loading + 1})` : 'Loading…'}</div>}
         <Messages items={items} running={running} onBranch={id ? branch : undefined} onRewind={id ? setRewinding : undefined} convId={id} />
+        {ownTerms.map(t => <div key={t.id} className="msg term-inline"><TermView term={t} compact onClose={reloadTerms} /></div>)}
       </div>
       {id && rewinding && <RewindDialog id={id} uuid={rewinding} onDone={nid => { setRewinding(null); if (nid) onOpen(nid) }} />}
       {id && <OptimizeStrip id={id} />}
@@ -750,7 +771,6 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
       {id && btwOpen && <Btw id={id} onClose={() => setBtwOpen(false)} />}
       {id && browserOwned && <BrowserDock owner={id} approvals={browserApprovals} />}
       {id && !browserOwned && browserApprovals.length > 0 && <div className="browser-dock collapsed"><ApprovalBar approvals={browserApprovals} /></div>}
-      {dock && <div className="term-dock"><TermView key={dock.id} term={dock} compact onClose={reloadTerms} /></div>}
       <JumpToMine items={items} convId={id} scroller={scroller} />
       <Composer id={id} running={running} settings={settings} onStarted={onOpen} onBtw={() => setBtwOpen(true)} compact={compact} conv={conv} shownInThread={lastFailureBlocked(items)} />
     </div>

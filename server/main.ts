@@ -68,7 +68,7 @@ import { summaryFor as exploreSummary, warmSummaries } from './explorer-summary.
 import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
 import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
-import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, sendTerm, termEvents, terms, typedInto, waitTerm } from './term.ts'
+import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, runPending, sendTerm, termEvents, terms, typedInto, waitTerm } from './term.ts'
 import { completePairing, deviceFor, isLoopback, lanHosts, listDevices, revokeDevice, setRemoteOnlyPort, startPairing, UNPAIRED_PAGE } from './remote.ts'
 import { gitInfo, idleFromLogs, leaseFor, leases, makeCloud, RETURN_BY } from './cloud.ts'
 import { beat, getDraft as getComposeDraft, handoff, macIdleMs, mobileStatus, notify, notifyTick, openProdAlerts, pushKey, putDraft, refreshTailscale, remotePort, setTailscale, stayAwakeTick, subscribe as pushSubscribe, tailscale, tailscaleUrl, unsubscribe as pushUnsubscribe } from './mobile.ts'
@@ -647,6 +647,12 @@ route('GET', '/api/terms/:id/read', async (m, _req, _res, q) => {
   if (wait > 0) await waitTerm(t, wait * 1000)
   return readTerm(t, { since: q.get('since') ? Number(q.get('since')) : undefined, maxChars: Number(q.get('max')) || undefined })
 })
+route('POST', '/api/terms/:id/run', m => {
+  const t = terms.get(m[1])
+  if (!t) return { error: 'No such terminal (closed, or auto-m8 restarted).' }
+  try { runPending(t) } catch (e: any) { return { error: e.message } }
+  return { ok: true }
+})
 route('POST', '/api/terms/:id/input', async (m, req) => {
   const t = terms.get(m[1]), b = await body(req)
   if (!t) return { error: 'No such terminal (closed, or auto-m8 restarted).' }
@@ -1161,7 +1167,7 @@ function onUpgrade(req: IncomingMessage, socket: import('node:stream').Duplex, h
       t.listeners.add(l)
       ws.on('message', raw => {
         const m = JSON.parse(raw.toString())
-        if (m.d) { t.p.write(m.d); typedInto(t, m.d) }
+        if (m.d && !typedInto(t, m.d)) t.p.write(m.d)
         if (m.r && !t.exited) t.p.resize(Math.max(2, m.r[0]), Math.max(2, m.r[1]))
       })
       ws.on('close', () => t.listeners.delete(l))

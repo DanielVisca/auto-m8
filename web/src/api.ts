@@ -9,7 +9,7 @@ export type Conversation = {
   effective: State; prs: PR[]; link_count: number; snippet?: string; labels: string[]; snooze_until: number | null; returned?: boolean; reason?: string | null; slack_url?: string | null
 }
 export type State = 'running' | 'waiting' | 'active' | 'later' | 'idle' | 'done' | 'archived' | 'hidden'
-export type Term = { id: string; title: string; cwd: string; cmd?: string; conversationId?: string; exited: boolean; createdAt: number; owner?: string; needsUser?: string; state?: string }
+export type Term = { id: string; title: string; cwd: string; cmd?: string; conversationId?: string; exited: boolean; createdAt: number; owner?: string; needsUser?: string; pending?: string; state?: string }
 export type Block =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
