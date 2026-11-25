@@ -75,7 +75,7 @@ const has = (t: string) => !!get(`select 1 from sqlite_master where name = ?`, t
 const HELPERS = () => has('delegations') ? ' union select child from delegations' : ''
 // Prompts perch injects into a conversation (follow-ups, resumes, watch events, helper reports,
 // auto-decisions). They sit in the transcript as user turns, but you didn't type them.
-export const PERCH_PROMPT = /^\s*(⏰ Follow-up from (?:auto-m8|perch)|⏰ (?:auto-m8|perch) check:|You stopped here before the work was finished|\((?:auto-m8|perch): |Your previous API request got no reply|This chat stalled \(|(?:auto-m8|perch) restarted while you were working|\(a message sent before (?:auto-m8|perch) restarted\)|EVENTS \(\d+\) from what you're watching|HELPER REPORT \(|Decision on "|The user changed the decision on "|\[Request interrupted by user)/
+export const PERCH_PROMPT = /^\s*(⏰ Follow-up from (?:auto-m8|perch)|⏰ (?:auto-m8|perch) check:|You stopped here before the work was finished|\((?:auto-m8|perch): |Your previous API request got no reply|This chat stalled \(|(?:auto-m8|perch) restarted while you were working|\(a message sent before (?:auto-m8|perch) restarted\)|EVENTS \(\d+\) from what you're watching|HELPER REPORT \(|Decision on "|The user changed the decision on "|\[Request interrupted by user|You are the shepherd for |New on this PR since your last run:)/
 
 export function ingest(days = 30) {
   let added = 0
@@ -106,8 +106,11 @@ export function ingest(days = 30) {
     } catch (e) { db.exec('rollback'); throw e }
   }
   // PostHog tasks: one ask each (the Slack message or desktop prompt that started it).
+  // A task auto-m8 started to carry on a local chat in the cloud ("☁ <chat title>") is not a new
+  // ask: the chat's own asks are already counted, and the title is auto-m8's, not your words.
+  const handedOff = has('cloud_leases') ? new Set(all<any>('select task_id from cloud_leases').map(r => `task:${r.task_id}`)) : new Set<string>()
   for (const t of all<any>(`select id, started_at, coalesce(first_prompt, title) text from conversations where source = 'posthog-task' and origin in ('slack', 'user_created', 'posthog_ai') and started_at > ?`, Date.now() - days * DAY)) {
-    if (!t.text) continue
+    if (!t.text || handedOff.has(t.id) || /^\s*☁ /.test(t.text)) { run('delete from asks where id = ?', hash(t.id)); continue }
     added += Number(run(`insert or ignore into asks (id, conversation_id, ts, text, intent, last) values (?, ?, ?, ?, ?, 1)`, hash(t.id), t.id, t.started_at, String(t.text).slice(0, 600), intentOf(t.text)).changes)
   }
   // What agents said they lacked a skill or tool for counts as an ask too, so it joins a use case.

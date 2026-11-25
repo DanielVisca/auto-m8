@@ -23,18 +23,20 @@ These need no history: sign in to Claude and GitHub, and turn on **Let agents ac
 3. **Retire.** A skill nobody has needed for 30 days is moved out. Every version is kept and can be rolled back.
 4. **Resume.** Work an agent dropped is picked back up.
 
-In six weeks, from 1,738 asks across 778 conversations, it wrote 44 skills, made 25 rewrites, skipped 3 jobs that had no repeatable steps, and resumed 35 pieces of dropped work.
+In six weeks, from 1,418 asks you typed across 461 conversations, it wrote 44 skills, made 25 rewrites, skipped 3 jobs that had no repeatable steps, and resumed 35 pieces of dropped work. Prompts auto-m8 writes itself (shepherd briefs, follow-ups, the titles of chats it hands to the cloud) don't count as asks.
 
 | Job | Asks | Skill written | What happened next |
 |---|---|---|---|
-| Building auto-m8 itself | 307 | `perch-perch-app-dev`, from 4 conversations | Loaded in 87 conversations. No rewrites needed. |
-| Shepherding PRs to merge | 381 | `perch-shepherd-prs-to-merge` | Rewritten 7 times as new phrasings went unloaded: a bare PR link, "it's approved, why isn't it merged?", stacks to restack. It still loads too rarely, which is why it keeps getting rewritten. |
-| Checking a merged PR reached production | 27 | `perch-verify-pr-production-deploy` | Loaded in 15 conversations. Became the procedure the shepherd runs after a merge. |
-| Creating and testing scouts | 27 | `perch-create-test-scouts` | Loaded in 11 conversations. Used to build and dry-run the scouts below. |
-| Finishing dropped work | 45 | `perch-resume-stalled-work` | Rewritten to trigger on the one-line prompt the cloud runs send. |
+| Building auto-m8 itself | 269 | `perch-perch-app-dev`, from 4 conversations | Loaded in 87 conversations. No rewrites needed. |
+| Shepherding PRs to merge | 228 | `perch-shepherd-prs-to-merge` | Rewritten 7 times as phrasings went unloaded: a bare PR link, "it's approved, why isn't it merged?", stacks to restack. It still loads too rarely. |
+| Checking a merged PR reached production | 27 | `perch-verify-pr-production-deploy` | Loaded in 15 conversations. |
+| Creating and testing scouts | 22 | `perch-create-test-scouts` | Loaded in 11 conversations. Used to build and dry-run the scouts below. |
+| Investigating a Slack thread | 21 | `perch-investigate-slack-thread` | Rewritten once, to also cover follow-ups in a thread and "do I need access to this?". |
 | Drafting a Slack reply | 30 | `perch-draft-slack-message` | Rewritten twice, to trigger on short asks like "whats my answer to him?". It never sends: you do. |
 
 One thing to watch: how often a job comes up is not the same as how often its skill gets loaded. The Evolve page shows both for every skill, so you can see which ones are doing their job.
+
+A mistake it made, and the fix: early on, auto-m8 counted its own prompts as yours. When it handed a chat to the cloud, the new task's title ("☁ Finish my recent work") was counted as a fresh ask, 45 times over, and it wrote a skill for a job you had typed once. It also rewrote the PR shepherding skill twice to match its own cloud prompts instead of your words. Asks now count only what you typed.
 
 ## After a skill proves itself: schedules
 
