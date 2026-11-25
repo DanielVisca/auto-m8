@@ -4,8 +4,10 @@ import './styles.css'
 import { App } from './App'
 import { Explore } from './Explore'
 import { registerSw } from './Mobile'
+import { startTracing } from './tracing'
 
 registerSw()
+startTracing()
 
 // ?popout=explore: the architecture explorer on its own, in a separate window. Opening a chat from it
 // goes to the main window (the app's shell routes it there).

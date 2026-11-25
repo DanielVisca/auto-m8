@@ -23,6 +23,7 @@ import { PR_URL, PrPill, PrRefs, bareRefs, knownPrs, linkPrRefs, type PrKnown } 
 import { agentSender, userBody } from '../../shared/messageOrigin'
 import { BlockerCard, knownBlocker } from './BlockerCard'
 import { blockerFor, blockerInText } from './blockers.ts'
+import { traceUi } from './tracing.ts'
 import { groupMessages, NEEDS_LOGIN, shortDuration, workPhases, workPulse, workSummary, type Entry, type Phase, type QueuedMessage, type StepResult, type WorkTurn } from './chatActivity'
 export { agentSender } from '../../shared/messageOrigin'
 import { CONV_SCHEME_RE, convIdOf, convLink, isConvLink, ourMcpTool } from '../../shared/brand.ts'
@@ -659,6 +660,10 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
     setLoading(id && !had ? 0 : null)
     bump()
     if (!id) return
+    // chat.open trace: click to first messages painted (tracing.ts); abandoned if you leave first.
+    const t0 = performance.now()
+    let opened = false
+    const markOpen = (via: string, n: number) => { if (opened) return; opened = true; requestAnimationFrame(() => traceUi('chat.open', performance.now() - t0, { via, cached: !!had, tries: attempt + 1, items: n })) }
     let ws: WebSocket | null = null
     let closed = false
     let frame = 0
@@ -667,12 +672,13 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
     // connection dropping), try again with a growing wait, keeping what's on screen, instead of
     // leaving the chat blank or silently no longer updating.
     let retry: any = null, attempt = 0
+    if (had) markOpen('cache', had.length)
     const again = () => { if (closed || retry) return; setLoading(l => l === null ? l : attempt + 1); retry = setTimeout(() => { retry = null; connect() }, Math.min(10_000, 500 * 2 ** attempt++)) }
     // A thread not opened before: its last messages come first (a few KB, not the whole thread).
     let whole = !!had
     if (!had) api.get<{ items: Item[] }>(`/api/conversations/${id}/messages?tail=30`).then(({ items }) => {
       if (closed || whole || !Array.isArray(items) || !items.length) return
-      setLoading(null); setHistory(items); render()
+      setLoading(null); setHistory(items); render(); markOpen('tail', items.length)
     }).catch(() => {})
     const connect = () => loadThread<Item>(id).then(({ items }) => {
       if (closed) return
@@ -682,7 +688,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
       setLoading(null)
       setHistory(items)
       adopt(live.current, items)
-      render()
+      render(); markOpen('full', items.length)
       ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/chat/${id}`)
       ws.onopen = () => { attempt = 0 }
       ws.onclose = () => { if (!closed) again() }
@@ -708,7 +714,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
     }).catch(again)
     connect()
     // Leaving a thread you watched update counts as having read it.
-    return () => { closed = true; clearTimeout(retry); ws?.close(); cancelAnimationFrame(frame); post(`/api/conversations/${encodeURIComponent(id)}/seen`).catch(() => {}) }
+    return () => { if (!opened) traceUi('chat.open', performance.now() - t0, { abandoned: true, cached: false, tries: attempt + 1 }); closed = true; clearTimeout(retry); ws?.close(); cancelAnimationFrame(frame); post(`/api/conversations/${encodeURIComponent(id)}/seen`).catch(() => {}) }
   }, [id])
 
   // A turn replayed to a late subscriber repeats messages the transcript already has: keep the

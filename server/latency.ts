@@ -4,12 +4,26 @@
 // as background. Alongside: event-loop delay every 10s and requests still in flight. All in memory,
 // bounded (last hour), a few microseconds per query. Stalls with their CPU profile summary are in
 // the availability table (stallprof.ts); the report joins them in.
-// Read it with GET /api/latency or the perch MCP tool `latency`.
+// Read it with GET /api/latency or the perch MCP tool `latency`. Durable history of the same data
+// (and client timings) lives in tracestore.ts, fed by the listeners below.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
 
 export type Span = { name: string; start: number; ms: number }
-export type Trace = { id: number; at: number; name: string; ms: number; status?: number; spans: Span[]; dbMs: number; dbCalls: number; done: boolean }
+export type Trace = { id: number; at: number; name: string; ms: number; status?: number; spans: Span[]; dbMs: number; dbCalls: number; done: boolean; path?: string }
+export type Loop = { at: number; p50: number; p99: number; max: number }
+
+// Listeners for the durable store: every finished request and every event-loop sample.
+const doneListeners: ((t: Trace) => void)[] = []
+const loopListeners: ((l: Loop) => void)[] = []
+export const onTraceDone = (fn: (t: Trace) => void) => { doneListeners.push(fn) }
+export const onLoopSample = (fn: (l: Loop) => void) => { loopListeners.push(fn) }
+// Background totals for whole minutes before `beforeMinute`, from `fromMinute` on.
+export function backgroundMinutes(fromMinute: number, beforeMinute: number) {
+  const out: { minute: number; name: string; calls: number; ms: number; max: number }[] = []
+  for (const [minute, m] of background) if (minute >= fromMinute && minute < beforeMinute) for (const [name, a] of m) out.push({ minute, name, calls: a.n, ms: a.ms, max: a.max })
+  return out
+}
 
 const als = new AsyncLocalStorage<Trace>()
 const MAX_SPANS = 200, KEEP_TRACES = 3000, HOUR = 3600_000
@@ -34,6 +48,7 @@ export function endTrace(t: Trace, status?: number, now = Date.now()) {
   t.done = true; t.ms = now - t.at; t.status = status
   inFlight.delete(t)
   finished.push(t)
+  for (const fn of doneListeners) try { fn(t) } catch {}
   while (finished.length > KEEP_TRACES || (finished.length && now - finished[0].at > HOUR)) finished.shift()
 }
 
@@ -70,14 +85,15 @@ export async function span<T>(name: string, fn: () => Promise<T> | T): Promise<T
 }
 
 // Event-loop delay: p50/p99/max for each 10s.
-type Loop = { at: number; p50: number; p99: number; max: number }
 const loops: Loop[] = []
 let loopTimer: NodeJS.Timeout | null = null
 export function startLatency() {
   if (loopTimer) return
   const h = monitorEventLoopDelay({ resolution: 20 }); h.enable()
   loopTimer = setInterval(() => {
-    loops.push({ at: Date.now(), p50: h.percentile(50) / 1e6, p99: h.percentile(99) / 1e6, max: h.max / 1e6 })
+    const l = { at: Date.now(), p50: h.percentile(50) / 1e6, p99: h.percentile(99) / 1e6, max: h.max / 1e6 }
+    loops.push(l)
+    for (const fn of loopListeners) try { fn(l) } catch {}
     if (loops.length > 360) loops.shift()
     h.reset()
   }, 10_000)

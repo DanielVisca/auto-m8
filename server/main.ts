@@ -120,6 +120,7 @@ import { availability, noteBoot, noteOutage, noteStop, recordAvailability, write
 import { explainStall, startStallProfiler } from './stallprof.ts'
 import { localResources } from './resources.ts'
 import { endTrace, report as latencyReport, routeOf, runInTrace, startLatency, startTrace } from './latency.ts'
+import { query as traceQuery, recordClient, startTraceStore } from './tracestore.ts'
 import { ghUsage } from './gh.ts'
 import * as kits from './kits.ts'
 const importsMs = performance.now() // every module above has loaded and run its top level by here
@@ -287,6 +288,13 @@ route('GET', '/api/latency', async (_m, _req, _res, q) => {
   const stalls = all<any>(`select at, ms, cause, detail from availability where kind = 'stall' and at > ? order by at desc limit 50`, Date.now() - seconds * 1000)
   return latencyReport({ seconds, machine, stalls, route: q?.get('route') ?? undefined })
 })
+// Durable traces (tracestore.ts): history by build, condensed to hourly summaries as raw expires.
+route('GET', '/api/traces', (_m, _r, _s, q) => {
+  const n = (k: string) => { const v = q.get(k); return v == null || v === '' ? undefined : Number(v) }
+  const t = (k: string) => { const v = q.get(k); if (!v) return undefined; const x = /^\d+$/.test(v) ? Number(v) : Date.parse(v); return Number.isFinite(x) ? x : undefined }
+  return traceQuery({ action: q.get('action') ?? undefined, from: t('from'), to: t('to'), hours: n('hours'), name: q.get('name') ?? undefined, kind: q.get('kind') ?? undefined, build: n('build'), id: n('id'), limit: n('limit'), bucket: q.get('bucket') ?? undefined })
+})
+route('POST', '/api/traces/client', async (_m, req) => ({ recorded: recordClient((await body(req)).events as any) }))
 route('GET', '/api/availability', (_m, _r, _s, q) => availability(Number(q.get('hours')) || 24))
 route('POST', '/api/availability', async (_m, req) => noteOutage(await body(req)))
 // The way to restart perch for new server code: says why, then stops; the shell starts it again
@@ -1125,10 +1133,12 @@ let lastRequest = ''
 
 // Each API request is a trace (latency.ts); long-lived streams aren't, they'd only add noise.
 startLatency()
+startTraceStore()
 function handle(req: IncomingMessage, res: ServerResponse) {
   const path = (req.url ?? '/').split('?')[0]
-  if (!path.startsWith('/api/') || path === '/api/events' || path === '/api/latency') return handleRequest(req, res)
+  if (!path.startsWith('/api/') || path === '/api/events' || path === '/api/latency' || path.startsWith('/api/traces')) return handleRequest(req, res)
   const t = startTrace(routeOf(req.method ?? 'GET', path))
+  t.path = path
   const end = () => endTrace(t, res.statusCode)
   res.on('finish', end); res.on('close', end)
   return runInTrace(t, () => handleRequest(req, res))

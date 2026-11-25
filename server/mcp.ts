@@ -26,7 +26,7 @@ import { BROWSER_TOOL_DESCRIPTION } from './browsertool.ts'
 import { convIdOf, convLink, MCP_SERVER } from '../shared/brand.ts'
 
 // Tools that only read: marked so read-only chats (plan mode, review helpers) can still use them.
-const READ_ONLY = new Set(['latency', 'work_origin', 'mcp_access', 'runtimes', 'search_conversations', 'get_conversation', 'recent_activity', 'search_notes', 'search_skills', 'open_prs', 'delegate_status', 'get_evidence', 'discover_mcp', 'board'])
+const READ_ONLY = new Set(['latency', 'traces', 'work_origin', 'mcp_access', 'runtimes', 'search_conversations', 'get_conversation', 'recent_activity', 'search_notes', 'search_skills', 'open_prs', 'delegate_status', 'get_evidence', 'discover_mcp', 'board'])
 const tools = [
   {
     name: 'needs_me',
@@ -191,6 +191,16 @@ const tools = [
     name: 'latency',
     description: "Live latency of auto-m8 itself, to diagnose 'auto-m8 is slow / chats won't load / it froze' in real time. Returns a diagnosis first (most likely cause in plain words), then: per-route p50/p95/p99 and share of time in SQLite, the slowest requests with where their time went (SQL and other spans), requests running right now, event-loop delay, background SQLite cost outside requests, event-loop freezes with their CPU-profile summary, and the Mac's memory/CPU/swap pressure with top processes. If the server doesn't answer within a few seconds it reports that, with the heartbeat age, recent freezes, slow-DB log and machine pressure read without it. seconds = window (default 300, 10-3600); route filters to routes containing that text; wait=N first waits N seconds (max 60) so you see what happens while you reproduce the slowness.",
     inputSchema: { type: 'object', properties: { seconds: { type: 'number' }, route: { type: 'string', description: 'e.g. /api/conversations' }, wait: { type: 'number', description: 'Seconds to wait before reading, to capture a reproduction' } } },
+  },
+  {
+    name: 'traces',
+    description: "History of everything in auto-m8 that takes time, how much and where, tied to what the app was at that moment. Use it for 'it was slow earlier / yesterday / since that change', regressions and capacity questions; use latency for right now. Covers server API requests with their spans (SQL, gh, subprocesses), background work per minute, event-loop delay, and client timings from the app window: chat.open (click to first message painted, with tries, cached, via), 'api <route>' (requests the window waited on, with queuedMs = time waiting for one of the browser's 6 connections, neverSent when it gave up queued), longtask (UI thread blocked) and page.load, each with the view the user was on. Every event carries a build: git sha, commit subject, commits since the previous build, uncommitted files (auto-m8 runs from its working tree) and the settings toggles; settings changed mid-run are config events. Raw events are kept 48h with full spans (action=get id); older hours are condensed into hourly summaries (count, errors, p50/p90/p95/p99/max, top spans, 3 slowest examples) kept 30 days. Actions: summary (default: diagnosis, slowest client/request operations, background cost, event loop, builds in the window), slowest (individual events with where their time went; id for get), get (one raw event: span timeline, meta, build), timeline (one name over time, bucket minute|hour|day, with build start marks), compare (same operations per build: did a change make them slower), spans (time per span name across all requests and background: e.g. total gh graphql time), builds (what code and settings ran when). Window: hours (default 24) or from/to (ISO or epoch ms). Filters: name (substring, e.g. chat.open, /api/conversations, railyard), kind (request|client|background|loop|config), build (id).",
+    inputSchema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['summary', 'slowest', 'get', 'timeline', 'compare', 'spans', 'builds'] },
+      hours: { type: 'number', description: 'Window ending now (or at to); default 24' }, from: { type: 'string', description: 'ISO time or epoch ms' }, to: { type: 'string' },
+      name: { type: 'string', description: 'Substring of the operation name' }, kind: { type: 'string', enum: ['request', 'client', 'background', 'loop', 'config'] },
+      build: { type: 'number' }, id: { type: 'number', description: 'Raw event id (get)' }, limit: { type: 'number' }, bucket: { type: 'string', enum: ['minute', 'hour', 'day'] },
+    } },
   },
   {
     name: 'mcp_access',
@@ -460,6 +470,15 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     } catch (e: any) {
       return JSON.stringify(await unresponsive(seconds, String(e?.message ?? e)), null, 1)
     }
+  }
+  if (name === 'traces') {
+    const port = process.env.PERCH_PORT ?? 4777
+    const qs = new URLSearchParams()
+    for (const k of ['action', 'hours', 'from', 'to', 'name', 'kind', 'build', 'id', 'limit', 'bucket']) if (args[k] != null && args[k] !== '') qs.set(k, String(args[k]))
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}/api/traces?${qs}`, { headers: { Host: `127.0.0.1:${port}` }, signal: AbortSignal.timeout(20_000) })
+      return JSON.stringify(await r.json(), null, 1)
+    } catch (e: any) { return `auto-m8 didn't answer /api/traces (${e?.message ?? e}). If it is hung, use the latency tool, which reads its state without the server.` }
   }
   if (name === 'mcp_access') {
     const port = process.env.PERCH_PORT ?? 4777
