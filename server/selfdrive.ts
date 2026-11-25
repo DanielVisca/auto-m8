@@ -18,7 +18,7 @@ run(`create table if not exists self_drive (
   status text, note text, updated_at integer)`)
 run(`create table if not exists self_drive_log (
   id integer primary key autoincrement, conversation_id text not null, at integer not null, action text not null, message text, reason text)`)
-try { run('alter table self_drive add column backoff_until integer') } catch {}
+for (const col of ['backoff_until integer', 'mode text', 'per_hour integer', 'recheck_min integer', 'model text', 'instructions text']) { try { run(`alter table self_drive add column ${col}`) } catch {} }
 run('create index if not exists self_drive_log_conv on self_drive_log(conversation_id, at)')
 
 // Self drive is meant to run unwatched, so it keeps going and only stops for a real loop:
@@ -37,14 +37,35 @@ export const RETRY_MS = 5 * 60_000 // the driver's own answer failed (unreadable
 const SETTLE_MS = 4000 // let the turn's last events land (and a queued user message start) first
 const DECISIONS = ['reply', 'resume', 'wait', 'done', 'needs_you', 'error', 'backoff']
 
-export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null }
-type Row = { id: string; enabled: number; replies: number; last_reply: string | null; last_reply_at: number | null; status: string | null; note: string | null; backoff_until: number | null }
+// Per-chat settings (right-click the 🚗). Unset means the defaults above.
+// mode: 'full' hands back only what only the user can do; 'careful' also hands back big, lasting choices.
+export type DriveSettings = { mode: 'full' | 'careful'; perHour: number; recheckMin: number; model: string | null; instructions: string }
+export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null; settings: DriveSettings }
+type Row = { id: string; enabled: number; replies: number; last_reply: string | null; last_reply_at: number | null; status: string | null; note: string | null; backoff_until: number | null
+  mode: string | null; per_hour: number | null; recheck_min: number | null; model: string | null; instructions: string | null }
+const settingsOf = (r?: Row | null): DriveSettings => ({
+  mode: r?.mode === 'careful' ? 'careful' : 'full', perHour: r?.per_hour || PER_HOUR, recheckMin: r?.recheck_min || WAIT_RECHECK_MS / 60_000,
+  model: r?.model || null, instructions: r?.instructions ?? '' })
+
+export function setDriveSettings(id: string, s: Partial<DriveSettings>) {
+  run('insert into self_drive (id, updated_at) values (?, ?) on conflict(id) do nothing', id, deps.now())
+  const clamp = (v: unknown, lo: number, hi: number) => v === undefined ? undefined : Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))
+  const set: [string, unknown][] = [
+    ['mode', s.mode === undefined ? undefined : s.mode === 'careful' ? 'careful' : 'full'],
+    ['per_hour', clamp(s.perHour, 1, 200)], ['recheck_min', clamp(s.recheckMin, 1, 24 * 60)],
+    ['model', s.model === undefined ? undefined : (String(s.model ?? '').trim().slice(0, 80) || null)],
+    ['instructions', s.instructions === undefined ? undefined : String(s.instructions).slice(0, 4000)],
+  ]
+  for (const [col, v] of set) if (v !== undefined) run(`update self_drive set ${col} = ? where id = ?`, v, id)
+  changed(id)
+  return driveState(id)
+}
 
 const row = (id: string) => get<Row>('select * from self_drive where id = ?', id)
 export const isSelfDriving = (id: string) => !!row(id)?.enabled
 export function driveState(id: string): DriveState {
   const r = row(id)
-  return { on: !!r?.enabled, replies: r?.replies ?? 0, status: r?.status ?? null, note: r?.note ?? null, lastReplyAt: r?.last_reply_at ?? null }
+  return { on: !!r?.enabled, replies: r?.replies ?? 0, status: r?.status ?? null, note: r?.note ?? null, lastReplyAt: r?.last_reply_at ?? null, settings: settingsOf(r) }
 }
 export const driveLog = (id: string, limit = 30) =>
   all<{ at: number; action: string; message: string | null; reason: string | null }>('select at, action, message, reason from self_drive_log where conversation_id = ? order by at desc limit ?', id, limit)
@@ -67,7 +88,7 @@ const changed = (id: string) => onSelfDrive.forEach(f => f(id))
 
 // Deps are swappable so tests can drive it without spawning Claude or a chat.
 export const deps = {
-  judge: (prompt: string) => judge(prompt),
+  judge: (prompt: string, model?: string | null) => judge(prompt, model),
   send: (id: string, prompt: string) => { send({ id, prompt, by: 'self-drive', resume: true }) },
   notice: (id: string, text: string) => { try { noticeLive(id, text) } catch {} },
   transcript: (id: string): Item[] => { const p = get<{ path: string }>('select path from conversations where id = ?', id)?.path; return p ? itemsOf(p) : [] },
@@ -119,14 +140,14 @@ export function sweep(now = deps.now()): string[] {
   for (const r of all<Row>('select * from self_drive where enabled = 1')) {
     if (deps.running(r.id) || inflight.has(r.id) || timers.has(r.id)) continue
     if (r.backoff_until && r.backoff_until > now) continue
-    const updated = deps.updatedAt(r.id), last = lastDecision(r.id)
+    const updated = deps.updatedAt(r.id), last = lastDecision(r.id), recheck = settingsOf(r).recheckMin * 60_000
     const since = now - (last?.at ?? 0)
     const moved = !last || updated > last.at // the chat did something the driver hasn't looked at
     const due =
       (moved && now - updated >= QUIET_MS) ||
-      (!moved && last?.action === 'wait' && since >= WAIT_RECHECK_MS) ||
+      (!moved && last?.action === 'wait' && since >= recheck) ||
       (!moved && (last?.action === 'error' || last?.action === 'backoff') && since >= RETRY_MS) ||
-      (!moved && (last?.action === 'reply' || last?.action === 'resume') && since >= WAIT_RECHECK_MS) // sent, and nothing happened
+      (!moved && (last?.action === 'reply' || last?.action === 'resume') && since >= recheck) // sent, and nothing happened
     if (!due || (last?.action === 'needs_you' && !moved)) continue
     picked.push(r.id)
     drive(r.id).catch(e => console.error('[self-drive]', r.id, e))
@@ -167,9 +188,10 @@ export async function drive(id: string, stalled: string | null = null, finished 
   const now = deps.now()
   if (r.backoff_until && r.backoff_until > now) return null
   const lastHour = get<{ n: number }>(`select count(*) n from self_drive_log where conversation_id = ? and action in ('reply', 'resume') and at > ?`, id, now - 3600_000)?.n ?? 0
-  if (lastHour >= PER_HOUR) {
+  const perHour = settingsOf(r).perHour
+  if (lastHour >= perHour) {
     const backoffs = (get<{ n: number }>(`select count(*) n from self_drive_log where conversation_id = ? and action = 'backoff' and at > ?`, id, now - 86400_000)?.n ?? 0) + 1
-    if (backoffs > MAX_BACKOFFS) return handBack(id, `Self drive has sent ${PER_HOUR}+ messages an hour, ${MAX_BACKOFFS} times today, without finishing: that's a loop.`, '')
+    if (backoffs > MAX_BACKOFFS) return handBack(id, `Self drive has sent ${perHour}+ messages an hour, ${MAX_BACKOFFS} times today, without finishing: that's a loop.`, '')
     run('update self_drive set backoff_until = ? where id = ?', now + BACKOFF_MS, id)
     setStatus(id, 'backoff', `${lastHour} messages in the last hour: pausing ${BACKOFF_MS / 60_000} min, then carrying on`)
     log(id, 'backoff', null, `${lastHour} in an hour (${backoffs}/${MAX_BACKOFFS} today)`)
@@ -184,7 +206,7 @@ export async function drive(id: string, stalled: string | null = null, finished 
   inflight.add(id)
   setStatus(id, 'thinking'); changed(id)
   try {
-    const v = await deps.judge(prompt(id, items, r.last_reply))
+    const v = await deps.judge(prompt(id, items, r.last_reply, settingsOf(r)), settingsOf(r).model)
     if (!row(id)?.enabled) return null // switched off while it was thinking
     if (!v) { setStatus(id, 'error', `The driver's answer was unreadable; trying again in ${RETRY_MS / 60_000} min.`); log(id, 'error'); return null }
     if (deps.running(id)) { setStatus(id, null); return null } // the user (or something else) already picked it up
@@ -250,7 +272,7 @@ export function transcriptFor(items: Item[], max = 14000) {
   return s.length > max ? '…' + s.slice(-max) : s
 }
 
-export function prompt(id: string, items: Item[], lastReply?: string | null) {
+export function prompt(id: string, items: Item[], lastReply?: string | null, ds: DriveSettings = settingsOf(null)) {
   const name = ownerName()
   let goal: { goal: string; done_when: string | null } | undefined
   try { goal = get<any>(`select goal, done_when from projects where conversation_id = ? and status = 'active'`, id) } catch {} // projects.ts may not be loaded
@@ -265,17 +287,17 @@ Choose one action:
 - "needs_you": rare. ${name} turned this on to not be needed: before choosing it, look for any way forward (another approach, a different tool, a reversible version, doing the independent parts first) and reply with that instead. Only when the next step truly can't happen without them: something irreversible or destructive in production, spending money, sending a message or posting publicly as them, a merge the PR's plan doesn't already allow, a credential or hardware approval, or a decision that belongs to someone outside the team. Also when the chat is going in circles.
 
 Never approve destructive production actions, spending, or messages to people on ${name}'s behalf: that is "needs_you". Don't invent facts the transcript doesn't support.
-${lastReply ? `\nYour last message to the agent was: "${lastReply.slice(0, 600)}". If that didn't move the work forward, try something different, don't repeat it.\n` : ''}${goal ? `\nThe goal of this chat: ${goal.goal}${goal.done_when ? `\nDone when: ${goal.done_when}` : ''}\n` : ''}
+${ds.mode === 'careful' ? `\n${name} set this chat to careful: also choose "needs_you" for big choices with lasting consequences (architecture, a public API, data model changes, which of two substantially different approaches to build), with the options and your recommendation in "reason".\n` : ''}${ds.instructions.trim() ? `\n${name}'s own instructions for driving this chat (follow them over the defaults above, except the never-approve rule):\n${ds.instructions.trim()}\n` : ''}${lastReply ? `\nYour last message to the agent was: "${lastReply.slice(0, 600)}". If that didn't move the work forward, try something different, don't repeat it.\n` : ''}${goal ? `\nThe goal of this chat: ${goal.goal}${goal.done_when ? `\nDone when: ${goal.done_when}` : ''}\n` : ''}
 Reply with ONLY JSON: {"action": "reply" | "done" | "wait" | "needs_you", "message": "the message to send (reply only), in ${name}'s voice", "reason": "one short line: why"}
 
 The conversation so far (most recent last):
 ${transcriptFor(items)}`
 }
 
-function judge(p: string): Promise<Verdict | null> {
+function judge(p: string, model?: string | null): Promise<Verdict | null> {
   return new Promise(resolve => {
     let out = ''
-    ephemeral(['-p', p, '--output-format', 'stream-json', '--verbose', '--model', settings.ai.model, '--no-session-persistence',
+    ephemeral(['-p', p, '--output-format', 'stream-json', '--verbose', '--model', model || settings.ai.model, '--no-session-persistence',
       '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk'], settings.chat.cwd, ev => {
       if (ev.type === 'result') out = String(ev.result ?? '')
       if (ev.type === 'perch_done') resolve(parseVerdict(out))

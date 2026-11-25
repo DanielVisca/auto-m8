@@ -2,6 +2,7 @@ import { BoardButton } from './Boards'
 import { marked } from 'marked'
 import { createContext, memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
+import { SelfDriveButton } from './SelfDrive'
 import { ago, api, cachedThread, loadThread, baseName, post, sendChat, toast, shortPath, useOutbox, titleOf, useLive, shell, type Conversation, type Item, type Term } from './api'
 import { adopt, apply, dropReplayedPrompt, emptyLive, toolLabel, toolSummary, type Live } from './stream'
 import { StateMenu } from './List'
@@ -790,6 +791,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
           <Title conv={conv} />
           <Family id={id} onOpen={onOpen} />
           {conv && <StateMenu c={conv} />}
+          <SelfDriveButton id={id} />
           <button className="icon" title="Side question that isn't saved (/btw)  ⌘⇧B" onClick={() => setBtwOpen(!btwOpen)}>btw</button>
           <button className="icon" title="Open in Claude Code (terminal)" onClick={() => onTerminal(id)}>⌘_</button>
           {conv?.source === 'claude' && <CloudBar id={id} desktop running={running} />}
@@ -884,19 +886,12 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
     if (id) post(`/api/chat/${encodeURIComponent(id)}/turbo`, { on })
     else try { localStorage.setItem('perch.turbo.next', on ? '1' : '0') } catch {}
   }
-  // Self drive: while on, a driver agent answers this chat's questions and blockers for you when its
-  // turn ends, and hands back only what only you can do (via Needs me). For a new chat it switches on
-  // once the chat starts.
-  const { data: drive, reload: reloadDrive } = useLive<{ on: boolean; replies: number; status: string | null; note: string | null }>(id ? `/api/chat/${encodeURIComponent(id)}/self-drive` : null, ['chats'])
-  const [driveNext, setDriveNext] = useState(false)
-  const driving = id ? !!drive?.on : driveNext
-  const toggleDrive = async () => {
-    if (!id) { setDriveNext(v => !v); return }
-    await post(`/api/chat/${encodeURIComponent(id)}/self-drive`, { on: !drive?.on })
-    reloadDrive()
-  }
+  // Self drive for a chat that hasn't started yet (existing chats have the 🚗 in the header): it
+  // switches on as soon as the chat starts.
+  const [driving, setDriveNext] = useState(false)
+  const toggleDrive = () => setDriveNext(v => !v)
   const started = (newId: string) => {
-    if (!id && driveNext) { post(`/api/chat/${encodeURIComponent(newId)}/self-drive`, { on: true }); setDriveNext(false) }
+    if (!id && driving) { post(`/api/chat/${encodeURIComponent(newId)}/self-drive`, { on: true }); setDriveNext(false) }
     onStarted(newId)
   }
   const [context, setContext] = useState(true)
@@ -1202,12 +1197,12 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
         {running && id
           ? <button className="stop" onClick={() => post(`/api/chat/${id}/interrupt`)} title="Stop">■</button>
           : <button className="primary" onClick={submit} disabled={!text.trim()}>↵</button>}
-        <button className={`turbo-btn${driving ? ' on' : ''}`} onClick={toggleDrive} aria-pressed={driving}
-          title={driving ? `Self drive is on: when this chat stops on a question or blocker, an agent answers for you and keeps it going. Only what only you can do comes back to you.${drive?.note ? ` Now: ${drive.note}` : ''} Click to turn off.` : 'Self drive: an agent answers this chat\'s questions and blockers for you until the work is done'}>🚗</button>
+        {!id && <button className={`turbo-btn${driving ? ' on' : ''}`} onClick={toggleDrive} aria-pressed={driving}
+          title={driving ? 'Self drive turns on when this chat starts: an agent takes control and keeps it going. Click to cancel.' : 'Self drive: let an agent take control of this chat once it starts'}>🚗</button>}
       </div>
       <div className="composer-opts">
         {!id && folder && <span className="chip">📁 {folder.name}</span>}
-        {driving && <span className="chip" title={drive?.note ?? ''}>🚗 Self drive{id && drive ? ` · ${drive.status === 'thinking' ? 'deciding…' : drive.status === 'needs_you' ? 'needs you' : drive.status === 'paused' ? 'paused' : drive.status === 'backoff' ? 'cooling off' : drive.status === 'resumed' ? 'picked up a stall' : `${drive.replies} ${drive.replies === 1 ? 'reply' : 'replies'}`}` : ' on start'}</span>}
+        {driving && !id && <span className="chip">🚗 Self drive on start</span>}
         {!id && <input className="cwd" value={cwd} onChange={e => setCwd(e.target.value)} title="Working directory" list="cwds" />}
         {id && conv?.cwd && <span className="muted small" title={`${conv.cwd}\nRight-click to show in Finder`} data-path={conv.cwd} data-dir="1">{baseName(conv.cwd)}{conv.branch ? ` · ${conv.branch}` : ''}</span>}
         {/* Which model: Auto picks per message from what you already pay for; or pin one. */}

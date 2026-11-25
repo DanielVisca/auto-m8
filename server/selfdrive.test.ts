@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BACKOFF_MS, deps, drive, driveLog, driveState, MAX_BACKOFFS, MAX_RESUMES, parseVerdict, PER_HOUR, prompt, QUIET_MS, setSelfDrive, stallIn, sweep, WAIT_RECHECK_MS, type Verdict } from './selfdrive.ts'
+import { BACKOFF_MS, setDriveSettings, deps, drive, driveLog, driveState, MAX_BACKOFFS, MAX_RESUMES, parseVerdict, PER_HOUR, prompt, QUIET_MS, setSelfDrive, stallIn, sweep, WAIT_RECHECK_MS, type Verdict } from './selfdrive.ts'
 import { get, run } from './db.ts'
 import type { Item } from './transcript.ts'
 
@@ -166,4 +166,20 @@ test('verdict parsing and prompt', () => {
   const p = prompt('c1', asked)
   assert.match(p, /Say go and I'll build it/)
   assert.match(p, /needs_you/)
+})
+
+test('per-chat settings reach the driver and are clamped', async () => {
+  fresh('c11')
+  const st = setDriveSettings('c11', { mode: 'careful', perHour: 0, recheckMin: 99999, model: 'opus', instructions: 'Merge when green.' })
+  assert.deepEqual(st.settings, { mode: 'careful', perHour: 1, recheckMin: 1440, model: 'opus', instructions: 'Merge when green.' })
+  let seen: { p: string; m?: string | null } | null = null
+  deps.judge = async (p, m) => { seen = { p, m }; return { action: 'reply', message: 'go' } }
+  await drive('c11')
+  assert.equal(seen!.m, 'opus')
+  assert.match(seen!.p, /careful/)
+  assert.match(seen!.p, /Merge when green\./)
+  clock += 1000
+  await drive('c11') // perHour 1: the second message in the hour cools off
+  deps.judge = async () => verdict
+  assert.equal(driveState('c11').status, 'backoff')
 })

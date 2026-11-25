@@ -1562,3 +1562,22 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 .run-card .run-md code { font-size: 12px; background: color-mix(in srgb, var(--line) 60%, transparent); padding: 0 3px; border-radius: 3px; }
 .run-card .run-ids { margin: 4px 0; overflow-wrap: anywhere; }
 .run-card .run-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* ---------- self drive (🚗) ---------- */
+.drive-wrap { position: relative; display: inline-flex; }
+button.icon.drive-btn { filter: grayscale(1); opacity: .75; display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; }
+button.icon.drive-btn:hover { opacity: 1; }
+button.icon.drive-btn.on { filter: none; opacity: 1; background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
+button.icon.drive-btn.warn { box-shadow: inset 0 0 0 1px color-mix(in srgb, #e5a50a 70%, transparent); background: color-mix(in srgb, #e5a50a 14%, transparent); }
+.drive-status { font-size: 11px; color: var(--fg); }
+.drive-tip { display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 90; width: 270px; padding: 8px 10px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 12px; line-height: 1.4; flex-direction: column; gap: 5px; pointer-events: none; }
+.drive-wrap:hover .drive-tip { display: flex; }
+.drive-menu { width: 300px; max-width: calc(100vw - 16px); }
+.drive-row { display: flex; gap: 4px; padding: 0 8px 4px; flex-wrap: wrap; }
+.drive-opt { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 9px; font-size: 12px; color: var(--muted); }
+.drive-opt:hover { color: var(--fg); }
+.drive-opt.on { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.drive-hint { font-size: 11px; color: var(--muted); padding: 0 8px 4px; }
+.drive-instr { margin: 0 8px 6px; font: inherit; font-size: 12px; resize: vertical; background: var(--bg2, var(--bg)); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; }
+.drive-log { display: flex; flex-direction: column; gap: 3px; padding: 0 8px 6px; font-size: 11.5px; }
+.drive-log > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
