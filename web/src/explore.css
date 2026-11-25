@@ -92,3 +92,9 @@
 .explore-side-top { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
 .explore-chat { flex: none; max-height: 45%; overflow: auto; }
 .explore-reply { max-height: none; }
+
+.ex-edge.faded { opacity: .06; }
+.ex-node.faded { opacity: .22; }
+.ex-node.faded text { opacity: .6; }
+.ex-node, .ex-edge { transition: opacity .15s; }
+.explore-spot { padding: 6px 4px 0; }

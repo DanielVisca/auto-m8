@@ -67,6 +67,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   const [step, setStep] = useState<number | null>(null) // null = now
   const [playing, setPlaying] = useState(false)
   const [active, setActive] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [dreaming, setDreaming] = useState(false)
   const [ops, setOps] = useState<Op[]>([])
@@ -110,6 +111,11 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   const visible = (id: string) => !T || !intro.has(id) || intro.get(id)! <= T
   const edgeVisible = (e: Edge) => visible(e.from) && visible(e.to) && (!T || !intro.has(`${e.from}→${e.to}`) || intro.get(`${e.from}→${e.to}`)! <= T)
   const fresh = (id: string) => !!group && group.some(e => e.id === id)
+  // Spotlight: what's hovered, else what's selected. Its neighbours stay bright; everything else fades.
+  const spot = useMemo(() => new Set(hovered ? [hovered] : selected.length ? selected : active ? [active] : []), [hovered, selected, active])
+  const near = useMemo(() => new Set(g ? g.edges.filter(e => spot.has(e.from) || spot.has(e.to)).flatMap(e => [e.from, e.to]) : []), [g, spot])
+  const clearSel = () => { setSelected([]); setActive(null) }
+  useEffect(() => { const f = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea')) clearSel() }; addEventListener('keydown', f); return () => removeEventListener('keydown', f) }, [])
   // Only the links that explain the focus are drawn; links between neighbours turn a view into a hairball.
   // Clicking a concept draws its links too. With no focus, only the strongest links.
   const drawn = useMemo(() => {
@@ -252,18 +258,22 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
               {[...g.edges, ...(dreamRes?.edgesAdded ?? [])].map((e, i) => {
                 const a = pos.get(e.from), b = pos.get(e.to)
                 if (!a || !b || !edgeVisible(e)) return null
-                if (drawn && e.evidence.length && !drawn.has(e) && e.from !== active && e.to !== active) return null
+                // A selected (or hovered) concept gets the stage: only its links are drawn, unless "all links" is on,
+                // where the rest stay as faint context.
+                const lit = spot.size > 0 && (spot.has(e.from) || spot.has(e.to))
+                if (spot.size && !lit && !allLinks) return null
+                if (!spot.size && drawn && e.evidence.length && !drawn.has(e)) return null
                 const rb = radius(nodeById(e.to)?.files ?? 1) + 3
                 const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
                 const ex = b.x - (dx / len) * rb, ey = b.y - (dy / len) * rb
                 // Curve the fk and import links between the same pair apart, so both stay visible.
                 const bend = e.kind === 'fk' ? 0.12 : -0.08
                 const mx = (a.x + ex) / 2 - dy * bend, my = (a.y + ey) / 2 + dx * bend
-                const hot = active && (e.from === active || e.to === active)
+                const hot = lit
                 const gone = removed.has(e.from) || removed.has(e.to)
                 const isNew = !e.evidence.length
                 return <path key={i} d={`M${a.x},${a.y} Q${mx},${my} ${ex},${ey}`}
-                  className={`ex-edge ${e.kind} ${hot ? 'hot' : ''} ${gone ? 'gone' : ''} ${isNew ? 'dreamed' : ''} ${fresh(`${e.from}→${e.to}`) ? 'fresh' : ''}`}
+                  className={`ex-edge ${e.kind} ${hot ? 'hot' : ''} ${spot.size && !lit ? 'faded' : ''} ${gone ? 'gone' : ''} ${isNew ? 'dreamed' : ''} ${fresh(`${e.from}→${e.to}`) ? 'fresh' : ''}`}
                   strokeWidth={Math.min(6, 0.8 + Math.log2(e.weight + 1))} markerEnd={`url(#${e.kind === 'fk' ? 'ex-arrow-fk' : 'ex-arrow'})`}>
                   <title>{`${e.from} → ${e.to}\n${e.kind === 'fk' ? 'foreign key' : 'import'} in ${e.weight} file${e.weight === 1 ? '' : 's'}\n${e.evidence.slice(0, 3).map(x => `${x.file}:${x.line}  ${x.text.slice(0, 100)}`).join('\n')}`}</title>
                 </path>
@@ -273,10 +283,10 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
                 const show = visible(n.id)
                 if (!show && T) return null
                 const r = radius(n.files)
-                const cls = ['ex-node', n.role, n.hub ? 'hub' : '', active === n.id ? 'active' : '', selected.includes(n.id) ? 'sel' : '', removed.has(n.id) ? 'gone' : '', broken.has(n.id) ? 'broken' : '', affected.has(n.id) ? 'affected' : '', fresh(n.id) ? 'fresh' : '', T && !intro.has(n.id) ? 'undated' : ''].join(' ')
+                const cls = ['ex-node', n.role, n.hub ? 'hub' : '', active === n.id ? 'active' : '', selected.includes(n.id) ? 'sel' : '', removed.has(n.id) ? 'gone' : '', broken.has(n.id) ? 'broken' : '', affected.has(n.id) ? 'affected' : '', fresh(n.id) ? 'fresh' : '', T && !intro.has(n.id) ? 'undated' : '', spot.size && !spot.has(n.id) && !near.has(n.id) ? 'faded' : ''].join(' ')
                 return (
                   <g key={n.id} className={cls} transform={`translate(${p.x},${p.y})`} onPointerDown={e => e.stopPropagation()}
-                    onClick={e => pick(n.id, e.shiftKey || e.metaKey)}
+                    onClick={e => pick(n.id, e.shiftKey || e.metaKey)} onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(h => h === n.id ? null : h)}
                     onContextMenu={e => { e.preventDefault(); if (dreaming) setOps(o => o.some(x => x.op === 'remove' && x.id === n.id) ? o.filter(x => !(x.op === 'remove' && x.id === n.id)) : [...o, { op: 'remove', id: n.id }]) }}>
                     <circle r={r} />
                     <text y={r + 13} textAnchor="middle">{label(n.id)}</text>
@@ -287,6 +297,12 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
               {ops.filter((o): o is Extract<Op, { op: 'add' }> => o.op === 'add').map(o => { const p = pos.get(o.id)!; return <g key={o.id} className="ex-node dreamed" transform={`translate(${p.x},${p.y})`}><circle r={12} /><text y={26} textAnchor="middle">{o.name ?? o.id}</text></g> })}
               {box && <rect className="ex-box" x={Math.min(box.x, box.x2)} y={Math.min(box.y, box.y2)} width={Math.abs(box.x2 - box.x)} height={Math.abs(box.y2 - box.y)} />}
             </svg>
+            {(selected.length > 0 || active) && (
+              <div className="small explore-spot">
+                Showing links of <b>{(selected.length ? selected : [active!]).map(label).join(', ')}</b> ({near.size ? near.size - spot.size : 0} connected)
+                {' · '}<button className="link small" onClick={clearSel}>show everything</button> <span className="muted">(Esc, or click empty space · shift-click to add)</span>
+              </div>
+            )}
             {g.focus && (g.hidden.dependencies + g.hidden.dependents + g.hidden.hubs.length > 0) && (
               <div className="small muted explore-hidden">
                 Not drawn: {g.hidden.dependencies} more it builds on, {g.hidden.dependents} more built on it{g.hidden.second ? `, ${g.hidden.second} two hops out` : ''}.
