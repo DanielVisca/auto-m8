@@ -113,6 +113,7 @@ More in [SECURITY.md](SECURITY.md).
 ## Learn more
 
 - [**Full feature guide**](docs/features.md): search, folders, routines, autoresearch, phone access, health, every setting.
+- [**What it automates, and how it grows**](docs/automation.md): what works on day one, and how repeated asks become skills, then routines or PostHog scouts, with real examples.
 - [Design notes on making auto-m8 shareable](docs/distributable.md)
 - How it fits together: `shell/` is Electron (floating window, hotkey); `server/` is Node 26 running TypeScript directly (HTTP + SSE + WebSocket on `127.0.0.1:4777`, SQLite with FTS5); `web/` is React + Vite. Each open chat is one long-lived `claude -p --input-format stream-json` process; transcripts are never copied. Internal identifiers (the `perch-plan` block, `perch/plan` checks, `PERCH_*` env vars, the data folder) keep the project's original name, perch.
 
