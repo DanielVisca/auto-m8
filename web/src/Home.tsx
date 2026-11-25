@@ -139,6 +139,7 @@ function Everything({ onOpen, onStart }: { onOpen: (id: string) => void; onStart
               <h4>Pick up</h4>
               {b.pickup?.map(pickRow)}
               <button className="link small" onClick={() => onStart()}>or start something new →</button>
+              <a className="small" href="#explore" title="See what a codebase is built on, how it grew, and ask about any part">or explore a codebase's architecture →</a>
             </div>
             {b.dropping?.length > 0 && <div><h4>Slipping</h4>{b.dropping.map(pickRow)}</div>}
           </div>

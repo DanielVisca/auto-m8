@@ -63,6 +63,7 @@ import { taskOutput } from './taskOutput.ts'
 import { isPaused, overview as pauseOverview, pauseAll, resumeAll } from './pause.ts'
 import { deleteRoutine, fire, listRoutines, saveRoutine, startScheduler } from './routines.ts'
 import { DATA_DIR, settings, updateSettings } from './settings.ts'
+import { exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
 import { cloneLayout, LAYOUT_DIR, listLayouts, loadLayout, readTile, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
 import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, sendTerm, termEvents, terms, typedInto, waitTerm } from './term.ts'
@@ -914,6 +915,14 @@ route('GET', '/api/prs/sidebar', (_m, _r, _s, q) => prSidebar(q.get('fresh') ===
 const PR_VIEW_MAX_AGE = 60_000
 route('GET', '/api/pr/page', (_m, _r, _s, q) => prPage(String(q.get('url') ?? ''), PR_VIEW_MAX_AGE))
 route('GET', '/api/prs/plan', (_m, _r, _s, q) => mergePlan(String(q.get('urls') ?? '').split(',').filter(Boolean)))
+// Architecture explorer: a deterministic map of a repo (modules, imports, foreign keys, history) to explore and chat about.
+setExploreDir(DATA_DIR)
+route('GET', '/api/explore/graph', (_m, _r, _s, q) => exploreGraph(String(q.get('repo') ?? ''), q.get('focus'), q.get('hubs') === '1'))
+route('GET', '/api/explore/timeline', (_m, _r, _s, q) => exploreTimeline(String(q.get('repo') ?? ''), q.get('focus')))
+route('GET', '/api/explore/node', (_m, _r, _s, q) => exploreNode(String(q.get('repo') ?? ''), String(q.get('id') ?? '')))
+route('POST', '/api/explore/dream', async (_m, req) => { const b = await body(req); return exploreDream(String(b.repo ?? ''), b.focus ?? null, Array.isArray(b.ops) ? b.ops : []) })
+route('POST', '/api/explore/open', async (_m, req) => { const b = await body(req); return exploreOpen(String(b.repo ?? ''), String(b.file ?? ''), Number(b.line) || undefined) })
+route('POST', '/api/explore/dream/save', async (_m, req) => { const b = await body(req); return saveDream(b as any) })
 route('GET', '/api/pr/journey', (_m, _r, _s, q) => journey(String(q.get('url') ?? ''), q.get('fresh') === '1'))
 route('POST', '/api/pr/queue', async (_m, req) => { const b = await body(req); return queuePr(String(b.pr ?? ''), b.on !== false) })
 route('POST', '/api/prs/orchestrate', async (_m, req) => { const b = await body(req); const r = await orchestrate(b.prs ?? [], b.where === 'cloud' ? 'cloud' : 'here', b.goal ?? 'both'); broadcast('conversations'); return r })
@@ -1241,4 +1250,5 @@ setInterval(stayAwakeTick, 15_000).unref()
 // Codex and Cursor get the same instructions, memory, skills and MCP servers as Claude Code
 // (agentsync.ts), so either can pick up a chat when Claude is at its cap.
 const agentSync = () => { const r = syncAgents({ command: existsSync('/opt/homebrew/bin/node') ? '/opt/homebrew/bin/node' : process.execPath, args: [join(import.meta.dirname, 'mcp.ts')] }); if (Object.values(r).some(v => Array.isArray(v) ? v.length : v === 'updated' || typeof v === 'number' && v > 0 || 'error' in r)) console.log('[agentsync]', JSON.stringify(r)) }
-agentSync(); setInterval(agentSync, 60 * 60_000).unref()
+// A second instance (a dev or test server on another port) must not rewrite the live app's Codex/Cursor config.
+if (!process.env.PERCH_NO_AGENT_SYNC) { agentSync(); setInterval(agentSync, 60 * 60_000).unref() }

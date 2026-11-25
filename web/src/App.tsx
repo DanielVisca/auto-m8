@@ -27,6 +27,7 @@ import { BrowserFlag } from './BrowserView'
 import { Resources } from './Resources'
 import { Insights } from './Insights'
 import { Evolve } from './Evolve'
+import { Explore } from './Explore'
 import { Library } from './Library'
 import { List } from './List'
 import { Settings } from './Settings'
@@ -45,6 +46,7 @@ type View =
   | { kind: 'compare'; ids: string[] }
   | { kind: 'pr'; id: string }
   | { kind: 'board'; id: string | null }
+  | { kind: 'explore'; id: string | null }
   | { kind: 'home' | 'needs' | 'settings' | 'insights' | 'library' | 'automations' | 'evolve' | 'paused' }
 
 // The layout follows the window, not a setting: drag it narrow and it becomes one column,
@@ -80,6 +82,7 @@ function parseHash(): View {
   if (kind === 'compare' && id) return { kind, ids: decodeURIComponent(id).split(',') }
   if (kind === 'pr' && id) return { kind, id: decodeURIComponent(id) }
   if (kind === 'board') return { kind, id: id ? decodeURIComponent(id) : null }
+  if (kind === 'explore') return { kind, id: id ? decodeURIComponent(id) : null }
   if (['settings', 'insights', 'library', 'automations', 'home', 'needs', 'evolve', 'paused'].includes(kind)) return { kind } as View
   return { kind: 'home' }
 }
@@ -225,6 +228,7 @@ export function App() {
       {view.kind === 'insights' && <div className="scroll"><Insights onOpen={openById} /></div>}
       {view.kind === 'paused' && <div className="scroll"><Paused onOpen={openById} /></div>}
       {view.kind === 'evolve' && <div className="scroll"><Evolve onOpen={openById} /></div>}
+      {view.kind === 'explore' && <div className="scroll"><Explore key={view.id ?? ''} initialRepo={view.id ?? undefined} onOpenChat={openById} /></div>}
       {view.kind === 'pr' && <div className="scroll"><PrPage key={view.id} url={view.id} onOpen={openById} sideConversations={mode === 'wide' && detailsOpen && !zen} /></div>}
       {view.kind === 'library' && <div className="scroll"><Library /></div>}
       {view.kind === 'automations' && <div className="scroll"><Automations draft={routineDraft} onOpen={openById} settings={settings} /></div>}

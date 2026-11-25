@@ -1,0 +1,129 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, importsOf, namesIt, prOf, scan } from './explorer.ts'
+
+// A tiny product repo: dashboards are built on insights, alerts on insights, everything on core.
+function fixture() {
+  const repo = mkdtempSync(join(tmpdir(), 'explorer-'))
+  const sh = (args: string[], env: Record<string, string> = {}) => execFileSync('git', ['-C', repo, ...args], { env: { ...process.env, ...env } })
+  sh(['init', '-q', '-b', 'main'])
+  const write = (f: string, s: string) => { mkdirSync(dirname(join(repo, f)), { recursive: true }); writeFileSync(join(repo, f), s) }
+  const commit = (msg: string, date: string, author: string) => sh(['-c', `user.name=${author}`, '-c', 'user.email=a@example.com', 'commit', '-q', '-m', msg],
+    { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date, GIT_AUTHOR_NAME: author })
+  write('products/core/models.py', 'from django.db import models\n\nclass Team(models.Model):\n    name = models.CharField()\n')
+  sh(['add', '-A']); commit('Add core (#1)', '2020-01-01T00:00:00Z', 'Ada')
+  write('products/insights/models.py', 'from django.db import models\n\nclass Insight(models.Model):\n    team = models.ForeignKey("core.Team", on_delete=models.CASCADE)\n')
+  write('products/insights/query.py', 'from products.core.models import Team\n')
+  sh(['add', '-A']); commit('Insights (#12)', '2020-06-01T00:00:00Z', 'Bob')
+  write('products/dashboards/models.py', 'from django.db import models\n\nclass Dashboard(models.Model):\n    team = models.ForeignKey("core.Team", on_delete=models.CASCADE)\n\nclass DashboardTile(models.Model):\n    dashboard = models.ForeignKey(Dashboard, on_delete=models.CASCADE)\n    insight = models.ForeignKey(\n        "insights.Insight", on_delete=models.CASCADE\n    )\n')
+  write('products/dashboards/ui/Board.tsx', "import { run } from '../../insights/web/run'\nimport {\n  Thing,\n} from 'products/core/web/thing'\nimport React from 'react'\n")
+  write('products/insights/web/run.ts', 'export const run = 1\n')
+  write('products/core/web/thing.ts', 'export const Thing = 1\n')
+  sh(['add', '-A']); commit('feat: dashboards (#30)', '2021-03-01T00:00:00Z', 'Cy')
+  write('products/alerts/models.py', 'from django.db import models\nfrom products.insights.models import Insight\n\nclass Alert(models.Model):\n    insight = models.ForeignKey(Insight, on_delete=models.CASCADE)\n')
+  write('products/alerts/tests/test_alert.py', 'from products.dashboards.models import Dashboard\n')
+  sh(['add', '-A']); commit('Alerts on insights (#45)', '2022-02-01T00:00:00Z', 'Di')
+  return repo
+}
+const repo = fixture()
+
+test('conceptOf picks <container>/<child>, deepest container wins', () => {
+  assert.equal(conceptOf('products/dashboards/backend/x.py', ['products']), 'products/dashboards')
+  assert.equal(conceptOf('posthog/models/team/team.py', ['posthog', 'posthog/models']), 'posthog/models/team')
+  assert.equal(conceptOf('posthog/models/team.py', ['posthog', 'posthog/models']), 'posthog/models')
+  assert.equal(conceptOf('README.md', ['products']), '(root)')
+})
+
+test('importsOf reads python, multi-line TS, go and rust imports', () => {
+  const py = importsOf('a.py', 'from x.y import (\n  A,\n  B as C,\n)\nimport z.w\n')
+  assert.deepEqual(py.map(r => r.spec), ['x.y', 'z.w'])
+  assert.deepEqual(py[0].names, ['A', 'B'])
+  assert.deepEqual(importsOf('a.ts', "import {\n a,\n} from './b'\nconst c = await import('../c')\n").map(r => [r.spec, r.line]), [['./b', 3], ['../c', 4]])
+  assert.deepEqual(importsOf('a.go', 'import (\n\t"fmt"\n\tk "github.com/x/repo/pkg/kafka"\n)\n').map(r => r.spec), ['fmt', 'github.com/x/repo/pkg/kafka'])
+  assert.deepEqual(importsOf('a.rs', 'use crate::x;\npub use common_kafka::Producer;\n').map(r => r.spec), ['common_kafka::Producer'])
+})
+
+test('scan finds concepts, models, foreign-key and import edges with evidence', async () => {
+  const g = await scan(repo)
+  const ids = g.concepts.map(c => c.id).sort()
+  assert.deepEqual(ids, ['products/alerts', 'products/core', 'products/dashboards', 'products/insights'])
+  assert.equal(g.models.DashboardTile.concept, 'products/dashboards')
+  const edge = (from: string, to: string, kind: string) => g.edges.find(e => e.from === `products/${from}` && e.to === `products/${to}` && e.kind === kind)
+  const fk = edge('dashboards', 'insights', 'fk')!
+  assert.ok(fk, 'multi-line ForeignKey to a string target')
+  assert.match(fk.evidence[0].text, /DashboardTile → Insight/)
+  assert.equal(fk.evidence[0].file, 'products/dashboards/models.py')
+  assert.ok(edge('alerts', 'insights', 'fk'))
+  assert.equal(edge('dashboards', 'core', 'fk')!.weight, 1)
+  const imp = edge('dashboards', 'insights', 'import')!
+  assert.deepEqual([imp.evidence[0].file, imp.evidence[0].line], ['products/dashboards/ui/Board.tsx', 1])
+  assert.ok(edge('dashboards', 'core', 'import'), 'multi-line TS import by repo path')
+  assert.ok(edge('alerts', 'insights', 'import'), 'python import attributed through the model name')
+  assert.ok(!edge('alerts', 'dashboards', 'import'), 'tests are not architecture')
+  assert.equal(g.concepts.find(c => c.id === 'products/dashboards')!.relations.length, 3)
+})
+
+test('focusGraph centres the focus, splits dependencies and dependents, caps and counts the rest', async () => {
+  const g = await scan(repo)
+  const f = focusGraph(g, 'insight', 25)
+  const role = (id: string) => f.nodes.find(n => n.id === `products/${id}`)?.role
+  assert.equal(role('insights'), 'focus')
+  assert.equal(role('dashboards'), 'dependent')
+  assert.equal(role('alerts'), 'dependent')
+  assert.equal(role('core'), 'dependency')
+  assert.ok(f.edges.every(e => f.nodes.some(n => n.id === e.from) && f.nodes.some(n => n.id === e.to)))
+  // The model name finds the module too.
+  assert.equal(focusGraph(g, 'DashboardTile').nodes.find(n => n.role === 'focus')?.id, 'products/dashboards')
+  const tiny = focusGraph(g, 'insight', 2)
+  assert.equal(tiny.nodes.length, 2)
+  assert.equal(tiny.hidden.dependencies + tiny.hidden.dependents, 2)
+})
+
+test('dream: removing insights breaks dashboards and alerts, adding links new nodes', async () => {
+  const g = await scan(repo)
+  const r = dream(g, [{ op: 'remove', id: 'products/insights' }])
+  // Dashboards lose a foreign key and an import, alerts the same: tie broken by name.
+  assert.deepEqual(r.broken.map(b => b.id).sort(), ['products/alerts', 'products/dashboards'])
+  assert.ok(r.broken.every(b => b.loses.some(l => l.kind === 'fk')))
+  assert.ok(r.edgesRemoved.every(e => e.from === 'products/insights' || e.to === 'products/insights'))
+  assert.match(r.summary, /foreign keys/)
+  // Transitive: something built on dashboards is affected one hop further out.
+  const g2 = { concepts: [...g.concepts, { id: 'x' }], edges: [...g.edges, { from: 'x', to: 'products/dashboards', kind: 'import' as const, weight: 1, evidence: [] }] }
+  assert.deepEqual(dream(g2, [{ op: 'remove', id: 'products/insights' }]).affected, [{ id: 'x', depth: 2, via: 'products/dashboards' }])
+  const add = dream(g, [{ op: 'remove', id: 'products/insights' }, { op: 'add', id: 'queries', dependsOn: ['products/core', 'products/insights'], usedBy: ['products/dashboards'] }])
+  assert.equal(add.edgesAdded.length, 3)
+  assert.match(add.warnings.join(), /depends on products\/insights, which this dream removes/)
+})
+
+test('timeline orders concept and link introductions with authors and PR numbers', async () => {
+  const g = await scan(repo)
+  const f = focusGraph(g, 'insight')
+  const t = await buildTimeline(repo, f.nodes, f.edges, () => {})
+  assert.equal(t.status, 'done')
+  assert.equal(t.shallow, false)
+  const concept = (id: string) => t.events.find(e => e.kind === 'concept' && e.id === `products/${id}`)!
+  assert.equal(concept('insights').commit.author, 'Bob')
+  assert.equal(concept('insights').commit.pr, 12)
+  assert.equal(concept('alerts').commit.pr, 45)
+  assert.deepEqual(t.events.filter(e => e.kind === 'concept').map(e => e.id), ['products/core', 'products/insights', 'products/dashboards', 'products/alerts'])
+  const link = t.events.find(e => e.kind === 'edge' && e.from === 'products/dashboards' && e.to === 'products/insights')!
+  assert.equal(link.commit.pr, 30)
+  assert.equal(link.approx, false)
+  assert.ok(t.events.every((e, i) => i === 0 || t.events[i - 1].date <= e.date))
+  assert.equal(prOf('Merge pull request #7 from x/y'), 7)
+  // A concept is only “mentioned” when the subject names it as a word.
+  assert.ok(namesIt('feat: Dashboards v2 (#9)', 'dashboard'))
+  assert.ok(!namesIt('add alertmanager config', 'alert'))
+})
+
+test('checkRepo accepts git repos inside home only', async () => {
+  const home = dirname(repo)
+  assert.equal(await checkRepo(join(repo, 'products'), home), await checkRepo(repo, home))
+  await assert.rejects(checkRepo(repo, mkdtempSync(join(tmpdir(), 'home-'))), /inside your home/)
+  await assert.rejects(checkRepo(mkdtempSync(join(home, 'plain-')), home), /Not a git repository/)
+  await assert.rejects(checkRepo(join(home, 'nope-missing'), home), /No such folder/)
+})
