@@ -118,10 +118,15 @@ export function watchdog() {
   }
 }
 
+// A run's cost at API prices. Stalled or killed runs never send a result, so they have no reported
+// cost: price them from the chat's transcript over the run's window (same pricing as Settings → AI spend).
+const RUN_COST = `coalesce(nullif(cost, 0), (select sum(m.cost) from usage_msgs m where m.session = routine_runs.conversation_id
+  and m.ts between routine_runs.started_at and coalesce(routine_runs.finished_at, routine_runs.started_at + ${LIVE_CEILING_MS})), cost)`
+
 export function health() {
   return listRoutines().map((r: any) => {
-    const runs = all<any>('select outcome, started_at, finished_at, conversation_id, detail, cost from routine_runs where routine_id = ? order by started_at desc limit 12', r.id)
-    const week = all<any>('select count(*) n, sum(cost) cost, sum(outcome in (\'error\', \'stalled\')) bad from routine_runs where routine_id = ? and started_at > ?', r.id, Date.now() - 7 * DAY)[0]
+    const runs = all<any>(`select outcome, started_at, finished_at, conversation_id, detail, ${RUN_COST} cost from routine_runs where routine_id = ? order by started_at desc limit 12`, r.id)
+    const week = all<any>(`select count(*) n, sum(${RUN_COST}) cost, sum(outcome in ('error', 'stalled')) bad from routine_runs where routine_id = ? and started_at > ?`, r.id, Date.now() - 7 * DAY)[0]
     const watching = r.watch_until && r.watch_until > Date.now() && !r.trusted
     return { ...r, runs, week, phase: !r.enabled ? (r.paused_reason ? 'paused by autopilot' : 'off') : r.trusted ? 'trusted' : watching ? 'watching' : 'running' }
   })
