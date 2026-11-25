@@ -15,6 +15,8 @@
     "dev": "node --watch server/main.ts & vite",
     "start": "npm run build && npm run app",
     "app": "open -n -a \"$PWD/node_modules/electron/dist/Electron.app\" --args \"$PWD\"",
+    "dist": "vite build && node scripts/fetch-node.mjs && electron-builder --mac --publish never",
+    "dist:arm64": "vite build && node scripts/fetch-node.mjs arm64 && electron-builder --mac dmg zip --arm64 --publish never",
     "test": "PERCH_OWNER_NAME=Ana PERCH_DB=:memory: PERCH_DATA=$(mktemp -d) node --test server/*.test.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web"
   },
@@ -33,6 +35,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "codemirror": "^6.0.2",
+    "electron-updater": "^6.8.11",
     "harper.js": "^3.2.0",
     "marked": "^18.1.3",
     "node-pty": "^1.1.0",
@@ -57,6 +60,7 @@
     "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^6.2.1",
     "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
   },

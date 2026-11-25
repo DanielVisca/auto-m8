@@ -81,9 +81,15 @@ It resizes to fit where you put it: a one-line **command bar**, a **compact** si
 </tr>
 </table>
 
-## Quick start
+## Install
 
-You need a Mac, [Node 26+](https://nodejs.org) (`brew install node`), [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) (log in once with `claude`) and the [GitHub CLI](https://cli.github.com) (`brew install gh && gh auth login`).
+**[Download auto-m8 for Apple silicon](https://github.com/DanielVisca/auto-m8/releases/latest/download/auto-m8-arm64.dmg)** ([Intel](https://github.com/DanielVisca/auto-m8/releases/latest/download/auto-m8-x64.dmg)). Open the DMG, drag auto-m8 to Applications and open it. Toggle the window anywhere with **⌃⌥Space**.
+
+You also need [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) (log in once with `claude`) and the [GitHub CLI](https://cli.github.com) (`brew install gh && gh auth login`). auto-m8 brings its own Node. It checks for updates on launch and every 6 hours, downloads them in the background and installs on the next quit (or pick **Restart to update** in the auto-m8 menu). Your data lives in `~/Library/Application Support/perch`.
+
+### From source
+
+For hacking on auto-m8: you need [Node 26+](https://nodejs.org) (`brew install node`) as well.
 
 ```sh
 git clone https://github.com/DanielVisca/auto-m8.git
@@ -91,9 +97,7 @@ cd auto-m8
 npm run setup
 ```
 
-Then open **auto-m8** from Spotlight (⌘Space). Toggle the window anywhere with **⌃⌥Space**.
-
-`npm run setup` installs dependencies, builds the UI and puts `auto-m8.app` in `~/Applications`; it runs this checkout, so `git pull && npm run build` updates it. Your data lives in `~/Library/Application Support/perch`, never in the repo. No Electron? `npm run serve` and open <http://127.0.0.1:4777> in any browser.
+Then open **auto-m8** from Spotlight (⌘Space). `npm run setup` installs dependencies, builds the UI and puts `auto-m8.app` in `~/Applications`; it runs this checkout, so `git pull && npm run build` updates it. No Electron? `npm run serve` and open <http://127.0.0.1:4777> in any browser. `npm run dist:arm64` builds the DMG locally into `dist/`; pushing a `v*` tag builds and publishes a release (`.github/workflows/release.yml`).
 
 <img src="docs/screenshots/setup.png" alt="First-run checklist on Home" width="640">
 

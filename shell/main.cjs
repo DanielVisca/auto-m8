@@ -7,6 +7,20 @@ const { join } = require('node:path')
 const os = require('node:os')
 
 const ROOT = join(__dirname, '..')
+// The downloaded auto-m8.app (DMG) carries its own Node 26 for the server, in Resources/node. A checkout
+// (npm run app, the setup launcher) runs the server on your own Node, as before.
+const PACKAGED = app.isPackaged === true
+const BUNDLED_NODE = PACKAGED ? join(process.resourcesPath, 'node/node') : null
+// Your terminal's PATH (claude, gh, codex live there), read once from a login shell. The bundled Node's
+// folder goes last, so tools that shell out to `node` find one even on a Mac without Node.
+let loginPath = null
+function packagedPath() {
+  if (loginPath == null) {
+    const r = spawnSync(process.env.SHELL || '/bin/zsh', ['-lc', 'printf "\\n@@PATH@@%s" "$PATH"'], { encoding: 'utf8', timeout: 10_000 })
+    loginPath = (r.stdout || '').split('@@PATH@@').slice(1).pop()?.trim() || [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'].filter(Boolean).join(':')
+  }
+  return `${loginPath}:${join(process.resourcesPath, 'node')}`
+}
 const BASE = join(os.homedir(), 'Library/Application Support/perch')
 const DATA = process.env.PERCH_DATA ?? BASE
 const read = () => { try { return JSON.parse(readFileSync(join(DATA, 'settings.json'), 'utf8')) } catch { return {} } }
@@ -130,8 +144,10 @@ async function startServerFor(p) {
   const log = openSync(join(p.dataDir, 'server.log'), 'a')
   const shellPath = process.env.SHELL || '/bin/zsh'
   starting.set(p.id, Date.now())
-  const child = spawn(shellPath, ['-lc', `exec node --inspect-port=${inspectPort(p)} "${join(ROOT, 'server/main.ts')}"`], { cwd: ROOT, stdio: ['ignore', log, log],
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '', PERCH_DATA: p.dataDir, PERCH_PORT: String(p.port), PERCH_PROFILE: p.id } })
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '', PERCH_DATA: p.dataDir, PERCH_PORT: String(p.port), PERCH_PROFILE: p.id }
+  const child = PACKAGED
+    ? spawn(BUNDLED_NODE, [`--inspect-port=${inspectPort(p)}`, join(ROOT, 'server/main.ts')], { cwd: ROOT, stdio: ['ignore', log, log], env: { ...env, PATH: packagedPath(), PERCH_PACKAGED: '1' } })
+    : spawn(shellPath, ['-lc', `exec node --inspect-port=${inspectPort(p)} "${join(ROOT, 'server/main.ts')}"`], { cwd: ROOT, stdio: ['ignore', log, log], env })
   require('node:fs').closeSync(log) // the child has its own copy; keeping ours leaked one per restart (17 open on 2026-11-14)
   servers.set(p.id, child)
   child.on('exit', (code, signal) => onServerExit(p, child, code, signal))
@@ -655,7 +671,7 @@ app.on('second-instance', () => { if (app.isReady()) showWindow() })
 // Show as auto-m8 (not Electron) in the Dock, menu bar and app switcher.
 app.setName('auto-m8')
 app.whenReady().then(async () => {
-  try { if (app.dock) app.dock.setIcon(join(ROOT, 'web/public/icon-180.png')) } catch {}
+  try { if (app.dock && !PACKAGED) app.dock.setIcon(join(ROOT, 'web/public/icon-180.png')) } catch {} // the packaged app has its own icon
   await ensureServer()
   createWindow()
   // The other enabled profiles start in the background, so their agents keep running too.
@@ -670,9 +686,11 @@ app.on('window-all-closed', () => {})
 // The menu bar: reload the window, restart perch with fresh code (rebuilds the web app, restarts
 // the servers and this shell), and quit. The window has no chrome of its own for these.
 function restartPerch() {
-  shellLog('restart from the menu: rebuilding the web app')
-  const r = spawnSync(process.env.SHELL || '/bin/zsh', ['-lc', 'npx vite build'], { cwd: ROOT, encoding: 'utf8', timeout: 120_000 })
-  if (r.status !== 0) shellLog(`web build failed, restarting on the last build:\n${(r.stderr || r.stdout || '').slice(-2000)}`)
+  if (!PACKAGED) { // the packaged app ships its web build; there's nothing to rebuild
+    shellLog('restart from the menu: rebuilding the web app')
+    const r = spawnSync(process.env.SHELL || '/bin/zsh', ['-lc', 'npx vite build'], { cwd: ROOT, encoding: 'utf8', timeout: 120_000 })
+    if (r.status !== 0) shellLog(`web build failed, restarting on the last build:\n${(r.stderr || r.stdout || '').slice(-2000)}`)
+  }
   // Stop every profile's server, including ones an earlier shell started (will-quit only stops our
   // own children), so the relaunch really runs fresh server code. Chats are detached and reattach.
   quitting = true // the servers stopped below are not crashes: don't bring them back
@@ -681,8 +699,9 @@ function restartPerch() {
     app.quit() // the relaunched shell starts fresh servers
   })
 }
-app.whenReady().then(() => Menu.setApplicationMenu(Menu.buildFromTemplate([
+const buildMenu = () => Menu.setApplicationMenu(Menu.buildFromTemplate([
   { label: 'auto-m8', submenu: [
+    ...(updateReady ? [{ label: `Restart to update (${updateReady})`, click: installUpdate }, { type: 'separator' }] : []),
     { label: 'Show / hide', accelerator: settings.window?.hotkey || 'Control+Alt+Space', click: toggle, registerAccelerator: false },
     { type: 'separator' },
     { label: 'Collapse / expand', accelerator: COLLAPSE_KEY, click: toggleCollapse, registerAccelerator: false },
@@ -696,7 +715,29 @@ app.whenReady().then(() => Menu.setApplicationMenu(Menu.buildFromTemplate([
   { role: 'editMenu' },
   { label: 'View', submenu: [{ role: 'toggleDevTools' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
   { role: 'windowMenu' },
-]))) // keep running: the shortcut brings it back
+]))
+app.whenReady().then(buildMenu) // keep running: the shortcut brings it back
+
+// Updates (the packaged app only): check GitHub Releases on launch and every 6h, download in the
+// background, and install on the next quit. One quiet menu item restarts into it sooner.
+let updateReady = null
+function installUpdate() {
+  quitting = true
+  const { autoUpdater } = require('electron-updater')
+  autoUpdater.quitAndInstall()
+}
+if (PACKAGED && !process.env.PERCH_NO_UPDATE) app.whenReady().then(() => {
+  let autoUpdater
+  try { ({ autoUpdater } = require('electron-updater')) } catch (e) { shellLog(`updates off: ${e.message}`); return }
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.logger = { info: m => shellLog(`update: ${m}`), warn: m => shellLog(`update: ${m}`), error: () => {}, debug: () => {} } // errors: the 'error' event below, once
+  autoUpdater.on('update-downloaded', info => { updateReady = info.version; shellLog(`update ${info.version} downloaded; installs on quit`); buildMenu() })
+  autoUpdater.on('error', e => shellLog(`update check failed: ${e?.message ?? e}`))
+  const check = () => autoUpdater.checkForUpdates().catch(() => {}) // already logged by the 'error' event
+  check()
+  setInterval(check, 6 * 3600_000).unref?.()
+})
 // Right-click the Dock icon: always a way out, even when the window is blank or stuck.
 // Force quit skips every quit handler (app.exit), after stopping our own servers.
 app.whenReady().then(() => app.dock?.setMenu(Menu.buildFromTemplate([

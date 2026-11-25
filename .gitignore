@@ -11,3 +11,7 @@ perch.db-*
 
 # Real app icons, extracted locally from installed apps (scripts/app-icons.mjs); not redistributed
 web/public/brand
+
+# Packaged app (npm run dist)
+/dist
+/build/node

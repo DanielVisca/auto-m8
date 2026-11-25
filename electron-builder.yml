@@ -1,0 +1,56 @@
+# Packaged auto-m8.app (npm run dist): a DMG and zip per arch, published to GitHub Releases, where
+# electron-updater finds updates. Dev installs (npm run setup / npm run app) don't use any of this.
+appId: dev.auto-m8.desktop
+productName: auto-m8
+copyright: Copyright © Daniel Visca
+# Fails the build when the bundled Node for an arch is missing (electron-builder only warns).
+beforePack: scripts/before-pack.cjs
+directories:
+  output: dist
+  buildResources: build
+# Not in an asar: the server runs on the bundled Node (below), which reads plain files.
+asar: false
+# node-pty uses Node-API, so its prebuilds load in any Node; nothing to rebuild for Electron.
+npmRebuild: false
+files:
+  - package.json
+  - shell/**
+  - server/**
+  - "!server/**/*.test.ts"
+  - shared/**
+  - tiles/**
+  - web/dist/**
+  # The server imports a few plain .ts helpers from web/src (blockers, prrefs, resourceStatus).
+  - web/src/*.ts
+  # Real app icons extracted from this Mac (scripts/app-icons.mjs): never redistributed.
+  - "!web/dist/brand/**"
+  - "!node_modules/node-pty/prebuilds/win32-*/**"
+  - "!node_modules/node-pty/{src,deps,scripts,third_party}/**"
+  # Only the web build uses these (vite bundles them into web/dist); the server never loads them.
+  - "!node_modules/{harper.js,simple-icons}/**"
+# The server's Node: official Node 26 (scripts/fetch-node.mjs). shell/main.cjs runs server/main.ts with it.
+extraResources:
+  - from: build/node/${arch}/node
+    to: node/node
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Signing and notarizing happen only when CSC_LINK / APPLE_* are set (see .github/workflows/release.yml).
+dmg:
+  title: auto-m8 ${version}
+# No version in the name, so releases/latest/download/auto-m8-arm64.dmg is a stable download link.
+artifactName: auto-m8-${arch}.${ext}
+publish:
+  provider: github
+  owner: DanielVisca
+  repo: auto-m8
+  releaseType: release
