@@ -57,7 +57,7 @@ const PROMPT = `You explain one module of a codebase to a senior engineer who is
 - **Main data:** <its key models or tables, as \`Code\` names, at most 5>
 - **Connects to:** <the 2-4 things it's built on or that use it that matter most, in plain words>
 - **Watch out:** <only if the material states a real gotcha or rule; otherwise omit this line>
-No fluff, no "This module". If the material doesn't say, write "unclear" rather than guess. Then a line "SOURCES:" listing the file paths you relied on, comma separated.`
+Each bullet under 20 words: the single most important point, not a list of rules. No fluff, no "This module". If the material doesn't say, write "unclear" rather than guess. Then a line "SOURCES:" listing the file paths you relied on, comma separated.`
 
 async function generate(repo: string, id: string, key: string) {
   await slot()
@@ -98,7 +98,7 @@ async function generate(repo: string, id: string, key: string) {
 }
 
 // The folder's tree hash: changes exactly when something in that module changes.
-const VERSION = 'v2' // bump when the prompt or shape changes, so old summaries are rewritten
+const VERSION = 'v3' // bump when the prompt or shape changes, so old summaries are rewritten
 async function keyOf(repo: string, path: string) {
   const tree = (await git(repo, ['rev-parse', `HEAD:${path}`]).catch(() => '')).trim()
   return tree ? `${VERSION}-${tree.slice(0, 20)}` : null
