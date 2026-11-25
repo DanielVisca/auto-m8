@@ -32,6 +32,9 @@ import { List } from './List'
 import { Settings } from './Settings'
 import { WritingPage } from './WritingList'
 const DocEditor = lazy(() => import('./Writing').then(m => ({ default: m.DocEditor })))
+// Fetch and parse the editor's code once the app is idle, so the first doc you open doesn't wait on it.
+// Only the code: Harper (grammar, 20 MB) starts from the docs list or the doc itself.
+if (typeof window !== 'undefined') ((window as any).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 3000)))(() => { import('./Writing').catch(() => {}) }, { timeout: 8000 })
 import { Paused, PauseBar, usePause } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'

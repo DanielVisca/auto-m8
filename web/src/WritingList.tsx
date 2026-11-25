@@ -1,5 +1,5 @@
 // The writing docs list (Home card and #writing). Kept apart from the editor so Home never loads CodeMirror.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { post, useLive } from './api'
 import './writing.css'
 
@@ -8,6 +8,8 @@ const ago = (t: number) => { const s = (Date.now() - t) / 1000; return s < 60 ? 
 
 export function WritingList({ onOpen, limit }: { onOpen: (id: string) => void; limit?: number }) {
   const { data } = useLive<{ docs: Doc[]; dir: string }>('/api/docs', ['docs'])
+  // The full list page (not the Home card): load the editor and its grammar checker while you pick a doc.
+  useEffect(() => { if (limit) return; const t = setTimeout(() => import('./Writing').then(m => m.warmWriting()).catch(() => {}), 300); return () => clearTimeout(t) }, [limit])
   const [path, setPath] = useState('')
   const open = async (body: any) => { const d = await post<Doc & { error?: string }>('/api/docs', body); if (d?.id) onOpen(d.id) }
   const docs = (data?.docs ?? []).slice(0, limit ?? 50)

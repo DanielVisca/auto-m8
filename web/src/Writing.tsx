@@ -147,6 +147,9 @@ function harperLinter(dialect: number) {
   })().catch(e => { harper = null; throw e })
   return harper
 }
+// Called from the docs list: start Harper (a 20 MB wasm compiled in a worker) before you pick a doc,
+// so its first marks don't wait on the download and compile.
+export function warmWriting() { harperLinter(local('perch.writing.dialect', 0)).catch(() => {}) }
 
 // Take the underline off at once (every copy of the word for the dictionary), without waiting for the next check.
 function dropMarks(v: EditorView, word: string, everywhere: boolean, message?: string) {
