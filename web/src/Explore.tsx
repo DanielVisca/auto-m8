@@ -151,7 +151,22 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
   const edgeVisible = (e: Edge) => visible(e.from) && visible(e.to) && (!T || !intro.has(`${e.from}→${e.to}`) || intro.get(`${e.from}→${e.to}`)! <= T)
   const fresh = (id: string) => !!group && group.some(e => e.id === id)
   // Spotlight: what's hovered, else what's selected. Its neighbours stay bright; everything else fades.
-  const spot = useMemo(() => new Set(hovered ? [hovered] : selected.length ? selected : active ? [active] : []), [hovered, selected, active])
+  // While stepping through the story, the concept that just appeared takes the stage (unless you've picked something):
+  // its links arriving in this step are drawn green, and the older concepts it tied into stay bright.
+  const storyIds = useMemo(() => !group ? [] : [...new Set(group.filter(e => e.kind === 'concept').map(e => e.id).concat(group.some(e => e.kind === 'concept') ? [] : group.map(e => e.from!)))], [group])
+  const story = !hovered && !selected.length && !active && storyIds.length > 0
+  const spot = useMemo(() => new Set(hovered ? [hovered] : selected.length ? selected : active ? [active] : storyIds), [hovered, selected, active, storyIds])
+  // The caption's "what it tied into": its links that exist at this point in time, strongest first (a foreign key counts 5x).
+  const storyLinks = useMemo(() => {
+    if (!g || !at || at.kind !== 'concept') return null
+    const id = at.id, live = g.edges.filter(e => (e.from === id || e.to === id) && edgeVisible(e))
+    const pick = (l: Edge[], other: (e: Edge) => string) => {
+      const m = new Map<string, { id: string; fk: boolean; w: number }>()
+      for (const e of l) { const o = other(e), x = m.get(o) ?? { id: o, fk: false, w: 0 }; x.fk ||= e.kind === 'fk'; x.w += e.weight * (e.kind === 'fk' ? 5 : 1); m.set(o, x) }
+      return [...m.values()].sort((a, b) => b.w - a.w)
+    }
+    return { on: pick(live.filter(e => e.from === id), e => e.to), by: pick(live.filter(e => e.to === id), e => e.from) }
+  }, [g, at, T]) // eslint-disable-line
   const colorOf = useMemo(() => new Map(selected.length > 1 ? selected.map((id, i) => [id, PALETTE[i % PALETTE.length]] as const) : []), [selected])
   const near = useMemo(() => new Set(g ? g.edges.filter(e => spot.has(e.from) || spot.has(e.to)).flatMap(e => [e.from, e.to]) : []), [g, spot])
   const clearSel = () => { setSelected([]); setActive(null) }
@@ -301,6 +316,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 {PALETTE.map((c, i) => <marker key={`d${c}`} id={`ex-dot-${i}`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5"><circle cx="5" cy="5" r="4" fill={c} /></marker>)}
                 <marker id="ex-dot-fk" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5"><circle cx="5" cy="5" r="4" fill="var(--accent)" /></marker>
                 {PALETTE.map((c, i) => <marker key={c} id={`ex-arrow-${i}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill={c} /></marker>)}
+                <marker id="ex-arrow-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ok)" /></marker>
                 <marker id="ex-arrow-fk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" /></marker>
               </defs>
               {[...g.edges, ...(dreamRes?.edgesAdded ?? [])].map((e, i) => {
@@ -309,7 +325,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 // A selected (or hovered) concept gets the stage: only its links are drawn, unless "all links" is on,
                 // where the rest stay as faint context.
                 const lit = spot.size > 0 && (spot.has(e.from) || spot.has(e.to))
-                if (spot.size && !lit && !allLinks) return null
+                if (spot.size && !lit && !allLinks && !story) return null
                 if (!spot.size && drawn && e.evidence.length && !drawn.has(e)) return null
                 const rb = radius(nodeById(e.to)?.files ?? 1) + 3
                 const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
@@ -324,13 +340,15 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 const isNew = !e.evidence.length
                 const d = `M${a.x},${a.y} Q${mx},${my} ${ex},${ey}`
                 const w = Math.min(6, 0.8 + Math.log2(e.weight + 1)) * (e.kind === 'fk' ? 1.6 : 1)
+                // A link arriving in this step of the story: green, so you see what the newcomer attached to.
+                const arrived = fresh(`${e.from}→${e.to}`) || (story && lit)
                 return <g key={i}>
                   {/* A foreign key stays recognizable in any color: thicker, solid, with a dot where the link starts. */}
                   <path d={d}
                     className={`ex-edge ${e.kind} ${hot ? 'hot' : ''} ${spot.size && !lit ? 'faded' : ''} ${gone ? 'gone' : ''} ${isNew ? 'dreamed' : ''} ${fresh(`${e.from}→${e.to}`) ? 'fresh' : ''} ${edgeCard?.e === e ? 'carded' : ''}`}
-                    style={pc ? { stroke: pc, opacity: 0.9 } : undefined}
+                    style={pc ? { stroke: pc, opacity: 0.9 } : arrived ? { stroke: 'var(--ok)', opacity: 1 } : undefined}
                     strokeWidth={w} markerStart={e.kind === 'fk' ? `url(#${pc ? `ex-dot-${PALETTE.indexOf(pc)}` : 'ex-dot-fk'})` : undefined}
-                    markerEnd={`url(#${pc ? `ex-arrow-${PALETTE.indexOf(pc)}` : e.kind === 'fk' ? 'ex-arrow-fk' : 'ex-arrow'})`} />
+                    markerEnd={`url(#${pc ? `ex-arrow-${PALETTE.indexOf(pc)}` : arrived ? 'ex-arrow-ok' : e.kind === 'fk' ? 'ex-arrow-fk' : 'ex-arrow'})`} />
                   {/* A wide invisible stroke, so a thin link is easy to hover and click. */}
                   {!(spot.size && !lit) && <path d={d} className="ex-hit" onPointerDown={ev => ev.stopPropagation()}
                     onMouseEnter={ev => cardAt(ev, e, false)} onMouseMove={ev => cardAt(ev, e, false)} onMouseLeave={() => setEdgeCard(c => c?.pinned ? c : null)}
@@ -376,7 +394,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 {g.hidden.hubs.length > 0 && <> {g.hidden.hubs.length} shared foundations used by almost everything (<span title={g.hidden.hubs.join('\n')}>{g.hidden.hubs.slice(0, 4).map(label).join(', ')}{g.hidden.hubs.length > 4 ? '…' : ''}</span>) are hidden; tick “show shared foundations” to draw them.</>}
               </div>
             )}
-            <TimelineBar tl={tl} steps={steps} step={step} setStep={s => { setPlaying(false); setStep(s) }} playing={playing} setPlaying={setPlaying} at={at} />
+            <TimelineBar tl={tl} steps={steps} step={step} setStep={s => { setPlaying(false); setStep(s) }} playing={playing} setPlaying={setPlaying} at={at} links={storyLinks} onPick={id => pick(id, false)} />
           </div>
           <aside className="explore-side">
             <div className="explore-side-top">
@@ -404,7 +422,8 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
   )
 }
 
-function TimelineBar({ tl, steps, step, setStep, playing, setPlaying, at }: { tl: Timeline | null; steps: Ev[][]; step: number | null; setStep: (s: number | null) => void; playing: boolean; setPlaying: (p: boolean) => void; at: Ev | null }) {
+type Link = { id: string; fk: boolean; w: number }
+function TimelineBar({ tl, steps, step, setStep, playing, setPlaying, at, links, onPick }: { tl: Timeline | null; steps: Ev[][]; step: number | null; setStep: (s: number | null) => void; playing: boolean; setPlaying: (p: boolean) => void; at: Ev | null; links: { on: Link[]; by: Link[] } | null; onPick: (id: string) => void }) {
   if (!tl) return <div className="explore-tl small muted">Loading history…</div>
   const n = steps.length
   const extra = step == null ? 0 : (steps[step]?.length ?? 1) - 1
@@ -421,7 +440,15 @@ function TimelineBar({ tl, steps, step, setStep, playing, setPlaying, at }: { tl
         <div className="explore-caption">
           <b>{at.date.slice(0, 7)}</b>{at.approx ? ' ≈' : ''} — {at.kind === 'concept' ? <><b>{label(at.id)}</b> appears</> : <><b>{label(at.from!)}</b> starts building on <b>{label(at.to!)}</b></>}
           {' '}by {at.commit.author}{at.commit.url ? <> · <a href={at.commit.url} target="_blank" rel="noreferrer">{at.commit.pr ? `#${at.commit.pr}` : at.commit.sha.slice(0, 8)}</a></> : null}: <span className="muted">{at.commit.subject}</span>
-          <div className="tiny muted">{at.source}{extra > 0 ? ` · +${extra} more link${extra === 1 ? '' : 's'} at this step` : ''}</div>
+          {links && (links.on.length > 0 || links.by.length > 0) && (
+            <div className="ex-story-links small">
+              {([['Built on', links.on], ['Used by', links.by]] as const).filter(([, l]) => l.length).map(([t, l]) => (
+                <div key={t}><span className="muted">{t}:</span> {l.slice(0, 5).map((x, i) => <span key={x.id}>{i ? ', ' : ''}<button className="link" onClick={() => onPick(x.id)} title={`${x.id}\nClick to select it`}>{label(x.id)}</button>{x.fk ? <span className="ex-kind fk" title="Foreign key: a database link"> fk</span> : ''}</span>)}{l.length > 5 ? <span className="muted"> +{l.length - 5} more</span> : ''}</div>
+              ))}
+            </div>
+          )}
+          {links && !links.on.length && !links.by.length && <div className="small muted">No links to anything that existed yet: it arrived on its own.</div>}
+          <div className="tiny muted">{at.source}{extra > 0 ? ` · +${extra} more link${extra === 1 ? '' : 's'} at this step` : ''} · <span style={{ color: 'var(--ok)' }}>green</span>: its links, to what existed then</div>
         </div>
       ) : (
         <div className="small muted">
