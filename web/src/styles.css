@@ -1118,12 +1118,12 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .pill-count .dot:not(:first-child) { margin-left: 6px; }
 .pill-input { flex: 1; min-width: 0; height: 32px; border-radius: 16px; padding: 0 14px; font-size: 13px; margin: 0; }
 .mini-pill .expand { font-size: 15px; color: var(--fg); padding: 2px 6px; }
-/* Tucked into the screen edge: a small tab to bring perch back. */
-.tuck-tab { height: 100vh; width: 100vw; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0; border: none; border-radius: 0; background: var(--bg); color: var(--fg); cursor: pointer; }
-.tuck-tab:hover { background: var(--bg3); }
-.tuck-arrow { font-size: 18px; line-height: 1; font-weight: 600; }
-.tuck-n { font-size: 10px; font-weight: 700; background: var(--accent); color: #fff; border-radius: 8px; padding: 0 4px; min-width: 14px; text-align: center; }
-.tuck-tab.left { border-right: 2px solid var(--accent); } .tuck-tab.right { border-left: 2px solid var(--accent); }
+/* Tucked into the screen edge: a slim bar to pull auto-m8 back out; green when a conversation you were in finished. */
+.tuck-tab { height: 100vh; width: 100vw; display: flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 0; background: var(--bg); cursor: pointer; }
+.tuck-bar { width: 4px; height: calc(100% - 16px); border-radius: 2px; background: var(--muted); opacity: .7; transition: background .2s, opacity .2s, width .2s; }
+.tuck-tab:hover .tuck-bar { opacity: 1; width: 6px; background: var(--accent); }
+.tuck-tab.done .tuck-bar { background: #3fb950; opacity: 1; box-shadow: 0 0 8px #3fb950; animation: tuck-glow 2s ease-in-out infinite; }
+@keyframes tuck-glow { 50% { box-shadow: 0 0 2px #3fb950; } }
 
 .menu.family { min-width: 320px; max-width: 460px; max-height: 60vh; overflow: auto; }
 .family-row { display: flex; align-items: center; gap: 6px; text-align: left; }
@@ -1152,8 +1152,6 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .pr-inline-row { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-bottom: 4px; }
 .pr-inline { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 520px); vertical-align: middle; font-size: 12.5px; line-height: 20px;
   padding: 1px 4px 1px 9px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg3); color: var(--fg) !important; text-decoration: none !important; cursor: pointer; }
-.tuck-tab.top, .tuck-tab.bottom { flex-direction: row; }
-.tuck-tab.top { border-bottom: 2px solid var(--accent); } .tuck-tab.bottom { border-top: 2px solid var(--accent); }
 .pr-inline:hover { border-color: var(--muted); }
 .pr-inline-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .pr-inline.st-open .pr-inline-dot { background: var(--ok); }

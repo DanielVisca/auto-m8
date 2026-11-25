@@ -438,7 +438,7 @@ function setMini(on) {
 let beforeTuck = null
 // over: how far the tab hangs off the screen, so its rounded corners sit out of sight and it reads
 // as attached to the edge. Not at the top: macOS keeps windows below the menu bar.
-const TAB = { long: 76, short: 22, over: 10 }
+const TAB = { long: 140, short: 12, over: 10 }
 // Edges macOS won't let the tab stay on: Stage Manager pushes windows out of its strip (left side,
 // or right when the Dock is on the left), plus any edge macOS moved the tab off this session.
 const osBlocked = new Set()

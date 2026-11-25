@@ -76,22 +76,26 @@ function Pill({ onOpen, onExpand, onPanel }: { onOpen: (id: string) => void; onE
   )
 }
 
-// Tucked into the edge of the screen: a small tab that brings perch back out, with what needs you.
+// Tucked into the edge of the screen: a slim bar to pull auto-m8 back out. It stays quiet except for
+// one signal: an agent finished a conversation you were just in (you opened it in the last 2 hours
+// and it was working while tucked). Then the bar lights up green until you bring auto-m8 back.
+const ENGAGED_MS = 2 * 3600_000
 export function Tab() {
-  const { data } = useLive<{ needsMe: Conversation[]; running: Conversation[] }>('/api/home', ['conversations', 'home'])
-  const needs = data?.needsMe?.length ?? 0, running = data?.running?.length ?? 0
-  // Which edge we're on (the arrow points back onto the screen), and how far the window hangs off
-  // it: the shell pushes the tab partly off screen so it sits flush, so pad the visible part.
-  const sx = screen as any, L = sx.availLeft ?? 0, T = sx.availTop ?? 0
-  const side = innerHeight > innerWidth
-  const edge = side ? (screenX + innerWidth / 2 < L + screen.availWidth / 2 ? 'left' : 'right') : (screenY + innerHeight / 2 < T + screen.availHeight / 2 ? 'top' : 'bottom')
-  const over = Math.max(0, edge === 'left' ? L - screenX : edge === 'right' ? screenX + innerWidth - (L + screen.availWidth) : edge === 'bottom' ? screenY + innerHeight - (T + screen.availHeight) : 0)
-  const pad = { left: { paddingLeft: over }, right: { paddingRight: over }, bottom: { paddingBottom: over }, top: {} }[edge]
+  const { data } = useLive<{ running: (Conversation & { seen_at?: number | null; automated?: boolean })[] }>('/api/home', ['conversations', 'home'])
+  const watched = useRef(new Map<string, string>())
+  const running = data?.running ?? []
+  for (const c of running) if (!c.automated && (c.seen_at ?? 0) > Date.now() - ENGAGED_MS) watched.current.set(c.id, c.title || c.first_prompt || 'a conversation')
+  const live = new Set(running.map(c => c.id))
+  const finished = data ? [...watched.current].filter(([id]) => !live.has(id)).map(([, t]) => t) : []
+  // Which side we're on, and how far the window hangs off it: the shell pushes the tab partly off
+  // screen so it sits flush, so pad the visible part.
+  const L = (screen as any).availLeft ?? 0
+  const edge = screenX + innerWidth / 2 < L + screen.availWidth / 2 ? 'left' : 'right'
+  const over = Math.max(0, edge === 'left' ? L - screenX : screenX + innerWidth - (L + screen.availWidth))
+  const tip = finished.length ? `Finished: ${finished.join(', ')}\nClick to bring auto-m8 back  ⌘⇧.` : 'Bring auto-m8 back  ⌘⇧.'
   return (
-    <button className={`tuck-tab ${edge}`} style={pad} onClick={() => shell.tuck?.(false)} title={`Bring auto-m8 back · ${running} running · ${needs} need you  ⌘⇧.`}>
-      <span className="tuck-arrow">{{ left: '›', right: '‹', top: '⌄', bottom: '⌃' }[edge]}</span>
-      {needs > 0 && <span className="tuck-n">{needs}</span>}
-      {running > 0 && <i className="spin" />}
+    <button className={`tuck-tab ${edge}${finished.length ? ' done' : ''}`} style={edge === 'left' ? { paddingLeft: over } : { paddingRight: over }} onClick={() => shell.tuck?.(false)} title={tip}>
+      <span className="tuck-bar" />
     </button>
   )
 }
