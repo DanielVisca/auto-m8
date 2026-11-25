@@ -1,11 +1,13 @@
-// Identifiers: neutral glyphs for local apps and sources (no third-party app icons ship with perch),
-// and Simple Icons (CC0) marks for web services. Near-black marks follow the text colour so they
+// Identifiers: the real macOS app icons for apps on this Mac (extracted locally into the gitignored
+// web/public/brand by scripts/app-icons.mjs, never shipped), falling back to neutral glyphs, and
+// Simple Icons (CC0) marks for web services. Near-black marks follow the text colour so they
 // stay visible in dark mode. Unknown names fall back to their initial.
 import {
   siAsana, siAtlassian, siBox, siBrex, siCalendly, siCanva, siClaude, siClickup, siCloudflare, siFigma, siGit, siGithub, siGmail,
   siGooglecalendar, siGoogledocs, siGoogledrive, siGooglesheets, siGrafana, siHubspot, siIntercom, siLinear, siNotion, siOllama, siOpenai, siSalesforce,
   siSentry, siShopify, siStrava, siStripe, siSupabase, siTodoist, siTrello, siVercel, siZapier, siZoom,
 } from 'simple-icons'
+import { useState } from 'react'
 
 // Generic glyphs, not logos: what kind of thing it is (a browser, a chat, an editor), not whose.
 const APPS: Record<string, string> = {
@@ -39,7 +41,7 @@ export function brandFor(name: string): string | null {
 
 export function Brand({ id, size = 14, title }: { id: string | null | undefined; size?: number; title?: string }) {
   if (!id) return null
-  if (id in APPS) return <span className="brand brand-glyph" role="img" aria-label={title ?? id} style={{ width: size, height: size, fontSize: size * (APPS[id].length > 1 && !/\p{Extended_Pictographic}/u.test(APPS[id]) ? 0.55 : 0.8) }} title={title ?? id}>{APPS[id]}</span>
+  if (id in APPS) return <AppIcon id={id} size={size} title={title} />
   const m = MARKS[id]
   if (m) return (
     <svg className="brand" width={size} height={size} viewBox="0 0 24 24" role="img" aria-label={title ?? m.title}>
@@ -52,3 +54,10 @@ export function Brand({ id, size = 14, title }: { id: string | null | undefined;
 // Where a conversation came from, as one icon.
 export const sourceBrand = (c: { source: string; origin?: string | null }) =>
   c.source === 'import' ? 'notes' : c.source === 'cursor' ? 'cursor' : c.source === 'claude' ? 'claude' : c.source === 'posthog-code' ? 'posthog' : c.origin === 'slack' ? 'slack' : 'posthog'
+
+// The app's real icon when this Mac has it, else its glyph.
+function AppIcon({ id, size, title }: { id: string; size: number; title?: string }) {
+  const [missing, setMissing] = useState(false)
+  if (!missing) return <img className="brand" src={`/brand/${id}.png`} width={size} height={size} alt={title ?? id} title={title ?? id} draggable={false} onError={() => setMissing(true)} />
+  return <span className="brand brand-glyph" role="img" aria-label={title ?? id} style={{ width: size, height: size, fontSize: size * (APPS[id].length > 1 && !/\p{Extended_Pictographic}/u.test(APPS[id]) ? 0.55 : 0.8) }} title={title ?? id}>{APPS[id]}</span>
+}

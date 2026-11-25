@@ -8,3 +8,6 @@ perch.db-*
 .DS_Store
 .env
 .env.*
+
+# Real app icons, extracted locally from installed apps (scripts/app-icons.mjs); not redistributed
+web/public/brand

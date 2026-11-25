@@ -32,6 +32,7 @@ export type Agent = {
   key: string // stable per agent: stamphog, reviewhog, shepherd, claude:<session>, task:<id>, bot:<login>
   name: string
   avatar?: string // GitHub avatar for bots
+  icon?: string // perch's own agent art (web/public/agents)
   brand?: string // perch Brand id
   glyph?: string // fallback icon
   state: AgentState
@@ -166,7 +167,7 @@ async function compute(urls: string[]) {
       const eyes = g?.eyes.find(e => e.login === 'stamphog')
       const rev = g?.reviews.filter(r => r.login === 'stamphog').at(-1)
       const avatar = eyes?.avatar ?? rev?.avatar ?? g?.comments.find(c => c.login === 'stamphog')?.avatar
-      const base = { key: 'stamphog', name: 'StampHog', avatar, glyph: '✓', link: url }
+      const base = { key: 'stamphog', name: 'StampHog', icon: '/agents/stamphog.png', avatar, glyph: '✓', link: url }
       const updated = run ? Date.parse(run.updated_at) : 0
       if (run && ['queued', 'reviewing'].includes(run.status)) {
         const stale = now - updated > 45 * MIN
@@ -184,7 +185,7 @@ async function compute(urls: string[]) {
       const s = await reviewhogStatus(url, ttl)
       const eyes = g?.eyes.find(e => e.login === 'posthog')
       const avatar = eyes?.avatar ?? g?.reviews.find(r => r.login === 'posthog')?.avatar
-      const base = { key: 'reviewhog', name: 'PostHog Review', avatar, glyph: '◉', link: url }
+      const base = { key: 'reviewhog', name: 'PostHog Review', icon: '/agents/reviewhog.png', avatar, glyph: '◉', link: url }
       if (s && ['queued', 'reviewing', 'resolving'].includes(s.state)) {
         const started = s.latest_resolution?.started_at ? Date.parse(s.latest_resolution.started_at) : null
         agents.push({ ...base, state: 'working', status: s.state === 'resolving' ? 'Checking whether its findings were fixed' : s.state === 'queued' ? 'Queued to review' : 'Reviewing the latest push', since: started ?? now, next: null, proof: 'ReviewHog API (live)' })
@@ -202,7 +203,7 @@ async function compute(urls: string[]) {
       const said = m?.[1]?.replace(/_/g, ' ')
       const at = m?.[2] && !Number.isNaN(Date.parse(m[2])) ? Date.parse(m[2]) : sticky?.at ?? runs[0]?.updated_at ?? null
       const scoutNext = scout?.enabled && scout.last ? scout.last + scout.every : null
-      const base = { key: 'shepherd', name: 'PR shepherd', glyph: '🐑', conversation: (live ?? runs[0])?.id }
+      const base = { key: 'shepherd', name: 'PR shepherd', icon: '/agents/shepherd.png', glyph: '🐑', conversation: (live ?? runs[0])?.id }
       if (live && now - live.updated_at < 60 * MIN) {
         agents.push({ ...base, state: 'working', status: said ? `Checking now · was ${said}` : 'Checking now', since: live.updated_at, next: null, proof: 'shepherd task is running' })
       } else if (live) {
@@ -258,7 +259,7 @@ export async function scoutPresence(): Promise<Agent | null> {
   const live = last && ['in_progress', 'queued', 'running'].includes(String(last.status ?? last.task_run_status ?? '').toLowerCase())
   const next = s.enabled && s.last ? s.last + s.every : null
   const late = !live && next != null && Date.now() > next + 30 * MIN
-  return { key: 'scout', name: s.name, glyph: '🔭', state: live ? 'working' : late ? 'late' : 'waiting',
+  return { key: 'scout', name: s.name, icon: '/agents/scout.png', glyph: '🔭', state: live ? 'working' : late ? 'late' : 'waiting',
     status: !s.enabled ? 'Paused' : live ? 'Looking over your PRs now, picking what to shepherd' : late ? 'Overdue: its last run was a while ago' : `Picks which PRs get a shepherd, every ${Math.round(s.every / 3600_000)}h`,
     since: live ? Date.parse(last.created_at ?? last.started_at ?? '') || null : s.last, next: live ? null : next, proof: 'scout config and runs (PostHog API)' }
 }

@@ -6,3 +6,4 @@ if (existsSync(dir)) for (const arch of readdirSync(dir)) {
   const helper = `${dir}/${arch}/spawn-helper`
   if (existsSync(helper)) chmodSync(helper, 0o755)
 }
+await import('./app-icons.mjs').catch(() => {})
