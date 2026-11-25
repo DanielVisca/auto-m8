@@ -87,6 +87,7 @@ export function Home({ onOpen, onStart, onBoard, settings, onTerminal }: { onOpe
       <div className="start-all row-flex">
         {boardList.filter(b => b.pinned).map(b => <button key={b.id} className="link small" onClick={() => onBoard(b.id)} title={b.tiles.map(t => t.title).join(' · ')}>▦ {b.name}</button>)}
         {boardList.length > 0 && <button className="link small muted" onClick={() => onBoard(null)}>Boards</button>}
+        <button className="link small" onClick={() => { location.hash = '#writing' }} title="Docs with comments, research, versions and an agent beside them">✎ Writing</button>
         <button className="link small" onClick={() => setAll(true)}>
           {waiting > 0 ? `${waiting} waiting on you · ` : ''}See everything →
         </button>
