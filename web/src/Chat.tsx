@@ -78,6 +78,7 @@ const onLinkClick = (e: React.MouseEvent) => {
   if (copy) { e.preventDefault(); copyText(copy.parentElement?.querySelector('pre')?.textContent ?? '').then(ok => ok && flash(copy)); return }
   const href = a?.getAttribute('href') ?? ''
   if (isConvLink(href)) { e.preventDefault(); window.dispatchEvent(new CustomEvent('perch-open', { detail: convIdOf(href) })) }
+  else if (/^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/)?#doc\/[\w-]+$/.test(href)) { e.preventDefault(); location.hash = href.slice(href.indexOf('#')) } // a doc in the editor
   else if (a && /^https?:/.test(href)) { e.preventDefault(); window.open(href, '_blank') }
 }
 // PR links become PR pills: state, repo#n, title and the robots on it.

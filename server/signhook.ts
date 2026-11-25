@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { ownerName, possessive } from './owner.ts'
+import { check as docGuard, lockedDocs } from './docguard.ts'
 
 const MARK = 'perch-agent:'
 
@@ -89,7 +90,7 @@ if (import.meta.main) {
   process.stdin.on('data', d => { raw += d })
   process.stdin.on('end', () => {
     let reason: string | null = null
-    try { reason = check(JSON.parse(raw)) } catch {}
+    try { const input = JSON.parse(raw); reason = check(input) ?? docGuard(input, lockedDocs()) } catch {}
     if (reason) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }))
   })
 }

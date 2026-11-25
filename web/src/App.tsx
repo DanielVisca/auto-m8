@@ -4,7 +4,7 @@ import { FileViewer } from './Files'
 import { CarryDialog, ProfileSwitch } from './Profile'
 import { PrPage, PrSide } from './PrPage'
 import { Mini, Tab } from './Mini'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, post, sendChat, shell, titleOf, useLive, type Conversation, type Term } from './api'
 import { Ask } from './Ask'
 import { Automations } from './Automations'
@@ -30,6 +30,8 @@ import { Explore } from './Explore'
 import { Library } from './Library'
 import { List } from './List'
 import { Settings } from './Settings'
+import { WritingPage } from './WritingList'
+const DocEditor = lazy(() => import('./Writing').then(m => ({ default: m.DocEditor })))
 import { Paused, PauseBar, usePause } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'
@@ -46,7 +48,8 @@ type View =
   | { kind: 'pr'; id: string }
   | { kind: 'board'; id: string | null }
   | { kind: 'explore'; id: string | null }
-  | { kind: 'home' | 'needs' | 'settings' | 'insights' | 'library' | 'automations' | 'evolve' | 'paused' }
+  | { kind: 'doc'; id: string }
+  | { kind: 'home' | 'needs' | 'settings' | 'insights' | 'library' | 'automations' | 'evolve' | 'paused' | 'writing' }
 
 // The layout follows the window, not a setting: drag it narrow and it becomes one column,
 // drag it short and it becomes a single command bar.
@@ -81,8 +84,9 @@ function parseHash(): View {
   if (kind === 'compare' && id) return { kind, ids: decodeURIComponent(id).split(',') }
   if (kind === 'pr' && id) return { kind, id: decodeURIComponent(id) }
   if (kind === 'board') return { kind, id: id ? decodeURIComponent(id) : null }
+  if (kind === 'doc' && id) return { kind, id: decodeURIComponent(id) }
   if (kind === 'explore') return { kind, id: id ? decodeURIComponent(id) : null }
-  if (['settings', 'insights', 'library', 'automations', 'home', 'needs', 'evolve', 'paused'].includes(kind)) return { kind } as View
+  if (['settings', 'insights', 'library', 'automations', 'home', 'needs', 'evolve', 'paused', 'writing'].includes(kind)) return { kind } as View
   return { kind: 'home' }
 }
 const hashFor = (v: View) => '#' + v.kind + ('id' in v && v.id ? '/' + encodeURIComponent(v.id) : 'q' in v ? '/' + encodeURIComponent(v.q) : 'ids' in v ? '/' + encodeURIComponent(v.ids.join(',')) : '')
@@ -192,6 +196,7 @@ export function App() {
       else if (k === 'f' && e.shiftKey) {
         e.preventDefault()
         if (zen) api.send('PUT', '/api/settings', { focus: { ...settings.focus, active: false } }) // ⌘⇧F leaves zen
+        else if (view.kind === 'doc') api.send('PUT', '/api/settings', { focus: { ...(settings?.focus ?? { areas: [] }), active: true } }) // writing: straight to just the page
         else { setListOpen(true); window.dispatchEvent(new Event('perch-focus')) }
       }
       else if (k === 'i') { e.preventDefault(); setDetailsOpen(o => !o) }
@@ -228,6 +233,8 @@ export function App() {
       {view.kind === 'settings' && <div className="scroll"><Settings settings={settings} onTerminal={(cmd, title) => newTerm({ cmd, title })} /></div>}
       {view.kind === 'insights' && <div className="scroll"><Insights onOpen={openById} /></div>}
       {view.kind === 'paused' && <div className="scroll"><Paused onOpen={openById} /></div>}
+      {view.kind === 'doc' && <Suspense fallback={<div className="pad muted">Opening the editor…</div>}><DocEditor key={view.id} id={view.id} onOpenChat={openById} settings={settings} zen={zen} /></Suspense>}
+      {view.kind === 'writing' && <div className="scroll"><WritingPage onOpen={id => setView({ kind: 'doc', id })} /></div>}
       {view.kind === 'explore' && <div className="scroll"><Explore key={view.id ?? ''} initialRepo={view.id ?? undefined} onOpenChat={openById} /></div>}
       {view.kind === 'pr' && <div className="scroll"><PrPage key={view.id} url={view.id} onOpen={openById} sideConversations={mode === 'wide' && detailsOpen && !zen} /></div>}
       {(view.kind === 'library' || view.kind === 'evolve') && <div className="scroll"><Library key={view.kind} initial={view.kind === 'evolve' ? 'learned' : undefined} onOpen={openById} /></div>}
@@ -309,6 +316,8 @@ export function App() {
   }
 
   const showDetails = mode === 'wide' && detailsOpen && !zen && view.kind === 'chat' && view.id
+  // Zen while writing: just the page. No sidebar, no side panels, no chats.
+  const zenWriting = zen && view.kind === 'doc'
   const showPrSide = mode === 'wide' && detailsOpen && !zen && view.kind === 'pr' && view.id
   if (custom) {
     // What a layout tile may ask for. Each one only navigates; none changes data.
@@ -332,7 +341,7 @@ export function App() {
     // The window's buttons sit over the top-left corner: whatever is drawn there makes room for them.
     const corner = shell.isElectron ? topLeftOf(layout.layout, { sidebar: listOpen, details: !!(showDetails || showPrSide) }) : null
     const slots = {
-      sidebar: listOpen ? sidebar : null,
+      sidebar: listOpen && !zenWriting ? sidebar : null,
       main: (
         <main className="main">
           <div className={`main-top drag ${corner === 'main' ? 'no-side' : ''}`}>
@@ -362,11 +371,11 @@ export function App() {
     <div className={`app ${mode} ${shell.isElectron ? 'electron' : ''} ${zen ? 'zen' : ''}`}>
       <Handoff current={hashFor(view)} onGo={goHash} />
       <div className="body">
-        {listOpen && sidebar}
-        {listOpen && <Splitter side="left" width={side.width} onWidth={side.setWidth} onReset={side.reset} />}
+        {listOpen && !zenWriting && sidebar}
+        {listOpen && !zenWriting && <Splitter side="left" width={side.width} onWidth={side.setWidth} onReset={side.reset} />}
         <main className="main">
-          <div className={`main-top drag ${listOpen ? '' : 'no-side'}`}>
-            {!listOpen && <button className="icon no-drag" onClick={() => setListOpen(true)} title="Show sidebar  ⌘\">☰</button>}
+          <div className={`main-top drag ${listOpen && !zenWriting ? '' : 'no-side'}`}>
+            {!listOpen && !zenWriting && <button className="icon no-drag" onClick={() => setListOpen(true)} title="Show sidebar  ⌘\">☰</button>}
             <span className="grow" />
             <BrowserFlag onOpen={openById} />
             {showDecisions && <DecisionFlag onOpen={openById} />}

@@ -56,7 +56,8 @@ import { family } from './family.ts'
 import { allLabels, applyRules, markSeen, setTitle, deleteRule, detail, editLabels, list, listRules, saveRule, setStates, siblings } from './conversations.ts'
 import { ask, briefing, generateBrief, home, today } from './brief.ts'
 import { indexStatus, onChange, onTick, posthogStatus, scanAll, startIndexer, syncMyPrs, syncPrs, syncTasks } from './indexer.ts'
-import { clearAnthropicKey, clearPosthogKey, posthogKey, setAnthropicKey, setPosthogKey } from './keychain.ts'
+import { clearAnthropicKey, clearPangramKey, clearPosthogKey, pangramKey, posthogKey, setAnthropicKey, setPangramKey, setPosthogKey } from './keychain.ts'
+import { addComment, addResearch, agentEdit, deleteComment, deleteResearch, DOCS_DIR, getDoc, listDocs, newDoc, onDocs, openDoc, pangramCheck, resolveComment, restoreVersion, saveDoc, snapshot, toSlack, updateDoc, version as docVersion, type Author as DocAuthor } from './docs.ts'
 import { runStoreCommand, scouts, skills, tasks } from './posthog.ts'
 import { onError, recentErrors, recordError, resolveErrors } from './errors.ts'
 import { taskOutput } from './taskOutput.ts'
@@ -174,6 +175,7 @@ for (const r of all<any>('select id from user_state where title is not null')) r
 onPresence.add(() => broadcast('prs'))
 onPrSections.add(() => broadcast('prs'))
 onCanvas.add(() => broadcast('canvas'))
+onDocs.add(() => broadcast('docs'))
 onCanvasData.add(() => broadcast('canvasdata'))
 onPromises.add(() => broadcast('conversations'))
 // Promises agents made: caught from their replies, followed up when due.
@@ -252,7 +254,7 @@ function json(res: ServerResponse, code: number, value: unknown, req?: IncomingM
   } else res.writeHead(code, { 'Content-Type': 'application/json' })
   res.end(text)
 }
-const MIME: Record<string, string> = { '.webmanifest': 'application/manifest+json', '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' }
+const MIME: Record<string, string> = { '.webmanifest': 'application/manifest+json', '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.wasm': 'application/wasm' }
 function serveStatic(path: string, res: ServerResponse) {
   let file = normalize(join(WEB, path))
   if (!file.startsWith(WEB) || !existsSync(file) || statSync(file).isDirectory()) file = join(WEB, 'index.html')
@@ -578,6 +580,36 @@ route('GET', '/api/conversations/:id/evidence', m => ({ evidence: evidence(decod
 route('GET', '/api/conversations/:id/files', m => ({ files: conversationFiles(decodeURIComponent(m[1])) }))
 route('GET', '/api/task-output', (_m, _r, _s, q) => taskOutput(String(q.get('path') ?? ''), q.get('summary') === '1'))
 route('GET', '/api/files/check', (_m, _r, _s, q) => ({ file: checkFile(String(q.get('path') ?? '')) }))
+// Writing: the doc editor (docs.ts). Agents use the same routes through the MCP doc tool, naming themselves in author.
+const authorOf = (b: Row): DocAuthor => {
+  const a = b.author
+  if (a?.kind !== 'agent') return { kind: 'person' }
+  const cid = typeof a.conversation_id === 'string' ? a.conversation_id : undefined
+  const t = cid ? get<Row>('select coalesce((select title from auto_titles where id = c.id), c.title, c.first_prompt) t from conversations c where id = ?', cid)?.t : null
+  return { kind: 'agent', name: String(a.name || (t ? String(t).slice(0, 60) : 'Agent')), conversation_id: cid }
+}
+const docTry = async <T>(f: () => T | Promise<T>) => { try { return await f() } catch (e: any) { return { error: e.message } } }
+route('GET', '/api/docs', () => ({ docs: listDocs(), dir: DOCS_DIR }))
+route('POST', '/api/docs', async (_m, req) => { const b = await body(req); return docTry(() => b.path ? openDoc(b.path) : newDoc(b.title)) })
+route('GET', '/api/docs/:id', m => docTry(() => getDoc(m[1])))
+route('POST', '/api/docs/:id', async (m, req) => { const b = await body(req); return docTry(() => updateDoc(m[1], b)) })
+route('POST', '/api/docs/:id/save', async (m, req) => { const b = await body(req); return docTry(() => saveDoc(m[1], String(b.text ?? ''), Number(b.rev), authorOf(b), Array.isArray(b.anchors) ? b.anchors : [])) })
+route('POST', '/api/docs/:id/edit', async (m, req) => { const b = await body(req); return docTry(() => agentEdit(m[1], String(b.old_text ?? ''), String(b.new_text ?? ''), authorOf({ author: { kind: 'agent', ...b.author } }))) })
+route('POST', '/api/docs/:id/comments', async (m, req) => { const b = await body(req); return docTry(() => addComment(m[1], b as any, authorOf(b))) })
+route('POST', '/api/doc-comments/:id', async (m, req) => { const b = await body(req); return docTry(() => { if (b.delete) deleteComment(m[1]); else resolveComment(m[1], b.resolved !== false); return { ok: true } }) })
+route('POST', '/api/docs/:id/research', async (m, req) => { const b = await body(req); return docTry(() => addResearch(m[1], b as any, authorOf(b))) })
+route('POST', '/api/doc-research/:id/delete', m => { deleteResearch(m[1]); return { ok: true } })
+route('POST', '/api/docs/:id/versions', async (m, req) => { const b = await body(req); return docTry(() => { const g = getDoc(m[1]); return { id: snapshot(m[1], g.text, g.doc.rev, String(b.label || 'Saved version'), authorOf(b)) } }) })
+route('GET', '/api/doc-versions/:id', m => docVersion(m[1]) ?? { error: 'No such version' })
+route('POST', '/api/doc-versions/:id/restore', async (m, req) => { const b = await body(req); return docTry(() => restoreVersion(m[1], authorOf(b))) })
+route('POST', '/api/docs/:id/slack', async (m, req) => { const b = await body(req); return docTry(() => ({ text: toSlack(typeof b.text === 'string' ? b.text : getDoc(m[1]).text) })) })
+route('GET', '/api/writing/pangram', () => ({ configured: !!pangramKey() }))
+route('POST', '/api/writing/pangram', async (_m, req) => { const b = await body(req); if (!isLoopback(req)) return { error: 'only from the Mac' }; if (b.clear) clearPangramKey(); else if (b.key) setPangramKey(String(b.key).trim()); return { configured: !!pangramKey() } })
+route('POST', '/api/docs/:id/ai-check', async (m, req) => {
+  const b = await body(req), key = pangramKey()
+  if (!key) return { error: 'Add a Pangram API key first (the AI check sends the text to Pangram)' }
+  return docTry(() => pangramCheck(typeof b.text === 'string' ? b.text : getDoc(m[1]).text, key))
+})
 route('POST', '/api/files/action', async (_m, req) => { const b = await body(req); return fileAction(String(b.path ?? ''), b.action) })
 // The file itself: shown in perch's viewer, or downloaded (download=1), e.g. from your phone.
 route('GET', '/api/files/raw', (_m, _req, res, q) => {

@@ -11,6 +11,7 @@ import { ProjectView, type Decision, type Project } from './Decisions'
 import { Setup } from './Setup'
 import { NeedsMe, type NeedsData } from './NeedsMe'
 import { handedFiles } from './Chat'
+import { WritingList } from './WritingList'
 
 type Pick = { id?: string; pr?: string; title: string; why: string }
 type Brief = { greeting: string; mode: 'drive' | 'create'; pickup: Pick[]; dropping: Pick[]; groups: { label: string; ids: string[]; why: string }[]; fromNotes: string[]; created_at: number; error?: string }
@@ -172,6 +173,8 @@ function Everything({ onOpen, onStart }: { onOpen: (id: string) => void; onStart
           {data.stale.length > 0 && <div className="muted small">{data.stale.length} haven't moved in 5+ days.</div>}
         </section>
       </div>
+
+      {!data.zen && <section className="card"><h3>Writing <a className="muted small" href="#writing">all docs →</a></h3><WritingList limit={3} onOpen={id => { location.hash = `#doc/${id}` }} /></section>}
 
       {!data.zen && <Autopilot onOpen={onOpen} />}
 

@@ -42,3 +42,9 @@ const anthropic = secret('anthropic-api-key', { skipUnderTest: true })
 export const anthropicKey = () => anthropic.get()
 export const setAnthropicKey = (key: string) => anthropic.set(key)
 export const clearAnthropicKey = () => anthropic.clear()
+
+// Optional Pangram key for the writing editor's AI-text check (docs.ts). Never sent anywhere else.
+const pangram = secret('pangram-api-key', { skipUnderTest: true })
+export const pangramKey = () => pangram.get() ?? process.env.PANGRAM_API_KEY ?? null
+export const setPangramKey = (key: string) => pangram.set(key)
+export const clearPangramKey = () => pangram.clear()

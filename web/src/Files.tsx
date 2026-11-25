@@ -109,6 +109,7 @@ function FileActions({ f, compact }: { f: FileRef; compact?: boolean }) {
   return (
     <span className={`file-actions${compact ? ' compact' : ''}`}>
       {f.kind === 'text' && f.size < 2e6 && <button className="icon" onClick={copyContents} title="Copy its contents">⧉</button>}
+      {/\.(md|markdown|mdx|txt)$/i.test(f.path) && <button className="icon" title="Edit in auto-m8's writing editor: comments, research, versions" onClick={async () => { const d = await post<{ id?: string }>('/api/docs', { path: f.path }); if (d?.id) { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); location.hash = `#doc/${d.id}` } }}>✎</button>}
       {shell.isElectron && <button className="icon" onClick={() => act(f.path, 'copy-file', `${f.name} is on your clipboard: paste it into Slack, Mail or Finder`)} title="Copy the file itself (paste into Slack, Mail, Finder)">📎</button>}
       {shell.isElectron && <button className="icon" onClick={() => act(f.path, 'reveal', 'Shown in Finder')} title="Show in Finder">⌕</button>}
       {!compact && shell.isElectron && <button className="icon" onClick={() => act(f.path, 'open', 'Opened')} title="Open in its app">↗</button>}
