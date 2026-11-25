@@ -179,9 +179,6 @@ function hydrate(r: Row, live: Set<string>) {
   r.models = [...last.keys()].sort((a, b) => (a === now ? -1 : b === now ? 1 : last.get(b)! - last.get(a)!))
   if (now && !r.models.includes(now) && r.models.length) r.models.unshift(now)
   delete r.used_models; delete r.engine_pref
-  // Unread, like an inbox: something arrived after you last opened it. Never-opened threads count
-  // only when recent, so years of imported history don't all show up bold.
-  r.unread = r.seen_at ? r.updated_at > r.seen_at + 2000 : r.updated_at > Date.now() - 2 * 86400_000
   r.promise = promiseFor(r.id)
   r.where = whereRuns(r)
   r.place = placeOf(r)
@@ -193,6 +190,10 @@ function hydrate(r: Row, live: Set<string>) {
 // The fields that change when a chat starts or stops running, without re-reading the row.
 function derive(r: Row, live: Set<string>) {
   r.effective = effectiveState(r, live)
+  // Unread, like an inbox: something arrived after you last opened it. Never-opened threads count
+  // only when recent, so years of imported history don't all show up bold. A chat that is still
+  // working isn't bold: it lights up once the agent finishes its turn, not on every mid-turn message.
+  r.unread = r.effective !== 'running' && (r.seen_at ? r.updated_at > r.seen_at + 2000 : r.updated_at > Date.now() - 2 * 86400_000)
   r.returned = r.state === 'later' && r.snooze_until && r.snooze_until <= Date.now()
   r.reason = r.effective === 'waiting' ? (r.state === 'waiting' ? r.note || 'flagged' : r.returned ? 'back from snooze' : needsReason(r)) : null
   return r
