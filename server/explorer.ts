@@ -386,10 +386,24 @@ function ghCommit(r: { owner: string; name: string }, c: any): Commit {
 // One GraphQL query per file at one commit, cached; the PR comes from the "(#123)" in the subject, because
 // asking GitHub for the PR as well pushes blame on a big repo past its 10s query limit.
 type Blame = { start: number; end: number; c: Commit }[]
+// History doesn't change: keep every GitHub answer on disk as it arrives, so a restart or a new focus resumes
+// instead of asking GitHub again (a full build is minutes of rate-limited calls).
+let ghDisk: Record<string, unknown> | null = null, ghDirty: ReturnType<typeof setTimeout> | null = null
+const ghFile = () => DIR && join(DIR, 'github-history.json')
+function ghLoad() { if (!ghDisk) { try { ghDisk = DIR && existsSync(ghFile()) ? JSON.parse(readFileSync(ghFile(), 'utf8')) : {} } catch { ghDisk = {} } } return ghDisk! }
+function ghSave() { if (!DIR || ghDirty) return; ghDirty = setTimeout(() => { ghDirty = null; try { writeFileSync(ghFile(), JSON.stringify(ghDisk)) } catch {} }, 2000) }
+export async function ghMemo<T>(key: string, f: () => Promise<T>): Promise<T> {
+  const d = ghLoad()
+  if (key in d) return d[key] as T
+  const v = await f()
+  // Don't keep failures (null): a timeout or rate limit should be retried next time.
+  if (v != null) { d[key] = v; ghSave() }
+  return v
+}
 const blameCache = new Map<string, Promise<{ lines: string[]; ranges: Blame } | null>>()
 function ghBlame(r: { owner: string; name: string }, ref: string, file: string) {
   const k = `${r.owner}/${r.name}@${ref}:${file}`
-  if (!blameCache.has(k)) blameCache.set(k, (async () => {
+  if (!blameCache.has(k)) blameCache.set(k, ghMemo(`blame:${k}`, async () => {
     try {
       // The file as GitHub has it at that commit, so line numbers match the blame (the checkout may differ).
       const content = Buffer.from(JSON.parse(await gh(['api', `repos/${r.owner}/${r.name}/contents/${file.split('/').map(encodeURIComponent).join('/')}?ref=${ref}`])).content ?? '', 'base64').toString('utf8')
@@ -401,7 +415,7 @@ function ghBlame(r: { owner: string; name: string }, ref: string, file: string) 
       })
       return { lines: content.split('\n'), ranges }
     } catch { return null }
-  })())
+  }))
   return blameCache.get(k)!
 }
 async function blameLine(r: { owner: string; name: string }, ref: string, file: string, text: string): Promise<Commit | null> {
@@ -438,7 +452,7 @@ export async function buildTimeline(repo: string, nodes: Concept[], edges: Edge[
     try {
       const term = termFor(c)
       const [p, m] = useGh
-        ? [await ghFirst(r!, c.path).catch(() => null), term ? await ghMention(r!, term).catch(() => null) : null]
+        ? [await ghMemo(`first:${r!.owner}/${r!.name}:${c.path}`, () => ghFirst(r!, c.path).catch(() => null)), term ? await ghMemo(`mention:${r!.owner}/${r!.name}:${term}`, () => ghMention(r!, term).catch(() => null)) : null]
         : [await localFirst(repo, c.path, r).catch(() => null), term && !shallow ? await localMention(repo, term, r).catch(() => null) : null]
       const first = earliest(p, m)
       if (first) {

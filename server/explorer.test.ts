@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, importsOf, MECHANICAL, namesIt, prOf, scan } from './explorer.ts'
+import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, ghMemo, importsOf, MECHANICAL, namesIt, prOf, scan } from './explorer.ts'
 
 // A tiny product repo: dashboards are built on insights, alerts on insights, everything on core.
 function fixture() {
@@ -132,4 +132,16 @@ test('checkRepo accepts git repos inside home only', async () => {
   await assert.rejects(checkRepo(repo, mkdtempSync(join(tmpdir(), 'home-'))), /inside your home/)
   await assert.rejects(checkRepo(mkdtempSync(join(home, 'plain-')), home), /Not a git repository/)
   await assert.rejects(checkRepo(join(home, 'nope-missing'), home), /No such folder/)
+})
+
+test('GitHub history answers are kept, failures are retried', async () => {
+  let calls = 0
+  const f = async () => { calls++; return { date: '2020-01-01' } }
+  assert.deepEqual(await ghMemo('t:keep', f), { date: '2020-01-01' })
+  assert.deepEqual(await ghMemo('t:keep', f), { date: '2020-01-01' })
+  assert.equal(calls, 1)
+  let tries = 0
+  const fail = async () => { tries++; return null }
+  await ghMemo('t:fail', fail); await ghMemo('t:fail', fail)
+  assert.equal(tries, 2)
 })
