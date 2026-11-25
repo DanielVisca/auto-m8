@@ -15,6 +15,10 @@ import { HOME } from './settings.ts'
 import { subscriptionBudget } from './subscription-budget.ts'
 import type { Usage } from './usage.ts'
 
+// A Claude token inherited from whatever launched auto-m8 overrides every config folder's own login
+// (so every chat, scout replay and status check bills that one account). auto-m8 passes no tokens.
+delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+
 export type Billing = 'login' | 'api'
 export const billing = (): Billing => anthropicKey() ? 'api' : 'login'
 export const billingLabel = (b: Billing) => b === 'api' ? 'API key' : 'Claude Code login'
@@ -99,7 +103,7 @@ export function refreshLogins(force = false): Promise<void> {
   return Promise.all(subs().map(s => new Promise<void>(done => {
     const l = logins.get(s.id)
     if (!force && l && Date.now() - l.at < 10 * 60_000) return done()
-    const env: NodeJS.ProcessEnv = { ...process.env }; delete env.CLAUDECODE
+    const env: NodeJS.ProcessEnv = { ...process.env }; delete env.CLAUDECODE; delete env.CLAUDE_CODE_OAUTH_TOKEN
     if (s.dir !== join(HOME, '.claude')) env.CLAUDE_CONFIG_DIR = s.dir; else delete env.CLAUDE_CONFIG_DIR
     execFile('claude', ['auth', 'status'], { env, timeout: 15_000 }, (_e, out) => {
       try { const j = JSON.parse(String(out)); logins.set(s.id, { loggedIn: !!j.loggedIn, email: j.email, org: j.orgName, plan: j.subscriptionType, at: Date.now() }) }

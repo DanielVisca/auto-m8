@@ -107,6 +107,9 @@ export function childEnv(configDir?: string, extra?: NodeJS.ProcessEnv) {
   Object.assign(env, extra)
   delete env.CLAUDECODE // set when perch itself was started from Claude Code
   delete env.CLAUDE_CODE_ENTRYPOINT
+  // A token inherited from whatever launched auto-m8 would override every folder's own login, so all
+  // Claude subscriptions would bill one account. Each claude process uses its folder's login instead.
+  delete env.CLAUDE_CODE_OAUTH_TOKEN
   if (configDir && configDir !== join(env.HOME!, '.claude')) env.CLAUDE_CONFIG_DIR = configDir
   return env
 }
