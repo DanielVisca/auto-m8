@@ -18,6 +18,9 @@ type Op = { op: 'remove'; id: string } | { op: 'add'; id: string; name?: string;
 type DreamRes = { removed: string[]; added: { id: string; name: string }[]; broken: { id: string; loses: { to: string; kind: string; weight: number }[] }[]; affected: { id: string; depth: number; via: string }[]; orphaned: string[]; edgesAdded: Edge[]; warnings: string[]; summary: string }
 
 const W = 1000, H = 640
+// One color per selected concept, so with several selected you can tell whose links are whose.
+// Distinct from the accent (foreign keys when one concept is selected) and readable on light and dark.
+const PALETTE = ['#4f9cf9', '#e5484d', '#30a46c', '#a970ff', '#e93d82', '#12a594']
 const qs = (o: Record<string, string | null | undefined>) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join('&')
 const recentRepos = (): string[] => { try { return JSON.parse(localStorage.getItem('perch.explore.repos') ?? '[]') } catch { return [] } }
 const label = (id: string) => id.split('/').pop() ?? id
@@ -113,6 +116,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   const fresh = (id: string) => !!group && group.some(e => e.id === id)
   // Spotlight: what's hovered, else what's selected. Its neighbours stay bright; everything else fades.
   const spot = useMemo(() => new Set(hovered ? [hovered] : selected.length ? selected : active ? [active] : []), [hovered, selected, active])
+  const colorOf = useMemo(() => new Map(selected.length > 1 ? selected.map((id, i) => [id, PALETTE[i % PALETTE.length]] as const) : []), [selected])
   const near = useMemo(() => new Set(g ? g.edges.filter(e => spot.has(e.from) || spot.has(e.to)).flatMap(e => [e.from, e.to]) : []), [g, spot])
   const clearSel = () => { setSelected([]); setActive(null) }
   useEffect(() => { const f = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea')) clearSel() }; addEventListener('keydown', f); return () => removeEventListener('keydown', f) }, [])
@@ -235,7 +239,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
           <div className="explore-stage">
             <div className="explore-legend small muted">
               {g.focus ? <>Left: what {focusNames.join(', ') || g.focus} is built on · Right: what's built on it · Middle: links both ways</> : <>The {g.nodes.length} most connected of {g.total} modules. Focus on one to see what it's built on.</>}
-              {' · '}<span className="lg-fk">━</span> foreign key <span className="lg-imp">┅</span> import · {shortPath(g.repo)} @ {g.sha.slice(0, 8)}
+              {' · '}<span className="lg-fk" title="A model in one module has a foreign key to a table in another: a database-level link, the hardest kind to undo">━ solid: foreign key (database link)</span> <span className="lg-imp" title="Code in one module imports another module">┅ dashed: code import</span> · arrows point at what it's built on · {shortPath(g.repo)} @ {g.sha.slice(0, 8)}
               {loading && <> · <i className="spin" /> mapping…</>}
               {(() => { const me = repos.find(r => r.path === g.repo); return me?.behindOrigin && me.behindOrigin > 50 ? <div className="warn">⚠ This checkout is on branch {me.branch} and {me.behindOrigin.toLocaleString()} commits behind main, so the map shows an older system. Pull or switch to main for today's.</div> : null })()}
             </div>
@@ -253,6 +257,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
               }}>
               <defs>
                 <marker id="ex-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)" /></marker>
+                {PALETTE.map((c, i) => <marker key={c} id={`ex-arrow-${i}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill={c} /></marker>)}
                 <marker id="ex-arrow-fk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" /></marker>
               </defs>
               {[...g.edges, ...(dreamRes?.edgesAdded ?? [])].map((e, i) => {
@@ -270,11 +275,14 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
                 const bend = e.kind === 'fk' ? 0.12 : -0.08
                 const mx = (a.x + ex) / 2 - dy * bend, my = (a.y + ey) / 2 + dx * bend
                 const hot = lit
+                // Several selected: color the link by the selected concept it belongs to (solid/dashed still says fk/import).
+                const pc = lit ? colorOf.get(e.from) ?? colorOf.get(e.to) : undefined
                 const gone = removed.has(e.from) || removed.has(e.to)
                 const isNew = !e.evidence.length
                 return <path key={i} d={`M${a.x},${a.y} Q${mx},${my} ${ex},${ey}`}
                   className={`ex-edge ${e.kind} ${hot ? 'hot' : ''} ${spot.size && !lit ? 'faded' : ''} ${gone ? 'gone' : ''} ${isNew ? 'dreamed' : ''} ${fresh(`${e.from}→${e.to}`) ? 'fresh' : ''}`}
-                  strokeWidth={Math.min(6, 0.8 + Math.log2(e.weight + 1))} markerEnd={`url(#${e.kind === 'fk' ? 'ex-arrow-fk' : 'ex-arrow'})`}>
+                  style={pc ? { stroke: pc, opacity: 0.9 } : undefined}
+                  strokeWidth={Math.min(6, 0.8 + Math.log2(e.weight + 1))} markerEnd={`url(#${pc ? `ex-arrow-${PALETTE.indexOf(pc)}` : e.kind === 'fk' ? 'ex-arrow-fk' : 'ex-arrow'})`}>
                   <title>{`${e.from} → ${e.to}\n${e.kind === 'fk' ? 'foreign key' : 'import'} in ${e.weight} file${e.weight === 1 ? '' : 's'}\n${e.evidence.slice(0, 3).map(x => `${x.file}:${x.line}  ${x.text.slice(0, 100)}`).join('\n')}`}</title>
                 </path>
               })}
@@ -288,7 +296,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
                   <g key={n.id} className={cls} transform={`translate(${p.x},${p.y})`} onPointerDown={e => e.stopPropagation()}
                     onClick={e => pick(n.id, e.shiftKey || e.metaKey)} onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(h => h === n.id ? null : h)}
                     onContextMenu={e => { e.preventDefault(); if (dreaming) setOps(o => o.some(x => x.op === 'remove' && x.id === n.id) ? o.filter(x => !(x.op === 'remove' && x.id === n.id)) : [...o, { op: 'remove', id: n.id }]) }}>
-                    <circle r={r} />
+                    <circle r={r} style={colorOf.has(n.id) ? { stroke: colorOf.get(n.id), strokeWidth: 3.5, strokeDasharray: 'none' } : undefined} />
                     <text y={r + 13} textAnchor="middle">{label(n.id)}</text>
                     <title>{`${n.id}\n${n.files} files${n.models.length ? `\nmodels: ${n.models.slice(0, 10).join(', ')}${n.models.length > 10 ? '…' : ''}` : ''}${intro.has(n.id) ? `\nfirst seen ${intro.get(n.id)!.slice(0, 10)}` : ''}`}</title>
                   </g>
@@ -299,7 +307,7 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
             </svg>
             {(selected.length > 0 || active) && (
               <div className="small explore-spot">
-                Showing links of <b>{(selected.length ? selected : [active!]).map(label).join(', ')}</b> ({near.size ? near.size - spot.size : 0} connected)
+                Showing links of {(selected.length ? selected : [active!]).map((id, i) => <span key={id}>{i ? ', ' : ''}<b style={colorOf.has(id) ? { color: colorOf.get(id) } : undefined}>{colorOf.has(id) ? '● ' : ''}{label(id)}</b></span>)} ({near.size ? near.size - spot.size : 0} connected)
                 {' · '}<button className="link small" onClick={clearSel}>show everything</button> <span className="muted">(Esc, or click empty space · shift-click to add)</span>
               </div>
             )}
