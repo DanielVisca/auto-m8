@@ -48,6 +48,8 @@ create table if not exists trace_events (
   meta text                -- JSON, kind-specific
 );
 create index if not exists trace_events_at on trace_events(at);
+-- weight: how many events the row stands for. Fast, successful requests are folded into one row
+-- per route and minute (ms = their mean, meta.max), so a /api/health poll isn't a row per call.
 create index if not exists trace_events_name_at on trace_events(name, at);
 create table if not exists trace_rollups (
   hour integer not null, build_id integer, kind text not null, name text not null,
@@ -59,6 +61,7 @@ create table if not exists trace_rollups (
 );
 create index if not exists trace_rollups_name on trace_rollups(name, hour);
 `)
+try { db.exec('alter table trace_events add column weight integer not null default 1') } catch {}
 
 // ---- builds: what the app was at the time ----
 
@@ -107,13 +110,22 @@ function checkConfig(now: number) {
 
 // ---- recording ----
 
-type Row = { at: number; kind: string; name: string; ms: number; status?: number | null; dbMs?: number | null; dbCalls?: number | null; spans?: Span[] | null; meta?: any }
+type Row = { at: number; kind: string; name: string; ms: number; status?: number | null; dbMs?: number | null; dbCalls?: number | null; spans?: Span[] | null; meta?: any; weight?: number }
 const queue: Row[] = []
 const MAX_QUEUE = 20_000
 const push = (r: Row) => { if (queue.length < MAX_QUEUE) queue.push(r) }
 
+// minute|route → fast requests in that minute, written as one weighted row once the minute is over.
+const fast = new Map<string, { minute: number; name: string; n: number; ms: number; max: number; dbMs: number; dbCalls: number }>()
 export function recordRequest(t: Trace) {
   const keepSpans = t.ms >= SPANS_FROM_MS || (t.status ?? 0) >= 500
+  if (!keepSpans) {
+    const minute = Math.floor(t.at / MIN), k = `${minute}|${t.name}`
+    const a = fast.get(k) ?? { minute, name: t.name, n: 0, ms: 0, max: 0, dbMs: 0, dbCalls: 0 }
+    a.n++; a.ms += t.ms; a.max = Math.max(a.max, t.ms); a.dbMs += t.dbMs; a.dbCalls += t.dbCalls
+    fast.set(k, a)
+    return
+  }
   push({ at: t.at, kind: 'request', name: t.name, ms: t.ms, status: t.status ?? null, dbMs: t.dbMs, dbCalls: t.dbCalls, spans: keepSpans && t.spans.length ? t.spans : null, meta: t.ms >= 500 && t.path ? { path: t.path } : null })
 }
 
@@ -136,18 +148,21 @@ export function flush(now = Date.now()) {
   const minute = Math.floor(now / MIN)
   for (const b of backgroundMinutes(bgCursor, minute)) push({ at: b.minute * MIN, kind: 'background', name: b.name, ms: b.ms, meta: { calls: b.calls, maxMs: Math.round(b.max) } })
   bgCursor = minute
+  for (const [k, a] of fast) if (a.minute < minute) {
+    fast.delete(k)
+    push({ at: a.minute * MIN, kind: 'request', name: a.name, ms: a.ms / a.n, status: 200, dbMs: a.dbMs, dbCalls: a.dbCalls, meta: { folded: true, max: r1(a.max) }, weight: a.n })
+  }
   checkConfig(now)
   if (!queue.length) return 0
   const rows = queue.splice(0)
-  tx(() => { for (const r of rows) run(`insert into trace_events (at, build_id, kind, name, ms, status, db_ms, db_calls, spans, meta) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  tx(() => { for (const r of rows) run(`insert into trace_events (at, build_id, kind, name, ms, status, db_ms, db_calls, spans, meta, weight) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     r.at, buildId, r.kind, r.name, Math.round(r.ms * 10) / 10, r.status ?? null, r.dbMs == null ? null : Math.round(r.dbMs * 10) / 10, r.dbCalls ?? null,
-    r.spans ? JSON.stringify(r.spans.map(s => ({ name: s.name, start: Math.round(s.start), ms: Math.round(s.ms * 10) / 10 }))) : null, r.meta == null ? null : JSON.stringify(r.meta)) })
+    r.spans ? JSON.stringify(r.spans.map(s => ({ name: s.name, start: Math.round(s.start), ms: Math.round(s.ms * 10) / 10 }))) : null, r.meta == null ? null : JSON.stringify(r.meta), r.weight ?? 1) })
   return rows.length
 }
 
 // ---- condensing: raw → hourly summary → gone ----
 
-const pct = (sorted: number[], p: number) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p / 100 * sorted.length))] : 0
 const r1 = (n: number) => Math.round(n * 10) / 10
 const parse = (s: string | null) => { if (!s) return null; try { return JSON.parse(s) } catch { return null } }
 function where(spans: Span[] | null, top = 5) {
@@ -156,22 +171,31 @@ function where(spans: Span[] | null, top = 5) {
   return [...by].sort((a, b) => b[1].ms - a[1].ms).slice(0, top).map(([name, a]) => ({ name, calls: a.calls, ms: r1(a.ms) }))
 }
 
-type Ev = { id: number; at: number; build_id: number | null; kind: string; name: string; ms: number; status: number | null; db_ms: number | null; spans: string | null; meta: string | null }
+type Ev = { id: number; at: number; build_id: number | null; kind: string; name: string; ms: number; status: number | null; db_ms: number | null; spans: string | null; meta: string | null; weight?: number | null }
+// Percentile over (value, weight) pairs sorted by value.
+export function wpct(sorted: [number, number][], p: number) {
+  const total = sorted.reduce((a, x) => a + x[1], 0)
+  if (!total) return 0
+  let acc = 0
+  for (const [v, w] of sorted) { acc += w; if (acc > p / 100 * total) return v }
+  return sorted.at(-1)![0]
+}
 export function summarize(evs: Ev[]) {
-  const ms = evs.map(e => e.ms).sort((a, b) => a - b)
+  const pairs = evs.map(e => [e.ms, e.weight ?? 1] as [number, number]).sort((a, b) => a[0] - b[0])
   const spanAgg = new Map<string, { calls: number; ms: number }>()
-  let calls = 0, errors = 0, dbMs = 0
+  let calls = 0, errors = 0, dbMs = 0, n = 0, total = 0, max = 0
   for (const e of evs) {
-    const m = parse(e.meta)
-    calls += e.kind === 'background' ? Number(m?.calls) || 1 : 1
+    const m = parse(e.meta), w = e.weight ?? 1
+    n += w; total += e.ms * w; max = Math.max(max, e.ms, Number(m?.max) || 0)
+    calls += e.kind === 'background' ? Number(m?.calls) || 1 : w
     if ((e.status ?? 0) >= 500 || m?.error || m?.neverSent) errors++
     dbMs += e.db_ms ?? 0
     for (const w of where(parse(e.spans), 50)) { const a = spanAgg.get(w.name) ?? { calls: 0, ms: 0 }; a.calls += w.calls; a.ms += w.ms; spanAgg.set(w.name, a) }
   }
   const slowest = [...evs].sort((a, b) => b.ms - a.ms).slice(0, 3).map(e => ({ at: e.at, ms: r1(e.ms), status: e.status, where: where(parse(e.spans)), meta: parse(e.meta) }))
   return {
-    n: evs.length, calls, errors, total_ms: r1(ms.reduce((a, b) => a + b, 0)),
-    p50: r1(pct(ms, 50)), p90: r1(pct(ms, 90)), p95: r1(pct(ms, 95)), p99: r1(pct(ms, 99)), max: r1(ms.at(-1) ?? 0), db_ms: r1(dbMs),
+    n, calls, errors, total_ms: r1(total),
+    p50: r1(wpct(pairs, 50)), p90: r1(wpct(pairs, 90)), p95: r1(wpct(pairs, 95)), p99: r1(wpct(pairs, 99)), max: r1(max), db_ms: r1(dbMs),
     top_spans: [...spanAgg].sort((a, b) => b[1].ms - a[1].ms).slice(0, 8).map(([name, a]) => ({ name, calls: a.calls, ms: r1(a.ms) })), slowest,
   }
 }
@@ -185,7 +209,7 @@ export function condense(now = Date.now(), maxHours = 6) {
     const first = get<{ at: number }>(`select min(at) at from trace_events where at < ? and kind != 'config'`, cutoff)
     if (first?.at == null) break
     const hour = Math.floor(first.at / HOUR) * HOUR
-    const evs = all<Ev>('select id, at, build_id, kind, name, ms, status, db_ms, spans, meta from trace_events where at >= ? and at < ?', hour, hour + HOUR)
+    const evs = all<Ev>('select id, at, build_id, kind, name, ms, status, db_ms, spans, meta, weight from trace_events where at >= ? and at < ?', hour, hour + HOUR)
     const groups = new Map<string, Ev[]>()
     for (const e of evs) { if (e.kind === 'config') continue; const k = `${e.build_id}\u0000${e.kind}\u0000${e.name}`; const l = groups.get(k) ?? []; l.push(e); groups.set(k, l) }
     tx(() => {
@@ -270,7 +294,7 @@ function groupStats(q: Q, by: 'name' | 'build' = 'name') {
   const { from, to } = range(q), f = filters(q)
   const key = (e: { kind: string; name: string; build_id: number | null }) => by === 'build' ? `${e.build_id}\u0000${e.kind}\u0000${e.name}` : `${e.kind}\u0000${e.name}`
   const raw = new Map<string, Ev[]>()
-  for (const e of all<Ev>(`select id, at, build_id, kind, name, ms, status, db_ms, spans, meta from trace_events where at between ? and ? and kind != 'config'${f.sql}`, from, to, ...f.p)) {
+  for (const e of all<Ev>(`select id, at, build_id, kind, name, ms, status, db_ms, spans, meta, weight from trace_events where at between ? and ? and kind != 'config'${f.sql}`, from, to, ...f.p)) {
     const k = key(e); const l = raw.get(k) ?? []; l.push(e); raw.set(k, l)
   }
   const out = new Map<string, any>()
@@ -343,17 +367,17 @@ export function query(q: Q) {
   }
   if (action === 'timeline') {
     const bucket = q.bucket === 'minute' ? MIN : q.bucket === 'day' ? 24 * HOUR : HOUR, f = filters(q)
-    const pts = new Map<number, number[]>(), rolled = new Map<number, any>()
-    for (const e of all<any>(`select at, ms from trace_events where at between ? and ? and kind != 'config'${f.sql}`, from, to, ...f.p)) { const b = Math.floor(e.at / bucket) * bucket; const l = pts.get(b) ?? []; l.push(e.ms); pts.set(b, l) }
+    const pts = new Map<number, [number, number][]>(), rolled = new Map<number, any>()
+    for (const e of all<any>(`select at, ms, weight from trace_events where at between ? and ? and kind != 'config'${f.sql}`, from, to, ...f.p)) { const b = Math.floor(e.at / bucket) * bucket; const l = pts.get(b) ?? []; l.push([e.ms, e.weight ?? 1]); pts.set(b, l) }
     for (const r of all<any>(`select hour, n, p50, p95, max, total_ms from trace_rollups where hour >= ? and hour < ?${f.sql}`, Math.floor(from / HOUR) * HOUR, to, ...f.p)) {
       const b = Math.floor(r.hour / bucket) * bucket, o = rolled.get(b) ?? { n: 0, p50w: 0, p95: 0, max: 0, total: 0 }
       o.n += r.n; o.p50w += r.p50 * r.n; o.p95 = Math.max(o.p95, r.p95); o.max = Math.max(o.max, r.max); o.total += r.total_ms; rolled.set(b, o)
     }
     const keys = [...new Set([...pts.keys(), ...rolled.keys()])].sort((a, b) => a - b)
     const series = keys.map(b => {
-      const ms = (pts.get(b) ?? []).sort((x, y) => x - y), o = rolled.get(b)
-      const n = ms.length + (o?.n ?? 0)
-      return { at: new Date(b).toISOString(), n, p50: r1(ms.length ? pct(ms, 50) : o.p50w / Math.max(1, o.n)), p95: r1(Math.max(pct(ms, 95), o?.p95 ?? 0)), max: r1(Math.max(ms.at(-1) ?? 0, o?.max ?? 0)), totalMs: r1(ms.reduce((a, x) => a + x, 0) + (o?.total ?? 0)) }
+      const ms = (pts.get(b) ?? []).sort((x, y) => x[0] - y[0]), o = rolled.get(b)
+      const n = ms.reduce((a, x) => a + x[1], 0) + (o?.n ?? 0)
+      return { at: new Date(b).toISOString(), n, p50: r1(ms.length ? wpct(ms, 50) : o.p50w / Math.max(1, o.n)), p95: r1(Math.max(wpct(ms, 95), o?.p95 ?? 0)), max: r1(Math.max(ms.at(-1)?.[0] ?? 0, o?.max ?? 0)), totalMs: r1(ms.reduce((a, x) => a + x[0] * x[1], 0) + (o?.total ?? 0)) }
     })
     // Builds starting inside the window, to line the series up against code changes.
     const marks = all<any>('select id, started_at, sha, subject from trace_builds where started_at between ? and ? order by started_at', from, to).map(b => ({ build: b.id, at: new Date(b.started_at).toISOString(), sha: b.sha?.slice(0, 9), subject: b.subject }))

@@ -79,3 +79,14 @@ test('client events are bounded and validated', () => {
   const m = JSON.parse((db.prepare(`select meta from trace_events where name = 'ok'`).get() as any).meta)
   assert.equal(m.truncated, true)
 })
+
+test('fast requests fold into one weighted row per route and minute; slow ones stay whole', () => {
+  recordBuild(NOW - HOUR)
+  for (let i = 0; i < 500; i++) req(NOW - HOUR + 1000, 'GET /api/health', 2)
+  req(NOW - HOUR + 2000, 'GET /api/health', 900, [{ name: 'db.all x', ms: 850 }])
+  flush(NOW)
+  const rows = db.prepare(`select ms, weight from trace_events where name = 'GET /api/health' order by ms`).all() as any[]
+  assert.deepEqual(rows.map(r => [r.ms, r.weight]), [[2, 500], [900, 1]])
+  const g = (query({ now: NOW, hours: 2, kind: 'request' }) as any).requests[0]
+  assert.equal(g.n, 501); assert.equal(g.p50, 2); assert.equal(g.max, 900); assert.equal(g.total_ms, 1900)
+})
