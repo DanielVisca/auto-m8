@@ -163,6 +163,7 @@ export async function lowerChromePriority() {
 // its page instead; anything that uses it again (an agent call, a live view, Open in Chrome, a page
 // script) wakes it first. Never one mid-call, watched, taken over, shown in Chrome, or waiting on you.
 export const FREEZE_MS = 5 * 60_000
+const frozenTargets = new Set<string>() // untracked windows frozen by target id
 const callsInFlight = new Map<string, number>()
 export const callStarted = (owner: string) => callsInFlight.set(owner, (callsInFlight.get(owner) ?? 0) + 1)
 export const callEnded = (owner: string) => { const n = (callsInFlight.get(owner) ?? 1) - 1; if (n > 0) callsInFlight.set(owner, n); else callsInFlight.delete(owner) }
@@ -187,6 +188,19 @@ export async function freezeIdleWindows(now = Date.now()) {
       await c.send('Page.setWebLifecycleState', { state: 'frozen' }, s.sid, 5000)
       s.frozen = true; done.push(s.owner)
       feed(s.owner, { kind: 'note', text: `Paused the page: unused for ${Math.round(FREEZE_MS / 60_000)} min (wakes when used)` })
+    } catch {}
+  }
+  // Windows no chat has picked up since a restart (closed by closeIdleWindows after an hour): freeze
+  // them too, through a short-lived attach, or a dashboard left open keeps a core busy all that time.
+  const waiting = new Set([...approvals.values()].filter(a => a.state === 'pending').map(a => a.owner))
+  for (const r of all<{ owner: string; target_id: string; updated_at: number | null; paused: number | null }>('select owner, target_id, updated_at, paused from browser_sessions')) {
+    if (sessions.has(r.owner) || r.paused || waiting.has(r.owner) || ownerBusy(r.owner) || frozenTargets.has(r.target_id) || now - (r.updated_at ?? 0) <= FREEZE_MS) continue
+    try {
+      const c = await ensureBrowser()
+      const { sessionId } = await c.send('Target.attachToTarget', { targetId: r.target_id, flatten: true })
+      await c.send('Page.setWebLifecycleState', { state: 'frozen' }, sessionId, 5000)
+      await c.send('Target.detachFromTarget', { sessionId }).catch(() => {})
+      frozenTargets.add(r.target_id); done.push(r.owner)
     } catch {}
   }
   if (done.length) { console.log(`[browser] froze ${done.length} idle window(s): ${done.map(o => o.slice(0, 8)).join(', ')}`); changed() }
@@ -435,6 +449,8 @@ async function attach(c: CDP, owner: string, targetId: string, runDir?: string):
     inflight: new Map(), navigating: false, lastNetAt: 0, net: [], log: [], runDir: runDir ?? newRunDir(owner), paused: false, frames: new Set(), casting: false, crashed: false, shown: false }
   s.paused = !!get<{ paused: number }>('select paused from browser_sessions where owner = ?', owner)?.paused
   sessions.set(owner, s)
+  // It may have been frozen while untracked (freezeIdleWindows): wake it before anything else.
+  c.send('Page.setWebLifecycleState', { state: 'active' }, sid, 5000).catch(() => {}); frozenTargets.delete(targetId)
   // No Runtime.enable: it's a common bot-detection signal, and an isolated world per document is all we need.
   await Promise.all([
     c.send('Page.enable', {}, sid),
