@@ -26,6 +26,8 @@ type Item = { key: string; type: string; count: number; tag: string; text?: stri
 type Click = { key: string; at: number }
 type State = { owner: string; on: boolean; timer?: NodeJS.Timeout; path: string; project?: number; cohort: I.Cohort; loadKey?: string; lastFreshCheck?: number; items: Item[]; adhoc: Map<string, Item>; clicks: Click[]; busy: boolean; error?: string; mode: string }
 const states = new Map<string, State>()
+// While the overlay is on it polls the page, so the window must not be frozen as idle.
+B.keepAwakeChecks.add(owner => !!states.get(owner)?.on)
 
 // ---------- PostHog API with the Agent profile's session ----------
 export async function ph(path: string, init: { method?: string; body?: any } = {}) {

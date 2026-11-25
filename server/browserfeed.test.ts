@@ -45,3 +45,20 @@ test('a huge ratio over a tiny usual time reads as "much slower", not a silly mu
   const hist = [fetchSpan('1', 4), fetchSpan('2', 5), fetchSpan('3', 4)]
   assert.match(concernFor('o', fetchSpan('x', 9000), hist)!, /^9\.0s: much slower than usual here \(usually 4ms\)$/)
 })
+
+test('an idle window is freezable only when nothing needs it', async () => {
+  const B = await import('./browser.ts')
+  const now = Date.now()
+  const s: any = { owner: 'idle-test', frozen: false, crashed: false, paused: false, shown: false, frames: new Set(), lastUsed: now - B.FREEZE_MS - 1000 }
+  assert.equal(B.freezable(s, now), true)
+  assert.equal(B.freezable({ ...s, lastUsed: now - 1000 }, now), false, 'used recently')
+  assert.equal(B.freezable({ ...s, frames: new Set([() => {}]) }, now), false, 'someone is watching')
+  assert.equal(B.freezable({ ...s, paused: true }, now), false, 'taken over')
+  assert.equal(B.freezable({ ...s, shown: true }, now), false, 'open in Chrome')
+  B.callStarted('idle-test')
+  assert.equal(B.freezable(s, now), false, 'a call is running')
+  B.callEnded('idle-test')
+  assert.equal(B.freezable(s, now), true)
+  B.keepAwakeChecks.add(o => o === 'idle-test')
+  assert.equal(B.freezable(s, now), false, 'overlay keeps it awake')
+})

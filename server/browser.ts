@@ -46,6 +46,7 @@ export type Session = {
   resolution?: Resolution // the agent's screenshot resolution for this window (sticky per open); the live view is always high
   record?: boolean // visual recording (browserrec.ts) for this window, set when the agent asks for mode=visual
   shown: boolean // the owner opened it in Chrome: pages get a small "back to perch" pill
+  frozen?: boolean // idle: page paused (no JS, no rendering) until something uses it again (freezeIdleWindows)
   adopted?: boolean // re-adopted at perch start and not used since: doesn't count toward the window cap
 }
 export type Approval = { id: string; owner: string; host: string; what: string; url: string; key: string; at: number; state: 'pending' | 'approved' | 'denied' }
@@ -141,6 +142,57 @@ async function waitEndpoint(ms: number) {
   throw new Error('Agent Chrome did not start (no DevToolsActivePort after ' + ms / 1000 + 's).')
 }
 
+// ---------- staying out of the way ----------
+// The Agent Chrome runs at a lower CPU priority than auto-m8 and your agents (nice 10): when the Mac
+// is busy they get the CPU first; when it's idle Chrome still runs at full speed. Pages and helper
+// processes Chrome starts later inherit it from the main process; the minute sweep catches any other.
+export const CHROME_NICE = 10
+export async function lowerChromePriority() {
+  if (process.platform === 'win32' || process.env.PERCH_CHROME_NICE === '0') return 0
+  const { execFile } = await import('node:child_process')
+  const run = (cmd: string, args: string[]) => new Promise<string>(res => execFile(cmd, args, { timeout: 5000 }, (_e, out) => res(String(out ?? ''))))
+  const out = await run('ps', ['-axo', 'pid=,nice=,command='])
+  const pids = out.split('\n').map(l => /^\s*(\d+)\s+(-?\d+)\s+(.*)$/.exec(l)).filter((m): m is RegExpExecArray => !!m)
+    .filter(m => m[3].includes(`--user-data-dir=${PROFILE_DIR}`) && Number(m[2]) < CHROME_NICE).map(m => m[1])
+  if (pids.length) await run('renice', [String(CHROME_NICE), '-p', ...pids])
+  return pids.length
+}
+
+// A window nobody is using keeps running its page (timers, live dashboards, animations) because
+// background throttling is off so agents can work in hidden windows. After FREEZE_MS unused, freeze
+// its page instead; anything that uses it again (an agent call, a live view, Open in Chrome, a page
+// script) wakes it first. Never one mid-call, watched, taken over, shown in Chrome, or waiting on you.
+export const FREEZE_MS = 5 * 60_000
+const callsInFlight = new Map<string, number>()
+export const callStarted = (owner: string) => callsInFlight.set(owner, (callsInFlight.get(owner) ?? 0) + 1)
+export const callEnded = (owner: string) => { const n = (callsInFlight.get(owner) ?? 1) - 1; if (n > 0) callsInFlight.set(owner, n); else callsInFlight.delete(owner) }
+export const keepAwakeChecks = new Set<(owner: string) => boolean>() // e.g. the PostHog overlay polling the page
+export function freezable(s: Session, now = Date.now()) {
+  const waiting = [...approvals.values()].some(a => a.owner === s.owner && a.state === 'pending')
+  return !s.frozen && !s.crashed && !s.paused && !s.shown && !s.frames.size && !callsInFlight.get(s.owner) && !waiting
+    && ![...keepAwakeChecks].some(f => { try { return f(s.owner) } catch { return false } }) && now - s.lastUsed > FREEZE_MS
+}
+export async function wake(s: Session) {
+  if (!s.frozen) return
+  s.frozen = false
+  try { const c = await ensureBrowser(); await c.send('Page.setWebLifecycleState', { state: 'active' }, s.sid, 5000) } catch {}
+  feed(s.owner, { kind: 'note', text: 'Woke the page' })
+}
+export async function freezeIdleWindows(now = Date.now()) {
+  const done: string[] = []
+  for (const s of sessions.values()) {
+    if (!freezable(s, now)) continue
+    try {
+      const c = await ensureBrowser()
+      await c.send('Page.setWebLifecycleState', { state: 'frozen' }, s.sid, 5000)
+      s.frozen = true; done.push(s.owner)
+      feed(s.owner, { kind: 'note', text: `Paused the page: unused for ${Math.round(FREEZE_MS / 60_000)} min (wakes when used)` })
+    } catch {}
+  }
+  if (done.length) { console.log(`[browser] froze ${done.length} idle window(s): ${done.map(o => o.slice(0, 8)).join(', ')}`); changed() }
+  return done
+}
+
 export async function ensureBrowser(): Promise<CDP> {
   if (cdp && !cdp.closed) return cdp
   if (connecting) return connecting
@@ -156,6 +208,7 @@ export async function ensureBrowser(): Promise<CDP> {
       wire(c)
       await c.send('Target.setDiscoverTargets', { discover: true })
       cdp = c
+      lowerChromePriority().catch(() => {})
       hideAgentChrome(launched) // a freshly launched Chrome comes to the front by itself
       changed()
       if (readopt) { readopt = false; setTimeout(() => { resumeBrowser().catch(e => console.error('resumeBrowser after recovery', e.message)) }, 0) }
@@ -409,7 +462,7 @@ function dropSession(s: Session, why: string) {
 export async function session(owner: string, create = true): Promise<Session | null> {
   const c = await ensureBrowser()
   const have = sessions.get(owner)
-  if (have && !have.crashed) { have.lastUsed = Date.now(); have.adopted = false; return have }
+  if (have && !have.crashed) { have.lastUsed = Date.now(); have.adopted = false; await wake(have); return have }
   const { targetInfos } = await c.send('Target.getTargets')
   const row = get<{ target_id: string; run_dir: string }>('select target_id, run_dir from browser_sessions where owner = ?', owner)
   if (row && targetInfos.some((t: any) => t.targetId === row.target_id && t.type === 'page')) return attach(c, owner, row.target_id, row.run_dir && existsSync(row.run_dir) ? row.run_dir : undefined)
@@ -480,6 +533,7 @@ async function world(s: Session): Promise<number> {
 }
 
 export async function evalIn(s: Session, expression: string, opts: { page?: boolean; awaitPromise?: boolean; timeoutMs?: number } = {}): Promise<any> {
+  if (s.frozen) await wake(s) // a frozen page would never answer
   const c = await ensureBrowser()
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -868,6 +922,8 @@ export async function watchFrames(owner: string, f: (jpegB64: string, meta: any)
 export async function userInput(owner: string, ev: { type: 'click' | 'move' | 'down' | 'up' | 'wheel' | 'key' | 'text'; x?: number; y?: number; dx?: number; dy?: number; key?: string; text?: string }) {
   const s = sessions.get(owner)
   if (!s) throw new Error('no browser window')
+  await wake(s)
+  s.lastUsed = Date.now()
   const c = await ensureBrowser()
   const x = ev.x ?? 0, y = ev.y ?? 0
   if (ev.type === 'click') await mouseClick(s, x, y)

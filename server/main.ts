@@ -115,7 +115,7 @@ import { report as learnReport, startLearn } from './learn.ts'
 import { board as getBoard, boards as listBoards, openedBoard, chatBoard, copyTile, createBoard, deleteBoard, ensurePlanBoard, expireBoards, putTile, requireCanvas, showBoard, updateBoard, useBoard } from './boards.ts'
 import { onPresence, presenceAll, presenceError, refreshPresence } from './presence.ts'
 import { moveToSection, onPrSections, resortSections } from './prsections.ts'
-import { approvals, browserEvents, closeIdleWindows, onBrowserChange, pruneRecordings, resumeBrowser, setOwnerBusy } from './browser.ts'
+import { approvals, browserEvents, closeIdleWindows, freezeIdleWindows, lowerChromePriority, onBrowserChange, pruneRecordings, resumeBrowser, setOwnerBusy } from './browser.ts'
 import { browserRoutes, browserSocket } from './browserroutes.ts'
 import { researchRoutes } from './productresearchroutes.ts'
 import { canvases as exploreCanvases, codebases as exploreCodebases, competitor as exploreCompetitor, competitors as exploreCompetitors, saveThumb, thumbFile } from './explorehub.ts'
@@ -774,6 +774,8 @@ const chatBusy = (owner: string) => runningChats().some(c => c.id === owner && c
 setOwnerBusy(chatBusy)
 // Agent windows unused for an hour are closed (see browser.ts idleWindows): stale pages were burning ~2 cores.
 setInterval(() => { closeIdleWindows().catch(e => console.error('[browser] idle sweep', e?.message)) }, 5 * 60_000).unref()
+// Every minute: pause idle agent windows' pages, and keep the Agent Chrome below agents and chats in CPU priority.
+setInterval(() => { freezeIdleWindows().catch(e => console.error('[browser] freeze sweep', e?.message)); lowerChromePriority().catch(() => {}) }, 60_000).unref()
 const resume = (again: boolean) => resumeBrowser(chatBusy).then(n => { console.log(`agent browser: re-adopted ${n} window(s)`); if (!n && again) setTimeout(() => resume(false), 15_000).unref() }).catch(e => console.error('resumeBrowser', e.message))
 setTimeout(() => resume(true), 3000).unref()
 

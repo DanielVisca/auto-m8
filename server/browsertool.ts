@@ -58,6 +58,7 @@ export async function browserTool(owner: string, a: any): Promise<ToolResult> {
   const detail = callDetail(a)
   if (!detail.host) { const u = B.sessions.get(owner)?.url; if (u) detail.host = hostOf(u) }
   const span = B.feed(owner, { kind: 'tool', text: what, at: t0, running: true, detail })
+  B.callStarted(owner)
   const logFrom = B.sessions.get(owner)?.log.length ?? 0
   try {
     const r = await browserToolRun(owner, a)
@@ -90,7 +91,7 @@ export async function browserTool(owner: string, a: any): Promise<ToolResult> {
   } catch (e: any) {
     B.feed(owner, { ...span, running: false, level: 'bad', ms: Date.now() - t0, text: `${what}: ${String(e?.message ?? e).split('\n')[0]}`, detail: { ...detail, error: String(e?.message ?? e).slice(0, 500) } })
     throw e
-  }
+  } finally { B.callEnded(owner) }
 }
 function describeCall(a: any): string {
   const act = String(a.action ?? '')
