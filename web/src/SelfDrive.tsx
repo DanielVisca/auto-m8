@@ -3,12 +3,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ago, post, useLive } from './api'
 
-type Settings = { mode: 'full' | 'careful'; perHour: number; recheckMin: number; model: string | null; instructions: string }
-type State = { on: boolean; replies: number; status: string | null; note: string | null; settings: Settings; log: { at: number; action: string; message: string | null; reason: string | null }[] }
+type Settings = { mode: 'full' | 'careful'; perHour: number; recheckMin: number; model: string | null; instructions: string; budgetHour: number | null }
+type State = { on: boolean; replies: number; status: string | null; note: string | null; settings: Settings; spentHour: number; log: { at: number; action: string; message: string | null; reason: string | null }[] }
 
-const STATUS: Record<string, string> = { thinking: 'deciding…', needs_you: 'needs you', paused: 'paused', backoff: 'cooling off', resumed: 'picked up a stall', waiting: 'waiting', replied: 'driving', error: 'retrying', done: 'done' }
+const STATUS: Record<string, string> = { thinking: 'deciding…', needs_you: 'needs you', paused: 'paused', backoff: 'cooling off', resumed: 'picked up a stall', waiting: 'waiting', budget: 'over budget', replied: 'driving', error: 'retrying', done: 'done' }
 const statusText = (d: State) => d.on ? (d.status && STATUS[d.status]) || 'driving' : 'off'
-const ACTION: Record<string, string> = { reply: '↩ replied', resume: '⟳ resumed a stall', wait: '⏸ waiting', done: '✓ done', needs_you: '✋ handed back', error: '⚠ driver failed', backoff: '❄ cooled off', on: '🚗 on', off: 'off' }
+const ACTION: Record<string, string> = { reply: '↩ replied', resume: '⟳ resumed a stall', wait: '⏸ waiting', done: '✓ done', needs_you: '✋ handed back', error: '⚠ driver failed', backoff: '❄ cooled off', budget: '$ paused for budget', on: '🚗 on', off: 'off' }
 
 export function SelfDriveButton({ id }: { id: string }) {
   const url = `/api/chat/${encodeURIComponent(id)}/self-drive`
@@ -52,6 +52,10 @@ function DriveMenu({ at, url, data, onChange, onClose }: { at: { x: number; y: n
   const save = async (patch: Partial<Settings>) => { await post(url, { settings: patch }); onChange() }
   const pick = <K extends keyof Settings>(key: K, value: Settings[K], label: string) =>
     <button key={String(value)} className={`drive-opt${s[key] === value ? ' on' : ''}`} onClick={() => save({ [key]: value } as Partial<Settings>)}>{label}</button>
+  // After the presets: type any number. Shows the current value when it isn't one of the presets.
+  const custom = (key: 'perHour' | 'recheckMin' | 'budgetHour', presets: (number | null)[], placeholder: string) =>
+    <CustomNumber key={`${key}-${s[key]}`} value={presets.includes(s[key]) ? null : s[key]} placeholder={placeholder} decimals={key === 'budgetHour'}
+      onSave={v => save({ [key]: v } as Partial<Settings>)} />
   return (
     <div className="ctx drive-menu" ref={ref} style={pos} onContextMenu={e => e.preventDefault()}>
       <button onClick={async () => { await post(url, { on: !data.on }); onChange() }}>{data.on ? '■ Turn self drive off' : '🚗 Let an agent take control'}</button>
@@ -59,9 +63,12 @@ function DriveMenu({ at, url, data, onChange, onClose }: { at: { x: number; y: n
       <div className="drive-row">{pick('mode', 'full', 'Full')}{pick('mode', 'careful', 'Careful')}</div>
       <div className="drive-hint">{s.mode === 'full' ? 'Only irreversible or outward-facing things, and real loops, come back to you.' : 'Also checks with you on big, lasting choices (architecture, APIs, data models).'}</div>
       <div className="ctx-head">Messages per hour before it cools off</div>
-      <div className="drive-row">{[10, 20, 40].map(n => pick('perHour', n, String(n)))}</div>
+      <div className="drive-row">{[10, 20, 40].map(n => pick('perHour', n, String(n)))}{custom('perHour', [10, 20, 40], 'custom')}</div>
       <div className="ctx-head">When waiting on CI or a deploy, look again after</div>
-      <div className="drive-row">{[10, 20, 60].map(n => pick('recheckMin', n, `${n} min`))}</div>
+      <div className="drive-row">{[10, 20, 60].map(n => pick('recheckMin', n, `${n} min`))}{custom('recheckMin', [10, 20, 60], 'min')}</div>
+      <div className="ctx-head">Budget per hour</div>
+      <div className="drive-row">{pick('budgetHour', null, 'None')}{[1, 5, 20].map(n => pick('budgetHour', n, `$${n}`))}{custom('budgetHour', [null, 1, 5, 20], '$')}</div>
+      <div className="drive-hint">{s.budgetHour ? `$${data.spentHour.toFixed(2)} of $${s.budgetHour} used in the last hour. Over it, self drive pauses until the hour rolls over, then carries on.` : `$${data.spentHour.toFixed(2)} in the last hour (this chat and its driver, at API prices; on your plan it counts toward limits, not billed).`}</div>
       <div className="ctx-head">Driver model</div>
       <div className="drive-row">{pick('model', null, 'Default')}{pick('model', 'opus', 'Opus')}{pick('model', 'sonnet', 'Sonnet')}</div>
       <div className="ctx-head">Your instructions for the driver</div>
@@ -77,4 +84,14 @@ function DriveMenu({ at, url, data, onChange, onClose }: { at: { x: number; y: n
       </>}
     </div>
   )
+}
+
+function CustomNumber({ value, placeholder, decimals, onSave }: { value: number | null; placeholder: string; decimals?: boolean; onSave: (v: number | null) => void }) {
+  const [text, setText] = useState(value === null ? '' : String(value))
+  const commit = () => {
+    const n = Number(text)
+    if (text.trim() && n > 0 && n !== value) onSave(decimals ? n : Math.round(n))
+  }
+  return <input className={`drive-num${value !== null ? ' on' : ''}`} type="number" min={decimals ? 0.1 : 1} step={decimals ? 0.5 : 1} value={text} placeholder={placeholder}
+    onChange={e => setText(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') { commit(); (e.target as HTMLInputElement).blur() } }} />
 }

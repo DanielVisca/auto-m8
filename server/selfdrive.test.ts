@@ -170,8 +170,8 @@ test('verdict parsing and prompt', () => {
 
 test('per-chat settings reach the driver and are clamped', async () => {
   fresh('c11')
-  const st = setDriveSettings('c11', { mode: 'careful', perHour: 0, recheckMin: 99999, model: 'opus', instructions: 'Merge when green.' })
-  assert.deepEqual(st.settings, { mode: 'careful', perHour: 1, recheckMin: 1440, model: 'opus', instructions: 'Merge when green.' })
+  const st = setDriveSettings('c11', { mode: 'careful', perHour: 0, recheckMin: 99999, model: 'opus', instructions: 'Merge when green.', budgetHour: null })
+  assert.deepEqual(st.settings, { mode: 'careful', perHour: 1, recheckMin: 1440, model: 'opus', instructions: 'Merge when green.', budgetHour: null })
   let seen: { p: string; m?: string | null } | null = null
   deps.judge = async (p, m) => { seen = { p, m }; return { action: 'reply', message: 'go' } }
   await drive('c11')
@@ -182,4 +182,21 @@ test('per-chat settings reach the driver and are clamped', async () => {
   await drive('c11') // perHour 1: the second message in the hour cools off
   deps.judge = async () => verdict
   assert.equal(driveState('c11').status, 'backoff')
+})
+
+test('an hourly budget pauses (never hands back) and counts the driver too', async () => {
+  fresh('c12')
+  setDriveSettings('c12', { budgetHour: 2 })
+  deps.judge = async () => ({ action: 'reply', message: 'next step', cost: 1.5 })
+  await drive('c12')
+  assert.equal(sent.length, 1)
+  assert.equal(driveState('c12').spentHour, 1.5)
+  run(`insert into self_drive_log (conversation_id, at, action, cost) values ('c12', ?, 'reply', 1)`, clock)
+  clock += 1000
+  await drive('c12')
+  deps.judge = async () => verdict
+  assert.equal(sent.length, 1, 'over budget: nothing sent')
+  assert.equal(driveState('c12').status, 'budget')
+  assert.equal(driveState('c12').on, true)
+  assert.equal(setDriveSettings('c12', { budgetHour: null }).settings.budgetHour, null)
 })

@@ -1583,3 +1583,7 @@ button.icon.drive-btn.warn { box-shadow: inset 0 0 0 1px color-mix(in srgb, #e5a
 .drive-log { display: flex; flex-direction: column; gap: 3px; padding: 0 8px 6px; font-size: 11.5px; }
 .drive-log > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-drive { font-size: 12px; line-height: 1; }
+/* Zen hides header icons until hover; a chat that is driving itself always shows it. */
+.zen .view-head .drive-btn.on { opacity: 1; }
+.drive-num { width: 64px; font: inherit; font-size: 12px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: none; color: var(--fg); }
+.drive-num.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 14%, transparent); }

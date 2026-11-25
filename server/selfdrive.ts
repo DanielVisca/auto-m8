@@ -18,7 +18,8 @@ run(`create table if not exists self_drive (
   status text, note text, updated_at integer)`)
 run(`create table if not exists self_drive_log (
   id integer primary key autoincrement, conversation_id text not null, at integer not null, action text not null, message text, reason text)`)
-for (const col of ['backoff_until integer', 'mode text', 'per_hour integer', 'recheck_min integer', 'model text', 'instructions text']) { try { run(`alter table self_drive add column ${col}`) } catch {} }
+for (const col of ['backoff_until integer', 'mode text', 'per_hour integer', 'recheck_min integer', 'model text', 'instructions text', 'budget_hour real']) { try { run(`alter table self_drive add column ${col}`) } catch {} }
+try { run('alter table self_drive_log add column cost real') } catch {} // the driver's own spend per decision
 run('create index if not exists self_drive_log_conv on self_drive_log(conversation_id, at)')
 
 // Self drive is meant to run unwatched, so it keeps going and only stops for a real loop:
@@ -35,26 +36,30 @@ export const QUIET_MS = 2 * 60_000 // a turn end the follower missed (restart, t
 export const WAIT_RECHECK_MS = 20 * 60_000 // "waiting on CI/deploy": look again after this much quiet
 export const RETRY_MS = 5 * 60_000 // the driver's own answer failed (unreadable, capped): try again
 const SETTLE_MS = 4000 // let the turn's last events land (and a queued user message start) first
-const DECISIONS = ['reply', 'resume', 'wait', 'done', 'needs_you', 'error', 'backoff']
+const DECISIONS = ['reply', 'resume', 'wait', 'done', 'needs_you', 'error', 'backoff', 'budget']
+export const BUDGET_PAUSE_MS = 15 * 60_000 // over the hourly budget: look again after this
 
 // Per-chat settings (right-click the 🚗). Unset means the defaults above.
 // mode: 'full' hands back only what only the user can do; 'careful' also hands back big, lasting choices.
-export type DriveSettings = { mode: 'full' | 'careful'; perHour: number; recheckMin: number; model: string | null; instructions: string }
-export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null; settings: DriveSettings }
+// budgetHour: API-equivalent $ per trailing hour across the chat's own turns and the driver's calls
+// (on a subscription it isn't billed, but it counts toward usage limits). null = no budget.
+export type DriveSettings = { mode: 'full' | 'careful'; perHour: number; recheckMin: number; model: string | null; instructions: string; budgetHour: number | null }
+export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null; settings: DriveSettings; spentHour: number }
 type Row = { id: string; enabled: number; replies: number; last_reply: string | null; last_reply_at: number | null; status: string | null; note: string | null; backoff_until: number | null
-  mode: string | null; per_hour: number | null; recheck_min: number | null; model: string | null; instructions: string | null }
+  mode: string | null; per_hour: number | null; recheck_min: number | null; model: string | null; instructions: string | null; budget_hour: number | null }
 const settingsOf = (r?: Row | null): DriveSettings => ({
   mode: r?.mode === 'careful' ? 'careful' : 'full', perHour: r?.per_hour || PER_HOUR, recheckMin: r?.recheck_min || WAIT_RECHECK_MS / 60_000,
-  model: r?.model || null, instructions: r?.instructions ?? '' })
+  model: r?.model || null, instructions: r?.instructions ?? '', budgetHour: r?.budget_hour || null })
 
 export function setDriveSettings(id: string, s: Partial<DriveSettings>) {
   run('insert into self_drive (id, updated_at) values (?, ?) on conflict(id) do nothing', id, deps.now())
   const clamp = (v: unknown, lo: number, hi: number) => v === undefined ? undefined : Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))
   const set: [string, unknown][] = [
     ['mode', s.mode === undefined ? undefined : s.mode === 'careful' ? 'careful' : 'full'],
-    ['per_hour', clamp(s.perHour, 1, 200)], ['recheck_min', clamp(s.recheckMin, 1, 24 * 60)],
+    ['per_hour', clamp(s.perHour, 1, 500)], ['recheck_min', clamp(s.recheckMin, 1, 24 * 60)],
     ['model', s.model === undefined ? undefined : (String(s.model ?? '').trim().slice(0, 80) || null)],
     ['instructions', s.instructions === undefined ? undefined : String(s.instructions).slice(0, 4000)],
+    ['budget_hour', s.budgetHour === undefined ? undefined : s.budgetHour === null || !(Number(s.budgetHour) > 0) ? 0 : Math.min(1000, Math.round(Number(s.budgetHour) * 100) / 100)],
   ]
   for (const [col, v] of set) if (v !== undefined) run(`update self_drive set ${col} = ? where id = ?`, v, id)
   changed(id)
@@ -65,13 +70,19 @@ const row = (id: string) => get<Row>('select * from self_drive where id = ?', id
 export const isSelfDriving = (id: string) => !!row(id)?.enabled
 export function driveState(id: string): DriveState {
   const r = row(id)
-  return { on: !!r?.enabled, replies: r?.replies ?? 0, status: r?.status ?? null, note: r?.note ?? null, lastReplyAt: r?.last_reply_at ?? null, settings: settingsOf(r) }
+  return { on: !!r?.enabled, replies: r?.replies ?? 0, status: r?.status ?? null, note: r?.note ?? null, lastReplyAt: r?.last_reply_at ?? null, settings: settingsOf(r), spentHour: spentSince(id, deps.now() - 3600_000) }
 }
 export const driveLog = (id: string, limit = 30) =>
   all<{ at: number; action: string; message: string | null; reason: string | null }>('select at, action, message, reason from self_drive_log where conversation_id = ? order by at desc limit ?', id, limit)
 
-const log = (id: string, action: string, message?: string | null, reason?: string | null) =>
-  run('insert into self_drive_log (conversation_id, at, action, message, reason) values (?, ?, ?, ?, ?)', id, deps.now(), action, message ?? null, reason ?? null)
+const log = (id: string, action: string, message?: string | null, reason?: string | null, cost?: number | null) =>
+  run('insert into self_drive_log (conversation_id, at, action, message, reason, cost) values (?, ?, ?, ?, ?, ?)', id, deps.now(), action, message ?? null, reason ?? null, cost ?? null)
+// API-equivalent $ since a time: the chat's own turns (turns.ts may not be loaded) plus the driver's calls.
+export function spentSince(id: string, since: number) {
+  let chat = 0
+  try { chat = get<{ c: number }>('select coalesce(sum(cost), 0) c from turns where conversation_id = ? and sent_at > ?', id, since)?.c ?? 0 } catch {}
+  return chat + (get<{ c: number }>('select coalesce(sum(cost), 0) c from self_drive_log where conversation_id = ? and at > ?', id, since)?.c ?? 0)
+}
 const setStatus = (id: string, status: string | null, note: string | null = null) =>
   run('update self_drive set status = ?, note = ?, updated_at = ? where id = ?', status, note, deps.now(), id)
 const lastDecision = (id: string) => get<{ at: number; action: string; message: string | null }>(
@@ -91,7 +102,7 @@ const toggled = (id: string) => onSelfDriveToggle.forEach(f => f(id))
 
 // Deps are swappable so tests can drive it without spawning Claude or a chat.
 export const deps = {
-  judge: (prompt: string, model?: string | null) => judge(prompt, model),
+  judge: (prompt: string, model?: string | null): Promise<(Verdict & { cost?: number }) | null> => judge(prompt, model),
   send: (id: string, prompt: string) => { send({ id, prompt, by: 'self-drive', resume: true }) },
   notice: (id: string, text: string) => { try { noticeLive(id, text) } catch {} },
   transcript: (id: string): Item[] => { const p = get<{ path: string }>('select path from conversations where id = ?', id)?.path; return p ? itemsOf(p) : [] },
@@ -150,7 +161,7 @@ export function sweep(now = deps.now()): string[] {
     const due =
       (moved && now - updated >= QUIET_MS) ||
       (!moved && last?.action === 'wait' && since >= recheck) ||
-      (!moved && (last?.action === 'error' || last?.action === 'backoff') && since >= RETRY_MS) ||
+      (!moved && (last?.action === 'error' || last?.action === 'backoff' || last?.action === 'budget') && since >= RETRY_MS) ||
       (!moved && (last?.action === 'reply' || last?.action === 'resume') && since >= recheck) // sent, and nothing happened
     if (!due || (last?.action === 'needs_you' && !moved)) continue
     picked.push(r.id)
@@ -202,6 +213,18 @@ export async function drive(id: string, stalled: string | null = null, finished 
     changed(id)
     return null
   }
+  const budget = settingsOf(r).budgetHour
+  if (budget) {
+    const spent = spentSince(id, now - 3600_000)
+    if (spent >= budget) {
+      // A budget pause isn't a loop: it never hands the chat back, it waits for the hour to roll over.
+      run('update self_drive set backoff_until = ? where id = ?', now + BUDGET_PAUSE_MS, id)
+      setStatus(id, 'budget', `$${spent.toFixed(2)} spent in the last hour (budget $${budget}): pausing, then carrying on`)
+      log(id, 'budget', null, `$${spent.toFixed(2)} of $${budget} in the last hour`)
+      changed(id)
+      return null
+    }
+  }
   const items = deps.transcript(id)
   // Stalled: nothing to judge, the agent just has to carry on. No model call needed.
   const stall = stalled ?? (finished ? null : stallIn(items))
@@ -209,12 +232,14 @@ export async function drive(id: string, stalled: string | null = null, finished 
   if (!items.some(i => i.kind === 'assistant')) return null
   inflight.add(id)
   setStatus(id, 'thinking'); changed(id)
+  let driverCost: number | null = null
   try {
     const v = await deps.judge(prompt(id, items, r.last_reply, settingsOf(r)), settingsOf(r).model)
     if (!row(id)?.enabled) return null // switched off while it was thinking
     if (!v) { setStatus(id, 'error', `The driver's answer was unreadable; trying again in ${RETRY_MS / 60_000} min.`); log(id, 'error'); return null }
+    driverCost = v.cost ?? null
     if (deps.running(id)) { setStatus(id, null); return null } // the user (or something else) already picked it up
-    return act(id, v)
+    return act(id, v, driverCost)
   } finally { inflight.delete(id); changed(id) }
 }
 
@@ -231,29 +256,29 @@ function resume(id: string, stall: string): Verdict | null {
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
-function act(id: string, v: Verdict): Verdict {
+function act(id: string, v: Verdict, cost: number | null = null): Verdict {
   const message = (v.message ?? '').trim(), reason = (v.reason ?? '').trim()
-  if (v.action === 'wait') { setStatus(id, 'waiting', reason || null); log(id, 'wait', null, reason); return v }
+  if (v.action === 'wait') { setStatus(id, 'waiting', reason || null); log(id, 'wait', null, reason, cost); return v }
   if (v.action === 'done') {
     run('update self_drive set enabled = 0, status = ?, note = ?, updated_at = ? where id = ?', 'done', reason || 'Finished.', deps.now(), id)
-    log(id, 'done', null, reason)
+    log(id, 'done', null, reason, cost)
     toggled(id)
     deps.notice(id, `🚗 Self drive finished and turned itself off: ${reason || 'the work is done.'}`)
     return v
   }
-  if (v.action === 'needs_you' || !message) return handBack(id, reason || 'The driver needs you here.', message)
+  if (v.action === 'needs_you' || !message) return handBack(id, reason || 'The driver needs you here.', message, cost)
   // The same reply over and over means the chat is going round in circles.
   const same = streak(id, d => d.action === 'reply' && !!d.message && norm(d.message) === norm(message))
   if (same >= MAX_SAME - 1) return handBack(id, `Self drive was about to send the same reply ${MAX_SAME} times in a row; the chat is going in circles.`, message)
   run('update self_drive set replies = replies + 1, last_reply = ?, last_reply_at = ?, status = ?, note = ?, updated_at = ? where id = ?', message, deps.now(), 'replied', reason || null, deps.now(), id)
-  log(id, 'reply', message, reason)
+  log(id, 'reply', message, reason, cost)
   deps.send(id, message)
   return v
 }
 
-function handBack(id: string, reason: string, message: string): Verdict {
+function handBack(id: string, reason: string, message: string, cost: number | null = null): Verdict {
   setStatus(id, 'needs_you', reason)
-  log(id, 'needs_you', message || null, reason)
+  log(id, 'needs_you', message || null, reason, cost)
   try {
     reportNeed({ key: `selfdrive:${id}`, source: 'self drive', conversation_id: id, title: reason.slice(0, 240),
       context: `Self drive stopped in this chat and handed it back.${message ? `\nWhat it would have said: ${message}` : ''}` })
@@ -299,13 +324,13 @@ The conversation so far (most recent last):
 ${transcriptFor(items)}`
 }
 
-function judge(p: string, model?: string | null): Promise<Verdict | null> {
+function judge(p: string, model?: string | null): Promise<(Verdict & { cost?: number }) | null> {
   return new Promise(resolve => {
-    let out = ''
+    let out = '', cost: number | undefined
     ephemeral(['-p', p, '--output-format', 'stream-json', '--verbose', '--model', model || settings.ai.model, '--no-session-persistence',
       '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk'], settings.chat.cwd, ev => {
-      if (ev.type === 'result') out = String(ev.result ?? '')
-      if (ev.type === 'perch_done') resolve(parseVerdict(out))
+      if (ev.type === 'result') { out = String(ev.result ?? ''); cost = Number(ev.total_cost_usd) || undefined }
+      if (ev.type === 'perch_done') { const v = parseVerdict(out); resolve(v ? { ...v, cost } : null) }
     })
   })
 }
