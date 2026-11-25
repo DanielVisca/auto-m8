@@ -123,3 +123,7 @@
 /* The PiP's hover bar covers the picture only, not the activity beside it. */
 .browserview.mini.feed-right .pip-head { right: 300px; }
 .browserview.mini.feed-left .pip-head { left: 300px; }
+/* Between bursts of activity: how long it was quiet. Each burst below has its own timeline. */
+.feed-gap { display: flex; align-items: center; gap: 8px; margin: 5px 0 3px 22px; color: var(--muted); font-size: 10.5px; }
+.feed-gap::before, .feed-gap::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.feed-gap::before { flex: 0 0 10px; }

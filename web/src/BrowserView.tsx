@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, post, useLive } from './api'
 import { Popover } from './Popover'
 import './browser.css'
@@ -255,6 +255,7 @@ const FEED_ICON: Record<FeedItem['kind'], string> = { tool: '◆', step: '·', n
 const FEED_KIND: Record<FeedItem['kind'], string> = { tool: 'Agent action', step: 'Step', nav: 'Page changed', net: 'Page request', note: 'Event' }
 const fmtMs = (ms?: number) => ms == null ? '' : ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s` : `${Math.floor(ms / 60_000)}m${String(Math.round(ms / 1000) % 60).padStart(2, '0')}s`
 const ago = (at: number, now: number) => { const s = Math.max(0, Math.round((now - at) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h` }
+const BURST_GAP = 20_000 // a quiet gap longer than this starts a new burst with its own timeline
 const WINDOW_MAX = 5 * 60_000 // the timeline covers at most the last 5 minutes; older bars are clipped at its left edge
 const MONO = new Set(['url', 'script', 'result', 'error', 'request id', 'page after', 'from'])
 
@@ -315,8 +316,19 @@ function BrowserFeed({ items, boxRef, onHeight, store = 'perch.browserFeed', sid
     const ro = new ResizeObserver(() => onHeight(el.offsetHeight)); ro.observe(el); onHeight(el.offsetHeight)
     return () => { ro.disconnect(); onHeight(0) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const t1 = Math.max(now, ...items.map(i => i.at + (i.ms ?? 0)))
-  const t0 = Math.max(t1 - WINDOW_MAX, Math.min(t1 - 10_000, ...items.map(i => i.at)))
+  // Bursts: entries closer than BURST_GAP belong together and share one timeline, from the burst's
+  // first start to its last end (or now, while something runs). A quiet gap starts a new burst, so the
+  // bars inside each one read as a waterfall instead of being squeezed against an ever-later "now".
+  const bursts: { t0: number; t1: number; items: FeedItem[]; gap: number }[] = []
+  for (const it of items) {
+    const end = it.running ? now : it.at + (it.ms ?? 0)
+    const b = bursts[bursts.length - 1]
+    if (b && it.at - b.t1 <= BURST_GAP) { b.items.push(it); b.t1 = Math.max(b.t1, end); b.t0 = Math.min(b.t0, it.at) }
+    else bursts.push({ t0: it.at, t1: end, items: [it], gap: b ? it.at - b.t1 : 0 })
+  }
+  for (const b of bursts) { b.t1 = Math.max(b.t1, b.t0 + 1000); if (b.t1 - b.t0 > WINDOW_MAX) b.t0 = b.t1 - WINDOW_MAX }
+  const last = bursts[bursts.length - 1]
+  const t0 = last?.t0 ?? now, t1 = last?.t1 ?? now
   const concerns = items.reduce((n, i) => n + (i.concern ? 1 : 0) + (i.children?.filter(c => c.concern).length ?? 0), 0)
   // Collapse to its header (click it); drag the line above it to any height. Both remembered.
   const CKEY = `${store}.collapsed`, HKEY = `${store}.height`
@@ -355,12 +367,15 @@ function BrowserFeed({ items, boxRef, onHeight, store = 'perch.browserFeed', sid
         {onSide && <span className="feed-side" onClick={e => e.stopPropagation()}>
           {(['left', 'below', 'right'] as FeedSide[]).map(p => <button key={p} className={`icon ${side === p ? 'on' : ''}`} title={`Activity ${p === 'below' ? 'below' : `on the ${p}`}`} onClick={() => onSide(p)}>{p === 'left' ? '◧' : p === 'below' ? '⬓' : '◨'}</button>)}
         </span>}
-        {!collapsed && side !== 'left' && side !== 'right' && <><span className="axis"><span>{fmtMs(t1 - t0)} ago</span><span>now</span></span>
+        {!collapsed && side !== 'left' && side !== 'right' && <><span className="axis" title="The timeline of the latest burst of work"><span>0</span><span>{fmtMs(t1 - t0)}</span></span>
         <span className="dur-h" /><span className="ago-h" /></>}
       </div>
       {!collapsed && <div ref={list} className="browser-feed-list" onScroll={e => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24 }}>
         {!items.length && <div className="muted small browser-feed-empty">No activity yet</div>}
-        {items.map(it => <FeedRow key={it.id} it={it} t0={t0} t1={t1} now={now} />)}
+        {bursts.map((b, i) => <Fragment key={b.items[0].id}>
+          {i > 0 && <div className="feed-gap"><span>{fmtMs(b.gap)} later</span></div>}
+          {b.items.map(it => <FeedRow key={it.id} it={it} t0={b.t0} t1={b.t1} now={now} />)}
+        </Fragment>)}
       </div>}
     </div>
   )
