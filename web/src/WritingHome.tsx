@@ -36,6 +36,11 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
   const [q, setQ] = useState('')
   const [showAll, setShowAll] = useState(false)
   const [allIdeas, setAllIdeas] = useState(false)
+  // A stat tile picked: show only that section, all of it. Click it again for everything.
+  type Only = null | 'docs' | 'drafts' | 'ideas' | 'published' | 'review'
+  const [only, setOnly] = useState<Only>(null)
+  const show = (k: Exclude<Only, null>) => !only || only === k
+  const pick = (k: Exclude<Only, null>) => setOnly(o => o === k ? null : k)
   const open = async (body: { path?: string; title?: string }) => {
     const d = await post<{ id?: string; error?: string }>('/api/docs', body)
     if (d?.id) onOpenDoc(d.id); else toast(d?.error ?? 'Could not open that file')
@@ -62,25 +67,27 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
       </div>
 
       <div className="wh-stats">
-        <Stat n={docs.length} label="docs" />
-        <Stat n={shelf?.posts.length ?? 0} label="drafted posts" sub={`${shelf?.posts.filter(p => ready(p.status)).length ?? 0} ready to edit`} />
-        <Stat n={shelf?.ideas.length ?? 0} label="ideas captured" />
-        <Stat n={pub?.pages?.length ?? 0} label="published pages" sub={pub?.pages ? `${fmt(pub.pages.reduce((n, p) => n + p.views30, 0))} views in 30 days` : undefined} />
-        <Stat n={reviewing.reduce((n, d) => n + (d.open_comments ?? 0), 0)} label="open review comments" sub={`on ${reviewing.length} docs`} />
+        <Stat n={docs.length} label="docs" on={only === 'docs'} onClick={() => pick('docs')} />
+        <Stat n={shelf?.posts.length ?? 0} label="drafted posts" sub={`${shelf?.posts.filter(p => ready(p.status)).length ?? 0} ready to edit`} on={only === 'drafts'} onClick={() => pick('drafts')} />
+        <Stat n={shelf?.ideas.length ?? 0} label="ideas captured" on={only === 'ideas'} onClick={() => pick('ideas')} />
+        <Stat n={pub?.pages?.length ?? 0} label="published pages" sub={pub?.pages ? `${fmt(pub.pages.reduce((n, p) => n + p.views30, 0))} views in 30 days` : undefined} on={only === 'published'} onClick={() => pick('published')} />
+        <Stat n={reviewing.reduce((n, d) => n + (d.open_comments ?? 0), 0)} label="open review comments" sub={`on ${reviewing.length} docs`} on={only === 'review'} onClick={() => pick('review')} />
       </div>
+      {only && <div className="small wh-only">Showing only {({ docs: 'your docs', drafts: 'drafted posts', ideas: 'ideas', published: 'published pages', review: 'docs waiting on review' } as const)[only]} · <button className="link small" onClick={() => setOnly(null)}>Show everything</button></div>}
 
-      <Published pub={pub} />
+      {show('published') && <Published pub={pub} expanded={only === 'published'} />}
 
-      {reviewing.length > 0 && <section className="wh-sec">
+      {only === 'review' && !reviewing.length && <section className="wh-sec"><h3>Waiting on you</h3><div className="muted small">No open review comments. Ask for review on a doc or draft and its comments land here.</div></section>}
+      {show('review') && reviewing.length > 0 && <section className="wh-sec">
         <h3>Waiting on you <span className="muted small">comments from reviewers and agents</span></h3>
         {reviewing.map(d => <DocRow key={d.id} d={d} onOpen={() => onOpenDoc(d.id)} />)}
       </section>}
 
-      <section className="wh-sec">
+      {show('docs') && <section className="wh-sec">
         <h3>Your docs <span className="muted small">new ones go in {tilde(data.dir)}; any markdown file opens too</span></h3>
         <Finder onPick={p => open({ path: p })} roots={[data.dir, ...(shelf ? [shelf.dir] : [])]} />
         <div className="wh-grid">
-          {mine.slice(0, showAll ? 50 : 6).map(d => (
+          {mine.slice(0, showAll || only === 'docs' ? 50 : 6).map(d => (
             <div key={d.id} className="wh-card">
               <button className="wh-card-main" onClick={() => onOpenDoc(d.id)} title={d.path}>
                 <b>{d.title || 'Untitled'}</b>
@@ -92,11 +99,11 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
             </div>))}
           {!mine.length && <div className="muted small">{q ? 'Nothing matches.' : 'No docs yet.'}</div>}
         </div>
-        {mine.length > 6 && <button className="link small" onClick={() => setShowAll(s => !s)}>{showAll ? 'Show fewer' : `Show all ${mine.length}`}</button>}
-      </section>
+        {mine.length > 6 && only !== 'docs' && <button className="link small" onClick={() => setShowAll(s => !s)}>{showAll ? 'Show fewer' : `Show all ${mine.length}`}</button>}
+      </section>}
 
       {shelf ? <>
-        <section className="wh-sec">
+        {show('drafts') && <section className="wh-sec">
           <h3>Drafted posts <span className="muted small">the blog shelf agents keep{shelf.last_run ? ` · last pass ${ago(shelf.last_run.at)}` : ''}</span>
             {shelf.readme && <button className="link small" onClick={() => open({ path: shelf.readme! })}>shelf notes</button>}</h3>
           <div className="wh-grid">{posts.map(p => (
@@ -114,22 +121,21 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
             </div>))}
             {!posts.length && <div className="muted small">{q ? 'Nothing matches.' : 'No drafts yet.'}</div>}
           </div>
-        </section>
-        <section className="wh-sec">
+        </section>}
+        {show('ideas') && <section className="wh-sec">
           <h3>Ideas <span className="muted small">{shelf.ideas.length} captured while agents worked; the strongest become drafts</span>
-            {ideas.length > 2 && <button className="link small" onClick={() => setAllIdeas(a => !a)}>{allIdeas ? 'Show top 2' : `Show all ${ideas.length}`}</button>}</h3>
-          {ideas.slice(0, allIdeas ? 60 : 2).map(i => (
+            {ideas.length > 2 && only !== 'ideas' && <button className="link small" onClick={() => setAllIdeas(a => !a)}>{allIdeas ? 'Show top 2' : `Show all ${ideas.length}`}</button>}</h3>
+          {ideas.slice(0, allIdeas || only === 'ideas' ? 200 : 2).map(i => (
             <div key={i.file} className="writing-row wh-idea">
               <button className="link grow ellipsis" onClick={() => open({ path: i.path })} title={i.point || tilde(i.path)}><b>{i.title}</b>{i.point && <span className="muted small"> · {i.point}</span>}</button>
               <span className="muted small">{i.captured}</span>
               <button className="small" onClick={() => develop(i)}>Draft it</button>
             </div>))}
-          {allIdeas && ideas.length > 60 && <div className="muted small">and {ideas.length - 60} more in {tilde(shelf.dir)}/inbox</div>}
           {!ideas.length && <div className="muted small">{q ? 'Nothing matches.' : 'No ideas captured yet.'}</div>}
-        </section>
-      </> : <section className="wh-sec"><h3>Drafted posts and ideas</h3><div className="muted small">No shelf folder yet. Set PERCH_WRITING_SHELF to a folder with posts/&lt;slug&gt;/draft.md and inbox/*.md (or create ~/Documents/blog-workshop) and agents' drafts and ideas show here.</div></section>}
+        </section>}
+      </> : (show('drafts') || show('ideas')) && <section className="wh-sec"><h3>Drafted posts and ideas</h3><div className="muted small">No shelf folder yet. Set PERCH_WRITING_SHELF to a folder with posts/&lt;slug&gt;/draft.md and inbox/*.md (or create ~/Documents/blog-workshop) and agents' drafts and ideas show here.</div></section>}
 
-      <section className="wh-sec">
+      {!only && <section className="wh-sec">
         <h3>Share and publish</h3>
         <div className="wh-grid">{(data.destinations ?? []).map(d => (
           <div key={d.id} className={`wh-card wh-dest ${d.status}`}>
@@ -137,7 +143,7 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
             <span className="muted small">{d.how}</span>
           </div>))}
         </div>
-      </section>
+      </section>}
     </div>
   )
 }
@@ -189,8 +195,8 @@ function Finder({ onPick, roots }: { onPick: (path: string) => void; roots: stri
   )
 }
 
-function Stat({ n, label, sub }: { n: number; label: string; sub?: string }) {
-  return <div className="wh-stat"><b>{n}</b><span className="small">{label}</span>{sub && <span className="muted small">{sub}</span>}</div>
+function Stat({ n, label, sub, on, onClick }: { n: number; label: string; sub?: string; on?: boolean; onClick?: () => void }) {
+  return <button className={`wh-stat ${on ? 'on' : ''}`} onClick={onClick} aria-pressed={!!on} title={on ? 'Show everything' : `Show only ${label}`}><b>{n}</b><span className="small">{label}</span>{sub && <span className="muted small">{sub}</span>}</button>
 }
 function DocRow({ d, onOpen, onReview }: { d: Doc; onOpen: () => void; onReview?: () => void }) {
   return (
@@ -238,7 +244,7 @@ function Spark({ v }: { v: number[] }) {
 // Weekly views, all your pages stacked by the top few and the rest.
 function ViewsChart({ weeks, pages }: { weeks: number[]; pages: PubPage[] }) {
   const [hover, setHover] = useState<number | null>(null)
-  const top = pages.filter(p => p.total > 0).slice(0, 4)
+  const top = pages.filter(p => p.total > 0).sort((a, b) => b.total - a.total).slice(0, 4)
   const rest = weeks.map((_, i) => pages.filter(p => !top.includes(p)).reduce((n, p) => n + (p.weekly[i] ?? 0), 0))
   const layers = [...top.map(p => ({ name: p.title, v: p.weekly })), { name: 'Other pages', v: rest }]
   const totals = weeks.map((_, i) => layers.reduce((n, l) => n + (l.v[i] ?? 0), 0))
@@ -263,8 +269,8 @@ function ViewsChart({ weeks, pages }: { weeks: number[]; pages: PubPage[] }) {
     </div>
   )
 }
-function Published({ pub }: { pub: Pub | null }) {
-  const [all, setAll] = useState(false)
+function Published({ pub, expanded }: { pub: Pub | null; expanded?: boolean }) {
+  const [open, setAll] = useState(false), all = open || !!expanded
   if (!pub) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Finding what you published…</div></section>
   if (pub.error) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Couldn't list published pages: {pub.error}</div></section>
   const pages = pub.pages, v30 = pages.reduce((n, p) => n + p.views30, 0), tot = pages.reduce((n, p) => n + p.total, 0)
@@ -285,7 +291,7 @@ function Published({ pub }: { pub: Pub | null }) {
             <span className="muted small">{p.published_at ? new Date(p.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</span>
           </a>))}
       </div>
-      {pages.length > 6 && <button className="link small" onClick={() => setAll(a => !a)}>{all ? 'Show top 6' : `Show all ${pages.length}`}</button>}
+      {pages.length > 6 && !expanded && <button className="link small" onClick={() => setAll(a => !a)}>{all ? 'Show top 6' : `Show all ${pages.length}`}</button>}
     </section>
   )
 }
