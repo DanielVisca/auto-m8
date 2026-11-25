@@ -119,6 +119,7 @@ import { browserRoutes, browserSocket } from './browserroutes.ts'
 import { researchRoutes } from './productresearchroutes.ts'
 import { canvases as exploreCanvases, codebases as exploreCodebases, competitor as exploreCompetitor, competitors as exploreCompetitors, saveThumb, thumbFile } from './explorehub.ts'
 import { ensureProductBoard } from './productresearchboard.ts'
+import { audiences as shareAudiences, forgetShare, shareBoard, sharesOf, targets as shareTargets } from './share.ts'
 import { onResearch } from './productresearch.ts'
 import { restartQueue } from './restartqueue.ts'
 import { availability, noteBoot, noteOutage, noteStop, recordAvailability, writeReason } from './uptime.ts'
@@ -489,6 +490,12 @@ route('GET', '/api/boards/:id', m => getBoard(decodeURIComponent(m[1])) ?? { err
 route('POST', '/api/boards/:id', async (m, req) => updateBoard(decodeURIComponent(m[1]), await body(req)))
 route('POST', '/api/boards/:id/activity', m => ({ ok: useBoard(decodeURIComponent(m[1])) }))
 route('POST', '/api/boards/:id/delete', m => { deleteBoard(decodeURIComponent(m[1])); return { ok: true } })
+// Sharing a board elsewhere (share.ts): targets, who it can go to there, and where it's been shared.
+route('GET', '/api/share/targets', async () => ({ targets: await shareTargets() }))
+route('GET', '/api/share/:target/audiences', async m => { try { return { audiences: await shareAudiences(decodeURIComponent(m[1])) } } catch (e: any) { return { error: e.message } } })
+route('GET', '/api/boards/:id/shares', m => ({ shares: sharesOf(decodeURIComponent(m[1])) }))
+route('POST', '/api/boards/:id/share', async (m, req) => { const b = await body(req); try { return await shareBoard(decodeURIComponent(m[1]), String(b.target ?? 'posthog'), { audience: b.audience || undefined, overwrite: !!b.overwrite }) } catch (e: any) { return { error: e.message } } })
+route('POST', '/api/boards/:id/share/forget', async (m, req) => { const b = await body(req); return { ok: forgetShare(decodeURIComponent(m[1]), String(b.target)) } })
 route('POST', '/api/boards-tile', async (_m, req) => putTile(await body(req)))
 route('POST', '/api/boards-tile/copy', async (_m, req) => { const b = await body(req); return copyTile(b.tile_id, b.board_id) })
 route('GET', '/api/chat-board/:id', m => ({ board: chatBoard(decodeURIComponent(m[1])) }))

@@ -9,6 +9,7 @@ import { TermView } from './Term'
 import { BrowserTile } from './BrowserView'
 import { PlanTile } from './ProjectPlan'
 import { BRIDGE } from './tileBridge'
+import { ShareButton } from './Share'
 
 type Tile = { id: string; folder_id: string; kind: 'web' | 'chat' | 'term' | 'note' | 'code' | 'browser' | 'plan'; x: number; y: number; w: number; h: number; config: any; state: any; error: string | null }
 const COLS = 12, ROW = 56, GAP = 8
@@ -77,6 +78,7 @@ export function Canvas({ folderId, ttlSeconds, conversations, cwd, onOpen, fit }
         </select>
         <button onClick={() => add({ kind: 'term', config: { cwd }, w: 6, h: 5 })}>+ Terminal</button>
         <button onClick={() => add({ kind: 'note', config: { text: '' }, w: 3, h: 4 })}>+ Note</button>
+        <ShareButton boardId={folderId} />
       </div>
       {!tiles.length && <div className="muted small pad">An empty board. Describe a tile to have Claude build it, paste a URL for a live page (Grafana, a PostHog dashboard), or add a chat, terminal or note.</div>}
       <div ref={host} className={`board${stacked ? ' stacked' : ''}`} style={{ height }}>
