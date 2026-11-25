@@ -1295,6 +1295,9 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .setup input { width: auto; }
 .setup-autonomy { align-items: flex-start; gap: 10px; padding-top: 8px; border-top: 1px solid var(--line); margin-top: 4px; }
 .setup-autonomy input { margin-top: 3px; }
+.first-run p { margin: 4px 0 8px; }
+.suggestions { width: 100%; max-width: 620px; margin: 0 auto 14px; display: flex; flex-direction: column; gap: 4px; }
+.suggestion { gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
 .setup-done { align-items: center; gap: 10px; }
 
 /* Settings: tabs in a side panel, the chosen tab's cards beside it. Narrow screens get a scrolling row of tabs. */

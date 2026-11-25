@@ -65,6 +65,10 @@ export type Settings = {
   // On for installs that predate it; a fresh install starts with it off (see FRESH below).
   autonomy: { enabled: boolean; pausedAt?: number | null; reason?: string | null; interrupted?: string[] } // enabled off = paused (server/pause.ts)
   welcome?: boolean // fresh installs: show the setup checklist on Home until it is dismissed
+  // Anonymous usage stats (telemetry.ts). On for fresh installs (opt-out), off for installs that predate it.
+  telemetry: { enabled: boolean; key?: string; host?: string }
+  // Unblocker cards on Home and the once-per-chat nudge in the system prompt (suggestions.ts). Fresh installs only.
+  nudges: { enabled: boolean }
   browser: { enabled: boolean; chromePath: string; headless: boolean; defaultPolicy: 'trusted' | 'allow' | 'read' | 'deny'; sites: Record<string, 'trusted' | 'allow' | 'read' | 'deny'>; confirmIrreversible: boolean; allowedActions: string[]; maxSessions: number; recordingDays: number; recordVisual: boolean; showWindows: boolean }
 }
 
@@ -95,6 +99,8 @@ export const defaults: Settings = {
   lifecycle: { enabled: true },
   owner: { name: '' },
   autonomy: { enabled: true },
+  telemetry: { enabled: false },
+  nudges: { enabled: false },
   browser: { enabled: true, chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: false, defaultPolicy: 'allow', sites: {}, confirmIrreversible: true, allowedActions: [], maxSessions: 6, recordingDays: 14, recordVisual: false, showWindows: false },
 }
 
@@ -114,7 +120,7 @@ export const FRESH = !existsSync(FILE)
 const CODE_DIRS = ['Development', 'code', 'src', 'Projects', 'projects', 'dev', 'repos', 'workspace', 'GitHub', 'Documents/GitHub', 'Developer']
 // Where repos live: the chat folder plus whichever usual places exist (search, PR checkouts).
 export const codeRoots = () => [...new Set([settings.chat.cwd, ...CODE_DIRS.map(d => join(HOME, d))])].filter(d => d && d !== HOME && existsSync(d))
-const FRESH_START = { autonomy: { enabled: false }, welcome: true, posthog: { projectId: null },
+const FRESH_START = { autonomy: { enabled: false }, welcome: true, posthog: { projectId: null }, telemetry: { enabled: true }, nudges: { enabled: true },
   chat: { ...defaults.chat, cwd: CODE_DIRS.map(d => join(HOME, d)).find(d => existsSync(d)) ?? HOME } }
 export let settings: Settings = merge(defaults, FRESH ? FRESH_START as Partial<Settings> : JSON.parse(readFileSync(FILE, 'utf8')))
 if (FRESH) saveSettings(FRESH_START)

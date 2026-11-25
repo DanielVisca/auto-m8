@@ -9,6 +9,7 @@ import { useBoards } from './Boards'
 import { toast } from './api'
 import { ProjectView, type Decision, type Project } from './Decisions'
 import { Setup } from './Setup'
+import { Suggestions } from './Suggestions'
 import { NeedsMe, type NeedsData } from './NeedsMe'
 import { handedFiles } from './Chat'
 import { WritingList } from './WritingList'
@@ -56,7 +57,8 @@ export function Home({ onOpen, onStart, onBoard, settings, onTerminal }: { onOpe
   const submit = () => { const t = text.trim(); onStart(t || undefined) }
   return (
     <div className="page start">
-      {onTerminal && <Setup settings={settings} onTerminal={onTerminal} />}
+      {onTerminal && <Setup settings={settings} onTerminal={onTerminal} onOpen={onOpen} />}
+      {!settings?.welcome && <Suggestions onOpen={onOpen} />}
       <h1 className="start-hello">{greeting()}</h1>
       <div className="start-box">
         <textarea autoFocus rows={2} value={text} placeholder="What are we working on?" onChange={e => setText(e.target.value)}

@@ -19,6 +19,7 @@ const empty = (): AgentState => ({ scopes: [], answer: '', steps: [], agents: []
 export const looksLikeQuestion = (q: string) => /\?$|^(what|where|when|why|how|which|who|did|does|do|have|was|is there|can|find|show)\b/i.test(q.trim()) || q.trim().split(/\s+/).length > 5
 
 export function Search({ initial, onOpen }: { initial: { q: string; mode?: string; agent?: string }; onOpen: (id: string) => void }) {
+  useEffect(() => { post('/api/usage/feature', { feature: 'search' }).catch(() => {}) }, []) // counted once per visit (suggestions.ts)
   const [q, setQ] = useState(initial.q)
   const [mode, setMode] = useState(initial.mode ?? (initial.agent === 'deep' ? 'deep' : 'auto'))
   const [groups, setGroups] = useState<Group[] | null>(null)

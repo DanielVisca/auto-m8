@@ -26,7 +26,8 @@ export function usePause() {
 // The strip across the top while paused, and the button that pauses.
 export function PauseBar({ onOpen }: { onOpen: () => void }) {
   const { data, reload } = usePause()
-  if (!data?.paused) return null
+  // A fresh install starts with autonomy off: that is a choice, not a pause, so no strip until something was paused.
+  if (!data?.paused || (!data.since && !data.held.length && !data.interrupted.length)) return null
   return (
     <div className="pause-bar" style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 12px', background: 'var(--accent)', color: '#fff', fontSize: 13 }}>
       <b>⏸ Agents and scouts are paused</b>

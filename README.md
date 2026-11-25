@@ -23,7 +23,7 @@ Agents can write code in parallel. You can't review it, unblock it, merge it and
 
 auto-m8 brings all your coding-agent chats into one place, and gives each one the context of the others. It reads the Claude Code and Cursor chats you already have and runs new chats on Claude Code or Codex. Every chat can search, read and message every other one, so an agent picks up where the last one left off instead of starting from zero.
 
-It sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), [Codex](https://github.com/openai/codex), `gh`, your own MCP servers and skills) and builds no connectors of its own. auto-m8 itself sends nothing anywhere: chats run the real `claude` and `codex` CLIs on your own login, so `claude --resume` works on every Claude chat.
+It sits on top of the tools you already use ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), [Codex](https://github.com/openai/codex), `gh`, your own MCP servers and skills) and builds no connectors of its own. Your chats, code and prompts never leave your Mac through auto-m8: chats run the real `claude` and `codex` CLIs on your own login, so `claude --resume` works on every Claude chat.
 
 ## Why I built it: one bottleneck at a time
 
@@ -97,7 +97,7 @@ Then open **auto-m8** from Spotlight (⌘Space). Toggle the window anywhere with
 
 <img src="docs/screenshots/setup.png" alt="First-run checklist on Home" width="640">
 
-A short checklist on Home tells you what's missing (Claude, GitHub, which folders hold your code). Everything else (search, chats, terminals, PR status, routines) works as soon as Claude and GitHub are in.
+On first open, auto-m8 looks at what this Mac already has (Claude, Codex and GitHub logins, your Claude Code and Cursor chats, your repos, MCP servers, Chrome) and shows it on one screen. It asks only for what's missing (Claude, GitHub), then opens a first chat that briefs you on your recent work and open PRs. After that, one-line cards on Home point at whatever would unblock you next.
 
 ## Safe by default
 
@@ -106,7 +106,8 @@ auto-m8 runs agents with **your** credentials, so the risky parts are opt-in:
 - **Autonomy is off on a fresh install.** The PR shepherd, autopilot, evolve and the closing pass on quiet chats all run Claude in the background on your subscription and can comment on your PRs from your account. One switch turns them on, and it says what it spends.
 - The server binds to `127.0.0.1` and rejects any request whose Host or Origin isn't auto-m8 itself, so a web page can't drive it through your browser.
 - Phone access is off until you pair a device with a one-time QR code.
-- Secrets live in the macOS keychain. No telemetry.
+- Secrets live in the macOS keychain.
+- **Anonymous usage stats, opt-out.** New installs send a few events so we can see whether setup works and which features get used: event names (first open, setup step completed or failed with an error code, onboarding completed, chat started with its engine, feature used, connection added with its kind, suggestion shown/acted/dismissed, PR opened by an agent, PR merged by the shepherd, server stall with a cause code, a daily active ping), each with a random install id, the app version, macOS version and CPU arch. Never code, prompts, chat text, repo names, file paths or account names; every property is checked against an allowlist ([server/telemetry.ts](server/telemetry.ts)). Turn it off on the first setup screen, in Settings → General, or with `DO_NOT_TRACK=1`. Installs from before this change stay off unless you turn it on.
 
 More in [SECURITY.md](SECURITY.md).
 
