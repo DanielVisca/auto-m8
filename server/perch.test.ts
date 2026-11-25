@@ -510,11 +510,11 @@ import { run as dbRun } from './db.ts'
 
 test('a no-signal answer is rechecked when its window closes, not every hour', () => {
   const now = Date.parse('2026-11-19T01:00:00Z'), H = 3_600_000
-  assert.equal(noSignalRecheckAt('waiting for 7-day window (2026-11-25)', now), Date.parse('2026-11-25T12:00:00Z'))
+  assert.equal(noSignalRecheckAt('waiting for 7-day window (2026-11-25)', now), Date.parse('2026-11-25T23:59:00Z'))
   assert.equal(noSignalRecheckAt('judged at 2026-11-19 20:00 UTC', now), Date.parse('2026-11-19T20:00:00Z'))
   assert.equal(noSignalRecheckAt('waiting for 24h window', now), now + 24 * H)
   assert.equal(noSignalRecheckAt('copy events, activation', now), now + 6 * H)
-  assert.equal(noSignalRecheckAt('window closed 2026-11-01', now), now + H)
+  assert.equal(noSignalRecheckAt('window closed 2026-11-01', now), now + 6 * H)
 })
 
 test('a blocker only a person can clear is recognised; a slow deploy is not', () => {

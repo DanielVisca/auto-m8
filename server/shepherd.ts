@@ -202,8 +202,11 @@ export function noSignalRecheckAt(detail: string, now: number): number {
   const HOUR = 3_600_000
   const date = detail.match(/\b(20\d\d-\d\d-\d\d)(?:[ T](\d\d:\d\d))?/)
   if (date) {
-    const t = Date.parse(`${date[1]}T${date[2] ?? '12:00'}:00Z`)
-    if (!Number.isNaN(t)) return Math.max(now + HOUR, t)
+    // A bare date means the window closes some time that day, so look at its end, not at noon:
+    // noon on the closing day turned into an hourly recheck for the rest of it.
+    const t = Date.parse(`${date[1]}T${date[2] ?? '23:59'}:00Z`)
+    // Once the named time has passed, the answer was still no signal: wait six hours, not one.
+    if (!Number.isNaN(t)) return t > now ? Math.max(now + HOUR, t) : now + 6 * HOUR
   }
   if (/\b24 ?h|\b24-hour|\bday\b/i.test(detail)) return now + 24 * HOUR
   return now + 6 * HOUR
