@@ -433,6 +433,8 @@ async function startChat(b: Row) {
   // A new chat that names a PR goes where the PR's other conversations are: into the one that opened it,
   // or a fresh chat with the related ones pulled in. Send noRoute to opt out.
   let routed: string | null = null, prNote = ''
+  // A clean chat (context off) gets nothing pulled in: no PR routing, no other conversations.
+  if (!b.id && b.context === false) { b.noRoute = true; b.contextIds = [] }
   if (!b.id && !b.noRoute) {
     const plan = planForPrompt(prompt)
     if (plan.reuse) { b.id = plan.reuse; routed = plan.reuse }

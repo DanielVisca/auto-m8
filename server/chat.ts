@@ -105,6 +105,12 @@ function configDirFor(id: string) {
 // perch's own notes in a thread (a model change, a cap, a stall) are kept, so you see them even if
 // you weren't watching when they happened.
 run('create table if not exists chat_notices (conversation_id text not null, at integer not null, text text not null)')
+// Clean chats ("context" off when starting one): no CLAUDE.md, auto-memory, settings, hooks, plugins,
+// MCP servers, skills, auto-m8 instructions or other conversations, in an empty folder. Sticky per chat.
+run('create table if not exists clean_chats (id text primary key, at integer not null)')
+export const isClean = (id: string) => !!get('select 1 from clean_chats where id = ?', id)
+const CLEAN_DIR = join(DATA_DIR, 'clean')
+export const NO_MCP = '{"mcpServers":{}}'
 export const noticesFor = (id: string) => all<{ at: number; text: string }>('select at, text from chat_notices where conversation_id = ? order by at', id)
 
 function emit(c: Chat, ev: ChatEvent) {
@@ -165,6 +171,13 @@ const DRIVER = () => `YOU ARE THE DRIVER. Act like the founder of this work: ${o
 
 function baseArgs(mode: string, context: boolean, id?: string, turbo = false) {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-mode', mode, '--add-dir', ATTACH_DIR]
+  // A clean chat: Claude Code with nothing of yours loaded. --bare would do it but needs an API key.
+  if (!context && id) {
+    args.push('--setting-sources', '', '--strict-mcp-config', '--mcp-config', NO_MCP, '--disable-slash-commands')
+    if (turbo) args.push('--model', 'opus', '--effort', 'high')
+    else if (settings.chat.model) args.push('--model', settings.chat.model)
+    return args
+  }
   args.push('--settings', JSON.stringify({ hooks: SIGN_HOOK, ...(turbo ? { fastMode: true } : {}) }))
   if (turbo) args.push('--model', 'opus', '--effort', 'high')
   else if (settings.chat.model) args.push('--model', settings.chat.model)
@@ -290,7 +303,7 @@ function attach(c: Chat, pid: number, offset: number): Runner {
           if (old) setTimeout(() => { if (c.proc === old && c.state === 'idle') { old.kill(); setTimeout(() => { if (c.proc === old) exited(c, old) }, 3000) } }, 500).unref?.()
         } else if (!ev.is_error && connStatus.claudeAuthLapse && !isCodex(c.engine) && !isLocal(c.engine)) { connStatus.claudeAuthLapse = undefined; onAuthLapse.forEach(f => f()) }
         // The reply told the user to run a command in their terminal: send the agent one correction.
-        const fix = !ev.is_error && typeof ev.result === 'string' ? runCorrectionFor(c.id, ev.result) : null
+        const fix = c.context && !ev.is_error && typeof ev.result === 'string' ? runCorrectionFor(c.id, ev.result) : null
         if (fix) setTimeout(() => { if (c.state === 'idle') send({ id: c.id, prompt: fix, resume: true }) }, 1500).unref?.()
       }
     }
@@ -341,7 +354,9 @@ function start(c: Chat, resume: boolean) {
   execFileSync('mkfifo', [f.fifo])
   const fdIn = openSync(f.fifo, 'r+'), fdOut = openSync(f.out, 'w')
   // Detached, in its own process group: it keeps running if perch stops.
-  const proc = spawn('claude', args, { cwd: existsSync(c.cwd) ? c.cwd : settings.chat.cwd, env: childEnv(configDirFor(c.id), { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: agentLabel(c.id), PERCH_ORIGIN_MARKER: originFor(chatSubject(c.id)) ? originMarker(originFor(chatSubject(c.id))!) : '', ...(local ? agentEnv(c.engine) : claudeEnv()) }), stdio: [fdIn, fdOut, fdOut], detached: true })
+  const clean = !c.context && !c.profile
+  if (clean) mkdirSync(c.cwd, { recursive: true })
+  const proc = spawn('claude', args, { cwd: existsSync(c.cwd) ? c.cwd : settings.chat.cwd, env: childEnv(configDirFor(c.id), { PERCH_CONVERSATION_ID: c.id, PERCH_AGENT: agentLabel(c.id), PERCH_ORIGIN_MARKER: !clean && originFor(chatSubject(c.id)) ? originMarker(originFor(chatSubject(c.id))!) : '', ...(clean ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}), ...(local ? agentEnv(c.engine) : claudeEnv()) }), stdio: [fdIn, fdOut, fdOut], detached: true })
   closeSync(fdIn); closeSync(fdOut)
   proc.unref()
   proc.on('error', () => {}) // reported through the exit check
@@ -416,17 +431,19 @@ export function send(opts: SendOpts): string {
   const id = opts.id ?? randomUUID()
   startChatOrigin(id, opts.by, opts.originParent)
   let c = chats.get(id)
+  if (!opts.id && opts.context === false && !opts.profile) run('insert or ignore into clean_chats (id, at) values (?, ?)', id, Date.now())
   if (!c) {
     const known = get<{ cwd: string }>('select cwd from conversations where id = ?', id)
+    const clean = isClean(id)
     c = {
-      id, cwd: opts.cwd ?? known?.cwd ?? settings.chat.cwd, proc: null, state: 'exited', turn: [], listeners: new Set(),
-      lastUsed: Date.now(), mode: opts.mode ?? settings.chat.permissionMode, context: opts.context ?? true, stderr: '', profile: opts.profile, turbo: false, engine: '', tier: null, pending: [], lastOutput: Date.now(),
+      id, cwd: clean ? join(CLEAN_DIR, id) : opts.cwd ?? known?.cwd ?? settings.chat.cwd, proc: null, state: 'exited', turn: [], listeners: new Set(),
+      lastUsed: Date.now(), mode: opts.mode ?? settings.chat.permissionMode, context: clean ? false : opts.context ?? true, stderr: '', profile: opts.profile, turbo: false, engine: '', tier: null, pending: [], lastOutput: Date.now(),
     }
     for (const l of waiting.get(id) ?? []) c.listeners.add(l)
     waiting.delete(id)
     chats.set(id, c)
   }
-  const race = selectRace({ conversation: id, prompt: opts.selectionText ?? opts.prompt, by: opts.by,
+  const race = !c.context ? null : selectRace({ conversation: id, prompt: opts.selectionText ?? opts.prompt, by: opts.by,
     retry: opts.retry, resent: opts.resent, busy: c.state === 'running' || !!c.handoffQueue,
     profile: !!(opts.profile || c.profile), mode: opts.mode ?? c.mode })
   if (race) {
@@ -460,6 +477,7 @@ export function send(opts: SendOpts): string {
   // Local models are peers too: if Ollama isn't running, Claude (or Codex) takes the message.
   const localDown = isLocal(wanted) && !localUpSync() && (!allCapped() || codexReadySync())
   let engine = codexPeerTier ? `claude:${codexPeerTier}` : localDown ? '' : wanted
+  if (!c.context && isCodex(engine)) engine = '' // Codex brings its own AGENTS.md and memory: clean chats stay on Claude
   if (codexPeerTier) emit(c, { type: 'perch_notice', text: `Codex is at its limit, near its plan limit or signed out: this message runs on ${tierLabel(available(codexPeerTier) ?? codexPeerTier)} with the same context.` })
   if (localDown) emit(c, { type: 'perch_notice', text: "The local model isn't running (Ollama is down): this message runs on Claude or Codex with the same context." })
   if (engine !== c.engine && !(c.proc && c.state === 'running')) { if (c.proc) { const old = c.proc; c.proc = null; old.kill(); old.stop() } c.engine = engine }
@@ -488,7 +506,7 @@ export function send(opts: SendOpts): string {
     else if (budget.provider === 'local') {
       // Before the local model: a PostHog cloud task keeps the same conversation running on a
       // different subscription pool. The hook takes the message; on failure it resends to local.
-      if (cloudFallback && !opts.noCloud) { cloudFallback(opts, id); return id }
+      if (cloudFallback && !opts.noCloud && c.context) { cloudFallback(opts, id); return id }
       if (c.proc) { const old = c.proc; c.proc = null; old.kill(); old.stop() }
       c.tier = pick.tier; pick = null
       engine = c.engine = settings.local.model
@@ -496,6 +514,7 @@ export function send(opts: SendOpts): string {
       if (previousModel !== engine) emit(c, { type: 'perch_notice', text: `Subscription allowances are unavailable. Continuing on ${engine} on this Mac with the same conversation and tools. It is a smaller model; auto-m8 retries the subscriptions on your next turn.` })
     }
   }
+  if (!c.context) cover = { codex: false, why: '' }
   if (!c.profile && !claudeBusy && (isCodex(engine) || cover.codex)) {
     // The engine preference stays on auto during a fallback. Announce the handoff, not every
     // message routed to Codex. Saved turns also remember the last provider across restarts.
