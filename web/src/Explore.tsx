@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, post, sendChat, shell, shortPath, toast } from './api'
 import { MiniChat } from './Mini'
+import { Markdown } from './Chat'
 import { DataSection, RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
 import './explore.css'
 
@@ -538,7 +539,7 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
         <span className="ex-chip" title={`${allCount(d.usedBy)} modules build on it: ${specificCount(d.usedBy)} specific, ${allCount(d.usedBy) - specificCount(d.usedBy)} shared foundations`}>used by {specificCount(d.usedBy)}</span>
       </div>
       <div className="ex-what small">
-        {sum?.ai && <div title={`AI summary (${sum.ai.model}), written only from this module's docs, models and largest files${sum.ai.sources?.length ? `:\n${sum.ai.sources.join('\n')}` : ''}\nRedone when the folder changes.`}>{sum.ai.text} <span className="ex-badge">AI</span></div>}
+        {sum?.ai && <div title={`AI summary (${sum.ai.model}), written only from this module's docs, models and largest files${sum.ai.sources?.length ? `:\n${sum.ai.sources.join('\n')}` : ''}\nRedone when the folder changes.`}><div className="ex-what-md"><Markdown text={sum.ai.text} /></div><span className="ex-badge">AI</span></div>}
         {sum?.own && <div className="muted" title={`In the team's own words, from ${sum.own.file}`}>“{sum.own.text}” <span className="tiny">{sum.own.file.split('/').pop()}</span></div>}
         {sum?.status === 'generating' && <div className="muted"><i className="spin" /> writing a short summary…</div>}
         {sum?.status === 'error' && !sum?.own && <div className="muted tiny" title={sum.error}>No summary yet (couldn't write one).</div>}

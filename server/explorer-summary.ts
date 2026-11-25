@@ -51,7 +51,13 @@ const queue: (() => void)[] = []
 const slot = () => new Promise<void>(res => { if (running < 2) { running++; res() } else queue.push(() => { running++; res() }) })
 const free = () => { running--; queue.shift()?.() }
 
-const PROMPT = `You explain one module of a codebase to a senior engineer who is new to it. Using ONLY the material below, write at most 2 sentences (under 60 words): what this module is for, and the main data or entities it handles. Name concrete things (models, tables, features). No fluff, no "This module". If the material doesn't say, say what it seems to be and that it's unclear. Then a line "SOURCES:" listing the file paths you relied on, comma separated.`
+// Short, scannable markdown: one line of purpose, then labelled bullets. Read at a glance in a narrow panel.
+const PROMPT = `You explain one module of a codebase to a senior engineer who is new to it. Using ONLY the material below, write markdown in exactly this shape:
+<one plain sentence, under 20 words: what it is for, as a reader would say it>
+- **Main data:** <its key models or tables, as \`Code\` names, at most 5>
+- **Connects to:** <the 2-4 things it's built on or that use it that matter most, in plain words>
+- **Watch out:** <only if the material states a real gotcha or rule; otherwise omit this line>
+No fluff, no "This module". If the material doesn't say, write "unclear" rather than guess. Then a line "SOURCES:" listing the file paths you relied on, comma separated.`
 
 async function generate(repo: string, id: string, key: string) {
   await slot()
@@ -85,16 +91,17 @@ async function generate(repo: string, id: string, key: string) {
     })
     const [body, srcLine] = text.split(/\n?SOURCES:/i)
     const sources = (srcLine ?? '').split(',').map(s => s.trim()).filter(s => s && files.includes(s))
-    writeFileSync(join(DIR, `${key}.json`), JSON.stringify({ text: body.trim().slice(0, 600), sources, model: 'haiku', at: Date.now() }))
+    writeFileSync(join(DIR, `${key}.json`), JSON.stringify({ text: body.trim().slice(0, 900), sources, model: 'haiku', at: Date.now() }))
   } catch (e: any) {
     writeFileSync(join(DIR, `${key}.err`), String(e?.message ?? e))
   } finally { free() }
 }
 
 // The folder's tree hash: changes exactly when something in that module changes.
+const VERSION = 'v2' // bump when the prompt or shape changes, so old summaries are rewritten
 async function keyOf(repo: string, path: string) {
   const tree = (await git(repo, ['rev-parse', `HEAD:${path}`]).catch(() => '')).trim()
-  return tree ? tree.slice(0, 20) : null
+  return tree ? `${VERSION}-${tree.slice(0, 20)}` : null
 }
 
 export async function summaryFor(repoPath: string, id: string, generateIfThin = true): Promise<Summary> {

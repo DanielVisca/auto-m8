@@ -128,3 +128,8 @@ a.ex-chip { cursor: pointer; }
 .explore-popout { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
 .explore-popout .explore { flex: 1; min-height: 0; }
 .ex-what { margin: 2px 0 8px; line-height: 1.45; display: flex; flex-direction: column; gap: 4px; }
+
+.ex-what-md p { margin: 0 0 4px; font-weight: 500; }
+.ex-what-md ul { margin: 2px 0 2px 16px; padding: 0; }
+.ex-what-md li { margin: 1px 0; }
+.ex-what-md code { font-size: 11px; padding: 0 4px; border-radius: 4px; background: var(--bg3); }
