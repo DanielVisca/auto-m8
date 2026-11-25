@@ -92,7 +92,7 @@ import { hookSignals } from './hookSignals.ts'
 import { handleHookPost } from './hookRoute.ts'
 import { dismiss as dismissAttention, sweep as attentionSweep } from './attention.ts'
 import { resumeStalls } from './resumestalls.ts'
-import { driveLog, driveState, onSelfDrive, setDriveSettings, setSelfDrive, startSelfDrive } from './selfdrive.ts'
+import { driveLog, driveState, onSelfDrive, onSelfDriveToggle, setDriveSettings, setSelfDrive, startSelfDrive } from './selfdrive.ts'
 import { relay, relayGraph } from './relay.ts'
 import { harvest as harvestChat, harvestOf, lifecycleStatus, sweepLifecycle } from './lifecycle.ts'
 import { board, push as inboxPush, startOrchestra, stopTargets, unwatch as orchUnwatch, watch as orchWatch } from './orchestra.ts'
@@ -1458,6 +1458,7 @@ resumeHelpers()
 startOrchestra()
 startSelfDrive(id => chats.get(id)?.state === 'running')
 onSelfDrive.add(() => broadcast('chats'))
+onSelfDriveToggle.add(() => broadcast('conversations'))
 // Lifecycle: stale chats get a closing pass (learnings to memory, a summary), then close.
 const sweepLife = () => sweepLifecycle().then(() => broadcast('conversations')).catch(e => console.error('lifecycle', e))
 setTimeout(sweepLife, 3 * 60_000).unref()

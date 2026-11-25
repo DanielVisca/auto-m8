@@ -85,6 +85,9 @@ function streak(id: string, match: (r: { action: string; message: string | null 
 
 export const onSelfDrive = new Set<(id: string) => void>()
 const changed = (id: string) => onSelfDrive.forEach(f => f(id))
+// Switched on or off (by you, or by itself when done): the conversation list shows a 🚗 on driven chats.
+export const onSelfDriveToggle = new Set<(id: string) => void>()
+const toggled = (id: string) => onSelfDriveToggle.forEach(f => f(id))
 
 // Deps are swappable so tests can drive it without spawning Claude or a chat.
 export const deps = {
@@ -104,6 +107,7 @@ export function setSelfDrive(id: string, on: boolean) {
        on conflict(id) do update set enabled = excluded.enabled, on_at = case when excluded.enabled = 1 then excluded.on_at else self_drive.on_at end,
        status = null, note = null, updated_at = excluded.updated_at`, id, on ? 1 : 0, now, now)
   log(id, on ? 'on' : 'off')
+  toggled(id)
   if (on) {
     follow(id)
     // Switched on while the chat is already waiting on you: drive the turn that is sitting there.
@@ -233,6 +237,7 @@ function act(id: string, v: Verdict): Verdict {
   if (v.action === 'done') {
     run('update self_drive set enabled = 0, status = ?, note = ?, updated_at = ? where id = ?', 'done', reason || 'Finished.', deps.now(), id)
     log(id, 'done', null, reason)
+    toggled(id)
     deps.notice(id, `🚗 Self drive finished and turned itself off: ${reason || 'the work is done.'}`)
     return v
   }

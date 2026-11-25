@@ -110,13 +110,17 @@ export function needsReason(r: Row): string | null {
 const USED_MODELS = `(select group_concat(f || ':' || last) from (select case when um.model like 'claude%' then 'claude' when um.model like 'codex%' then 'codex' else 'ollama' end f, max(um.ts) last
       from usage_msgs um where um.session = c.id and um.model is not null and um.model <> '<synthetic>' group by 1)) used_models,`
 let extras: boolean | null = null
+// Self drive on (selfdrive.ts creates the table): the row shows a 🚗.
+let driveTable = false
+const driveCol = () => (driveTable ||= !!get('select 1 from sqlite_master where type = \'table\' and name = \'self_drive\''))
+  ? `(select sd.enabled from self_drive sd where sd.id = c.id) self_drive,` : ''
 function extraCols(models: boolean) {
   if (!extras) {
     const have = new Set(all<{ name: string }>(`select name from sqlite_master where type = 'table' and name in ('browser_sessions', 'usage_msgs')`).map(t => t.name))
     if (have.size < 2) return ''
     extras = true
   }
-  return `
+  return `${driveCol()}
     -- An Agent Chrome window open for this chat right now (browser.ts deletes the row when it closes).
     exists (select 1 from browser_sessions b where b.owner = c.id) has_browser,
     -- Which model families it has run on, with when each was last used ("claude:1794..,ollama:1794.."),
@@ -186,6 +190,7 @@ function hydrate(r: Row, live: Set<string>) {
   r.prs = r.prs ? JSON.parse(r.prs).filter((p: Row) => p.url) : []
   r.labels = r.labels ? JSON.parse(r.labels).filter(Boolean) : []
   r.has_browser = !!r.has_browser
+  r.self_drive = !!r.self_drive
   // Model families it ran on, current first: the engine it is set to now, then the rest by last use.
   // Usage lags (transcripts are scanned every 10 min), so the pref is what says "current".
   const last = new Map<string, number>()

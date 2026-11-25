@@ -104,6 +104,7 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
           ? <ModelStack models={(c as any).models} local={(c as any).local_engine} subs={(c as any).claude_subs} />
           : <Brand id={sourceBrand(c)} size={13} title={c.source === 'posthog-task' && c.origin === 'slack' ? 'Asked in Slack' : SOURCE_LABEL[c.source]} />}
         {(c as any).has_browser && <Brand id="chrome" size={13} title="Has an Agent Chrome window open" />}
+        {(c as any).self_drive && <span className="row-drive" title="Self drive is on: an agent is driving this chat">🚗</span>}
         <span className="muted small ellipsis" title={c.source === 'posthog-task' ? '' : `Folder it ran in: ${c.cwd ?? '?'}${c.branch ? `\nBranch: ${c.branch}` : ''}`}>{c.source === 'posthog-task' ? (c.origin ?? 'task') : [(c as any).place, c.branch && !['main', 'master', 'HEAD'].includes(c.branch) ? c.branch : ''].filter(Boolean).join(' · ')}</span>
         {(c as any).agent_kind && c.source !== 'posthog-task' && <span className="label" title="Started by auto-m8's automation, not you. Write in it and it becomes yours.">{(c as any).agent_kind}</span>}
         {SHOW_LABELS && c.labels?.slice(0, 2).map(l => <span key={l} className="label">#{l}</span>)}
