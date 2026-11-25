@@ -1,10 +1,12 @@
 // Shepherd: every PR an agent opens for you is driven from review to verified in production.
 // - Review: the moment one needs an answer a shepherd run starts on it: a new review thread
 //   comment, a human comment, a changes-requested review, CI going red, or a green head with no
-//   open threads that has no stamphog label yet (stamphog repos only).
+//   open threads that has no approval-bot label yet (repos whose ship profile has one: stamphog).
+// The repo's ship profile (shipprofile.ts) says how it merges and how to tell it is live, so this
+// isn't tied to PostHog's pipeline; a repo without a profile gets PostHog's behaviour.
 // - Merge: when the PR's plan says `merge: auto`, it is approved, green, has no open threads, and
-//   every PR it waits on is verified in production, the shepherd merges it (Trunk where the repo
-//   uses it).
+//   every PR it waits on is verified in production, the shepherd merges it the way the repo does
+//   (Trunk, Mergify, the GitHub merge queue, auto-merge, or a plain merge).
 // - Production: after the merge the shepherd waits for the deploy, then checks the plan's verify
 //   list against the pre-merge baseline right away and again two hours after the merge. A
 //   regression gets a revert PR and a NEEDS YOU, never an automatic revert.
@@ -32,6 +34,7 @@ import { MARK, revive, reviveBackoff, watch } from './shepherdstore.ts'
 import { raise, resolveKey } from './decisionstore.ts'
 import { toItems, itemsOf } from './transcript.ts'
 import { ownerName } from './owner.ts'
+import { liveCheck, mergeInstruction, observabilityTools, shipProfile, type ShipProfile } from './shipprofile.ts'
 
 export { MARK } from './shepherdstore.ts'
 
@@ -90,8 +93,10 @@ const SLACK = 60_000
 export const byShepherd = (i: Item, own?: Own) => !!own && i.author === own.me && own.windows.some(([a, b]) => (i.at ?? 0) >= a - SLACK && (i.at ?? 0) <= b + SLACK)
 
 // What in an open PR needs a review run now, and the watermarks to store once a run takes it.
-// Pure, so the rules are tested without GitHub.
-export function detect(pr: Snapshot, w: Watch, stamphogRepo: boolean, own?: Own) {
+// Pure, so the rules are tested without GitHub. stampWith is the label that asks this repo's approval
+// bot for a review (the ship profile's review.autoApprover; true means stamphog), or false/null for none.
+export function detect(pr: Snapshot, w: Watch, stampWith: boolean | string | null, own?: Own) {
+  const label = stampWith === true ? 'stamphog' : stampWith || null
   const events: string[] = []
   const fresh = (i: Item | null, mark: number): i is Item => !!i && i.id > mark && !i.body.includes(MARK) && !byShepherd(i, own)
   const snip = (s: string) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)
@@ -120,9 +125,9 @@ export function detect(pr: Snapshot, w: Watch, stamphogRepo: boolean, own?: Own)
 
   let stamp: string | null = null
   const openThreads = pr.threads.filter(t => !t.resolved).length
-  if (stamphogRepo && pr.rollup === 'SUCCESS' && !pr.isDraft && pr.reviewDecision !== 'APPROVED'
-    && !pr.labels.includes('stamphog') && openThreads === 0 && pr.head !== w.handled_stamp) {
-    events.push(`CI green on ${pr.head.slice(0, 12)} with no open threads and no stamphog label: apply stamphog`)
+  if (label && pr.rollup === 'SUCCESS' && !pr.isDraft && pr.reviewDecision !== 'APPROVED'
+    && !pr.labels.includes(label) && openThreads === 0 && pr.head !== w.handled_stamp) {
+    events.push(`CI green on ${pr.head.slice(0, 12)} with no open threads and no ${label} label: apply ${label}`)
     stamp = pr.head
   }
   return { events, seen, ci, stamp }
@@ -265,49 +270,69 @@ async function hasStamphog(slug: string) {
   return stamphogRepos.get(slug)!
 }
 
+// The label that asks this repo's approval bot for a review. From the ship profile: only a bot that
+// approves on a label gets one (stamphog on PostHog repos). Without a profile (detection failed, no
+// access), today's check: the repo has a stamphog label.
+export async function stampLabel(slug: string, profile: ShipProfile | null): Promise<string | null> {
+  const a = profile?.review.autoApprover
+  if (a?.trigger === 'label' && a.label) return a.label
+  if (profile && a?.bot !== 'stamphog') return null
+  return await hasStamphog(slug) ? 'stamphog' : null
+}
+
+// What the prompts say about this repo: its approval bot, how it merges, how to tell it is live, and
+// the observability MCPs actually connected here. Every field missing means today's PostHog wording.
+export type ShipCtx = { profile?: ShipProfile | null; stamp?: string | null; tools?: string[] | null; live?: string | null }
+async function shipCtx(url: string): Promise<ShipCtx> {
+  const slug = parse(url).slug
+  const profile = await shipProfile(slug).catch(() => null)
+  return { profile, stamp: await stampLabel(slug, profile), tools: await observabilityTools().catch(() => null) }
+}
+
 // ---------- the runs ----------
-export const PLAN_FORMAT = `<!-- perch-plan
+export const planFormat = (tools = '(Grafana, PostHog, ...)') => `<!-- perch-plan
 merge: auto            # auto: auto-m8 merges once approved, green, and every "after" PR is verified in production. manual: the author merges.
 after: <PR url>        # zero or more lines. This PR waits until each one is merged AND verified in production.
 deploy: <how this reaches production, and how to tell it is live (Kargo stage, ArgoCD app, image tag)>
 intent: <one sentence: what a user or system should see happen in production if this works (the prod scouts check it on real sessions)>
 verify:
-- <a concrete check: the query or command, where to run it ((Grafana, PostHog, ...)), and what passing looks like against the pre-merge baseline>
+- <a concrete check: the query or command, where to run it (${tools}), and what passing looks like against the pre-merge baseline>
 -->`
+export const PLAN_FORMAT = planFormat()
 
-const FIRST = (url: string, head: string) => `You are the shepherd for ${url}. auto-m8 starts you whenever something on this PR needs an answer, so handle the events below, then stop. You will be woken again for the next ones, and later to merge it and verify it in production.
+export const FIRST = (url: string, head: string, c?: ShipCtx) => `You are the shepherd for ${url}. auto-m8 starts you whenever something on this PR needs an answer, so handle the events below, then stop. You will be woken again for the next ones, and later to merge it and verify it in production.
 
 You are in a dedicated worktree of the PR branch (${head}), detached at origin/${head}. Before you change anything, \`git fetch origin ${head}\` and check out \`origin/${head}\` so you work on the latest head. Push with \`git push origin HEAD:${head}\`. Never force-push over someone else's commits.
 
-How to handle events: load the pr-shepherd skill (use_skill) and run one iteration of it focused on the events: review-triage for threads and comments, ci-shepherd for red checks, its Step 4 for stamphog. Skip qa-swarm and simplify unless your own fixes in this run changed behaviour substantively.
+How to handle events: load the pr-shepherd skill (use_skill) and run one iteration of it focused on the events: review-triage for threads and comments, ci-shepherd for red checks${!c || c.stamp === 'stamphog' ? ', its Step 4 for stamphog' : c.stamp ? `, and for "apply ${c.stamp}" add the \`${c.stamp}\` label (\`gh pr edit --add-label ${c.stamp}\`): that asks the repo's approval bot to review` : ''}. Skip qa-swarm and simplify unless your own fixes in this run changed behaviour substantively.
 
 The plan: auto-m8 reads a <!-- perch-plan --> block in the PR description to know whether to merge it, what it waits for, and how to verify it in production. If the description has none, add one (edit the description with \`gh pr edit --body-file\`, keeping everything else). Read the diff and the description to fill it in:
-${PLAN_FORMAT}
-Use merge: manual when you add it yourself; the author switches it to auto. Make every verify check something you could run later with the Grafana or PostHog MCPs, with what passing looks like.
+${c?.tools?.length ? planFormat(`(${c.tools.join(', ')}, ...)`) : PLAN_FORMAT}
+Use merge: manual when you add it yourself; the author switches it to auto. Make every verify check something you could run later with the ${c?.tools?.length ? `MCPs connected here (${c.tools.join(', ')})` : c?.tools ? 'tools you have (no observability MCP is connected, so say what a person should look at)' : 'Grafana or PostHog MCPs'}, with what passing looks like.
 
 Rules:
 - auto-m8 knows what you post during a run, so your own replies never wake you. Post comments as plain text.
 - Never mark a draft ready, and never merge or add to the merge queue in a review run. auto-m8 tells you when to merge.
 - Fix what a reviewer or CI shows is wrong. When you disagree, reply with the reason. When a decision belongs to the author (scope, design, a disputed review), don't act: say so in your last message on a line starting "NEEDS YOU:".
 - Visual Review (PostHog storybook snapshots): when the changed or new snapshots are what this PR or the master it picked up should produce, approve them and finalize the run yourself with the auto-m8 browser on the run page linked from the \`PostHog Visual Review / storybook\` check. Finalizing only writes baselines for this branch and is redone on the next head, so it is not a decision for the author. Raise NEEDS YOU only for a snapshot that looks like a real regression, and say which one.
-- Finish with a few lines: what you did per event, and the PR's state (CI, threads, stamphog verdict).`
+- Finish with a few lines: what you did per event, and the PR's state (CI, threads${!c || c.stamp === 'stamphog' ? ', stamphog verdict' : c.stamp ? `, ${c.stamp} verdict` : ', reviews'}).`
 
 const LATER = (events: string[]) => `New on this PR since your last run:\n${events.map(e => `- ${e}`).join('\n')}\nHandle them as before, then stop.`
 
-const MERGE = (url: string, head: string, plan: Plan) => `Time to merge ${url}. auto-m8 checked: approved, CI green on ${head.slice(0, 12)}, no open review threads, the plan says merge: auto${plan.after.length ? `, and every PR it waits on is verified in production (${plan.after.join(', ')})` : ''}.
+export const MERGE = (url: string, head: string, plan: Plan, profile?: ShipProfile | null) => `Time to merge ${url}. auto-m8 checked: approved, CI green on ${head.slice(0, 12)}, no open review threads, the plan says merge: auto${plan.after.length ? `, and every PR it waits on is verified in production (${plan.after.join(', ')})` : ''}.
 
 1. Re-check on the current head with \`gh pr view ${url} --json headRefOid,reviewDecision,statusCheckRollup,mergeStateStatus\`. If the head moved or anything is no longer true, don't merge; say what changed.
-2. If the repo merges through Trunk (a trunk-io[bot] comment on the PR), comment exactly \`/trunk merge\` on the PR, with nothing else in the comment: Trunk rejects any extra text. Then read Trunk's reply on the PR: "Submitted to Merge" means queued. Otherwise run \`gh pr merge ${url} --squash\`.
+2. ${profile ? mergeInstruction(profile, url) : `If the repo merges through Trunk (a trunk-io[bot] comment on the PR), comment exactly \`/trunk merge\` on the PR, with nothing else in the comment: Trunk rejects any extra text. Then read Trunk's reply on the PR: "Submitted to Merge" means queued. Otherwise run \`gh pr merge ${url} --squash\`.`}
 3. Reply with one line: MERGE QUEUED, MERGED, or NOT MERGED: <reason>.
 auto-m8 then follows it to production and starts your verify run once it has merged.`
 
-const VERIFY = (url: string, round: number, mergedAt: number, sha: string | null, plan: Plan | null) => `${url} merged at ${new Date(mergedAt).toISOString()}${sha ? ` as ${sha.slice(0, 12)}` : ''}. This is production check ${round} of 2: round 1 once it is deployed, round 2 two hours after the merge.
+export const VERIFY = (url: string, round: number, mergedAt: number, sha: string | null, plan: Plan | null, c?: ShipCtx) => `${url} merged at ${new Date(mergedAt).toISOString()}${sha ? ` as ${sha.slice(0, 12)}` : ''}. This is production check ${round} of 2: round 1 once it is deployed, round 2 two hours after the merge.
 
 The plan from the PR description:
 ${plan ? plan.raw : '(none: work out from the diff how it deploys and what would show it working or broken, and say so)'}
 
-1. Confirm it is live in production (the plan's deploy line: the deploy stage, ArgoCD app or image that carries ${sha ? sha.slice(0, 12) : 'the merge commit'}). Check what production runs now, not that it ran once: when another repo pins a version (a release tag bumped in a deploy or infra repo), confirm the pinned version contains the commit, e.g. \`gh api repos/<org>/<repo>/compare/<pinned tag>...<merge sha> -q .status\` is "behind" or "identical". For an ArgoCD app, read it directly (read-only, already logged in over Tailscale): \`argocd app list -o name | grep <service>\` to find it, then \`argocd app get argocd/<app> -o json\` for sync/health status, the live images (.status.summary.images) and the synced revision, and \`argocd app history argocd/<app>\` for when it last synced; if the CLI says the token expired, say so in your reply instead of guessing. If it is not live yet, reply with a line "NOT DEPLOYED: <where it is>" and stop; auto-m8 checks again in 15 minutes.
-2. Run every verify check twice: over a window before the merge (the baseline) and since the deploy. Use whichever observability MCPs you have (Grafana, PostHog, Datadog…).
+${c?.live ? `auto-m8 already confirmed from the repo's GitHub Deployments that it is live (${c.live}). Use step 1 only if the plan's deploy line names a target those deployments don't cover.\n` : c?.profile?.live.kind === 'merged' ? `auto-m8 found no deploy step for this repo (no deployments, releases or deploy workflows), so merged is live unless the plan's deploy line says otherwise.\n` : ''}1. Confirm it is live in production (the plan's deploy line: the deploy stage, ArgoCD app or image that carries ${sha ? sha.slice(0, 12) : 'the merge commit'}). Check what production runs now, not that it ran once: when another repo pins a version (a release tag bumped in a deploy or infra repo), confirm the pinned version contains the commit, e.g. \`gh api repos/<org>/<repo>/compare/<pinned tag>...<merge sha> -q .status\` is "behind" or "identical". For an ArgoCD app, read it directly (read-only, already logged in over Tailscale): \`argocd app list -o name | grep <service>\` to find it, then \`argocd app get argocd/<app> -o json\` for sync/health status, the live images (.status.summary.images) and the synced revision, and \`argocd app history argocd/<app>\` for when it last synced; if the CLI says the token expired, say so in your reply instead of guessing. If it is not live yet, reply with a line "NOT DEPLOYED: <where it is>" and stop; auto-m8 checks again in 15 minutes.
+2. Run every verify check twice: over a window before the merge (the baseline) and since the deploy. ${c?.tools?.length ? `Use the observability MCPs connected here: ${c.tools.join(', ')}.` : c?.tools ? 'No observability MCP is connected here: use what you can reach (logs, the app, the API), and mark checks you cannot judge "no signal".' : 'Use whichever observability MCPs you have (Grafana, PostHog, Datadog…).'}
 3. If every check ran and held, post a PR comment with a table (check, baseline, now), and reply with a line "VERIFIED". No signal is not a pass: a check that couldn't be judged (zero traffic or usage, e.g. a flag-gated page nobody opened yet; no data in the window; a tool or the browser unavailable) has not passed, even if nothing looks wrong. If any check had no signal and none regressed or failed, post the same table marking those checks "no signal" and why, and reply with a line "NO SIGNAL: <the checks without signal>" instead of VERIFIED. auto-m8 runs this round again later to retry them. Never write VERIFIED or result=pass while a check lacks signal.
 4. If a check regressed, open a revert PR (\`git revert\` the merge commit on a new branch from the default branch; in its description say which check failed and include a perch-plan with merge: manual). Post the evidence as a PR comment. Reply with a line "REGRESSION: <check> — revert PR <url>" and a line "NEEDS YOU: <what to decide>". Never merge the revert yourself.
 5. If a check isn't met but nothing got worse than the baseline (a revert would bring nothing back, or would undo what the PR did fix), don't open a revert. Name the follow-up PR that owns the rest (open it if none exists), post the evidence as a PR comment, and reply with a line "NOT MET: <check> — no regression; follow-up <PR url>". auto-m8 stops verifying this PR and follows the follow-up instead. Never write REGRESSION just to end the checks.
@@ -420,8 +445,8 @@ async function enroll() {
 // One shepherd conversation per PR, started in its worktree or resumed. If it can't start (the
 // worktree fetch failed, the repo isn't cloned), the run it claimed is given back: a run that never
 // happened must not count toward the daily cap, or the PR is paused having done nothing.
-async function converse(url: string, w: any, prompt: (first: string | null) => string) {
-  try { return await startOrResume(url, w, prompt) }
+async function converse(url: string, w: any, prompt: (first: string | null) => string, c?: ShipCtx) {
+  try { return await startOrResume(url, w, prompt, c) }
   catch (e) {
     run(`update shepherd_watch set runs = max(0, runs - 1) where url = ?`, url)
     const list = JSON.parse(get<any>('select own_windows from shepherd_watch where url = ?', url)?.own_windows ?? '[]')
@@ -430,7 +455,7 @@ async function converse(url: string, w: any, prompt: (first: string | null) => s
   }
 }
 
-async function startOrResume(url: string, w: any, prompt: (first: string | null) => string) {
+async function startOrResume(url: string, w: any, prompt: (first: string | null) => string, c?: ShipCtx) {
   const p = parse(url)
   if (w.conversation_id) {
     // The hourly worktree sweep may have removed an idle checkout: make it again before resuming,
@@ -441,7 +466,7 @@ async function startOrResume(url: string, w: any, prompt: (first: string | null)
   }
   const { dir, head } = await prWorktree(url)
   const id = randomUUID()
-  send({ by: 'shepherd', id, originParent: prSubject(url), cwd: dir, prompt: prompt(FIRST(url, head)), context: true, resume: false })
+  send({ by: 'shepherd', id, originParent: prSubject(url), cwd: dir, prompt: prompt(FIRST(url, head, c ?? await shipCtx(url))), context: true, resume: false })
   setTitle(id, `Shepherd: ${p.repo}#${p.number}`)
   editLabels([id], ['shepherd'])
   for (const c of all<any>('select conversation_id from conversation_prs where url = ? and conversation_id != ?', url, id)) link(id, c.conversation_id, 'related', `shepherd of #${p.number}`)
@@ -475,13 +500,14 @@ function claim(url: string, w: any, isRunning: (id: string) => boolean) {
 }
 
 async function review(url: string, w: any, pr: Snapshot, isRunning: (id: string) => boolean) {
-  const d = detect(pr, w, await hasStamphog(parse(url).slug), { me: await login(), windows: windows(w) })
+  const c = await shipCtx(url)
+  const d = detect(pr, w, c.stamp ?? null, { me: await login(), windows: windows(w) })
   if (!d.events.length) { if (w.pending) run('update shepherd_watch set pending = null, pending_since = null where url = ?', url); return false }
   // Let a burst land (bots post several comments in a row) before starting one run for all of it.
   if (!w.pending_since) { run('update shepherd_watch set pending = ?, pending_since = ? where url = ?', d.events.join('\n'), Date.now(), url); return true }
   if (Date.now() - w.pending_since < settings.shepherd.quietSeconds * 1000) { run('update shepherd_watch set pending = ? where url = ?', d.events.join('\n'), url); return true }
   if (!claim(url, w, isRunning)) return true
-  const id = await converse(url, w, first => first ? `${first}\n\nEvents now:\n${d.events.map(e => `- ${e}`).join('\n')}` : LATER(d.events))
+  const id = await converse(url, w, first => first ? `${first}\n\nEvents now:\n${d.events.map(e => `- ${e}`).join('\n')}` : LATER(d.events), c)
   run(`update shepherd_watch set conversation_id = ?, pending = null, pending_since = null, seen_comment = ?, seen_thread = ?, seen_review = ?,
        handled_ci = coalesce(?, handled_ci), handled_stamp = coalesce(?, handled_stamp) where url = ?`,
     id, d.seen.comment, d.seen.thread, d.seen.review, d.ci, d.stamp, url)
@@ -493,8 +519,10 @@ async function maybeMerge(url: string, w: any, pr: Snapshot, isRunning: (id: str
   const depStages = depStagesOf(plan)
   const blocker = mergeBlocker(pr, plan, depStages, w.handled_merge)
   run('update shepherd_watch set outcome = ? where url = ?', blocker ? `not merging: ${blocker}` : 'merging', url)
-  if (blocker || !claim(url, w, isRunning)) return
-  const id = await converse(url, w, first => first ? `${first}\n\n${MERGE(url, pr.head, plan!)}` : MERGE(url, pr.head, plan!))
+  if (blocker) return
+  const c = await shipCtx(url)
+  if (!claim(url, w, isRunning)) return
+  const id = await converse(url, w, first => first ? `${first}\n\n${MERGE(url, pr.head, plan!, c.profile)}` : MERGE(url, pr.head, plan!, c.profile), c)
   run('update shepherd_watch set conversation_id = ?, handled_merge = ? where url = ?', id, pr.head, url)
 }
 
@@ -564,10 +592,26 @@ async function production(url: string, w: any, pr: Snapshot, isRunning: (id: str
     }
     return
   }
-  if (Date.now() < (w.verify_due_at ?? 0) || !claim(url, w, isRunning)) return
+  if (Date.now() < (w.verify_due_at ?? 0)) return
   const round = w.verify_round || 1
-  const prompt = VERIFY(url, round, w.merged_at ?? mergedAt, w.merge_sha ?? pr.mergeSha, parsePlan(pr.body))
-  const id = await converse(url, w, first => first ? `${first}\n\n${prompt}` : prompt)
+  const c = await shipCtx(url)
+  // Where the repo publishes production Deployments, "is it live yet" is a check in code, not an agent
+  // run every 15 minutes. For the first three hours a merge that no deployment carries waits here; after
+  // that (a service that deploys some other way) the verify agent looks for itself, as before.
+  const sha = w.merge_sha ?? pr.mergeSha
+  if (round === 1 && sha && c.profile?.live.kind === 'deployments' && c.profile.live.environments?.length) {
+    try {
+      const l = await liveCheck(parse(url).slug, sha, w.merged_at ?? mergedAt, c.profile.live.environments)
+      if (l.live) c.live = l.detail
+      else if (Date.now() - (w.merged_at ?? mergedAt) < 3 * 60 * MIN) {
+        run('update shepherd_watch set verify_due_at = ?, outcome = ? where url = ?', Date.now() + 5 * MIN, `merged; waiting for the deploy (${l.detail})`.slice(0, 400), url)
+        return
+      }
+    } catch (e: any) { recordError('PR shepherd', e, `Checking deployments for ${url}`) }
+  }
+  if (!claim(url, w, isRunning)) return
+  const prompt = VERIFY(url, round, w.merged_at ?? mergedAt, sha, parsePlan(pr.body), c)
+  const id = await converse(url, w, first => first ? `${first}\n\n${prompt}` : prompt, c)
   run('update shepherd_watch set conversation_id = ?, awaiting = ?, awaiting_since = ? where url = ?', id, `verify:${round}`, Date.now(), url)
 }
 

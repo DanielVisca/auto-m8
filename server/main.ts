@@ -27,6 +27,7 @@ import { dismissDraft, draftInSlack, draftsFor, editDraft, getDraft, refreshCont
 import { recentPage, sidebar } from './sidebar.ts'
 import { evidence } from './evidence.ts'
 import { journey, mergePlan, queue as queuePr } from './journey.ts'
+import { shipProfile } from './shipprofile.ts'
 import { prPage, prSidebar } from './prview.ts'
 import { rateLast, setTurbo, turboFor, turnStats } from './turns.ts'
 import { data as canvasData, makeTile, onCanvas, onCanvasData, removeTile, reportTile, saveTile, tiles as canvasTiles } from './canvas.ts'
@@ -1164,6 +1165,12 @@ route('GET', '/api/explore/data', (_m, _r, _s, q) => swr(`data:${q.get('concept'
 setTimeout(() => { if (!process.env.PERCH_NO_AGENT_SYNC) prewarmRuntime() }, 30_000).unref()
 route('POST', '/api/explore/dream/save', async (_m, req) => { const b = await body(req); return saveDream(b as any) })
 route('GET', '/api/pr/journey', (_m, _r, _s, q) => journey(String(q.get('url') ?? ''), q.get('fresh') === '1'))
+// A repo's ship profile (how it reviews, merges, deploys); refresh=1 detects it again now.
+route('GET', '/api/ship-profile', async (_m, _r, _s, q) => {
+  const repo = String(q.get('repo') ?? '')
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('repo must be owner/name')
+  return { profile: await shipProfile(repo, q.get('refresh') === '1') }
+})
 route('POST', '/api/pr/queue', async (_m, req) => { const b = await body(req); return queuePr(String(b.pr ?? ''), b.on !== false) })
 route('POST', '/api/prs/orchestrate', async (_m, req) => { const b = await body(req); const r = await orchestrate(b.prs ?? [], b.where === 'cloud' ? 'cloud' : 'here', b.goal ?? 'both'); broadcast('conversations'); return r })
 route('POST', '/api/pr/fix-ci', async (_m, req) => { const b = await body(req); const r = await fixCi(String(b.pr ?? ''), b.where === 'here' ? 'here' : 'cloud', !!b.force); broadcast('conversations'); return r })
