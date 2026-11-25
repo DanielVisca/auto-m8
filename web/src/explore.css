@@ -127,3 +127,4 @@ a.ex-chip { cursor: pointer; }
 .ex-hubs { margin-top: 4px; }
 .explore-popout { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
 .explore-popout .explore { flex: 1; min-height: 0; }
+.ex-what { margin: 2px 0 8px; line-height: 1.45; display: flex; flex-direction: column; gap: 4px; }

@@ -120,7 +120,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
     // The first load after coming back keeps your place on the timeline; later changes start from now.
     setLoading(true); setErr(''); setTl(null); if (!restoring.current) setStep(null); restoring.current = false; setPlaying(false)
     api.get<GraphRes>(`/api/explore/graph?${qs({ repo, focus, hubs: hubs ? '1' : '' })}`)
-      .then(r => { if (gone) return; setG(r); localStorage.setItem('perch.explore.repos', JSON.stringify([r.repo, ...recentRepos().filter(x => x !== r.repo && x !== repo)].slice(0, 8))); localStorage.setItem('perch.explore.focus', focus) })
+      .then(r => { if (gone) return; setG(r); post('/api/explore/summary/warm', { repo: r.repo, ids: r.nodes.slice().sort((a, b) => (a.role === 'focus' ? -1 : 0) - (b.role === 'focus' ? -1 : 0) || b.score - a.score).map(n => n.id).slice(0, 10) }).catch(() => {}); localStorage.setItem('perch.explore.repos', JSON.stringify([r.repo, ...recentRepos().filter(x => x !== r.repo && x !== repo)].slice(0, 8))); localStorage.setItem('perch.explore.focus', focus) })
       .catch(e => !gone && setErr(String(e?.message ?? e)))
       .finally(() => !gone && setLoading(false))
     return () => { gone = true }
@@ -480,6 +480,15 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
   const [open, setOpen] = useState<string | null>(null)
   const [runs, setRuns] = useState('')
   const [data, setData] = useState('')
+  // "What is this": the team's own words now, a short AI summary when it's ready (cached per version of the folder).
+  const [sum, setSum] = useState<any>(null)
+  useEffect(() => {
+    let gone = false, tries = 0, t: ReturnType<typeof setTimeout>
+    setSum(null)
+    const load = () => api.get(`/api/explore/summary?${qs({ repo, id })}`).then((x: any) => { if (gone) return; setSum(x); if (x.status === 'generating' && ++tries < 40) t = setTimeout(load, 2500) }).catch(e => !gone && setSum({ status: 'error', error: String(e?.message ?? e) }))
+    load()
+    return () => { gone = true; clearTimeout(t) }
+  }, [repo, id])
   // Ignore an answer for a concept you've already clicked away from (a slow cold load could overwrite the newer one).
   useEffect(() => { let gone = false; setD(null); api.get(`/api/explore/node?${qs({ repo, id })}`).then(x => !gone && setD(x)).catch(e => !gone && setD({ error: String(e?.message ?? e) })); return () => { gone = true } }, [repo, id])
   if (!d) return <div className="card small muted"><i className="spin" /> Loading {id}…</div>
@@ -527,6 +536,12 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
         {introduced && <a className="ex-chip" href={introduced.commit.url ?? undefined} target="_blank" rel="noreferrer" title={`First seen ${introduced.date.slice(0, 10)} by ${introduced.commit.author}\n${introduced.commit.subject}\n${introduced.source}${introduced.approx ? '\n≈ estimate: this clone is shallow' : ''}`}>since {introduced.date.slice(0, 7)}{introduced.approx ? ' ≈' : ''}</a>}
         <span className="ex-chip" title={`Built on ${allCount(d.dependsOn)} modules: ${specificCount(d.dependsOn)} specific, ${allCount(d.dependsOn) - specificCount(d.dependsOn)} shared foundations`}>built on {specificCount(d.dependsOn)}</span>
         <span className="ex-chip" title={`${allCount(d.usedBy)} modules build on it: ${specificCount(d.usedBy)} specific, ${allCount(d.usedBy) - specificCount(d.usedBy)} shared foundations`}>used by {specificCount(d.usedBy)}</span>
+      </div>
+      <div className="ex-what small">
+        {sum?.ai && <div title={`AI summary (${sum.ai.model}), written only from this module's docs, models and largest files${sum.ai.sources?.length ? `:\n${sum.ai.sources.join('\n')}` : ''}\nRedone when the folder changes.`}>{sum.ai.text} <span className="ex-badge">AI</span></div>}
+        {sum?.own && <div className="muted" title={`In the team's own words, from ${sum.own.file}`}>“{sum.own.text}” <span className="tiny">{sum.own.file.split('/').pop()}</span></div>}
+        {sum?.status === 'generating' && <div className="muted"><i className="spin" /> writing a short summary…</div>}
+        {sum?.status === 'error' && !sum?.own && <div className="muted tiny" title={sum.error}>No summary yet (couldn't write one).</div>}
       </div>
       <div className="ex-actions small">
         <button className="small" onClick={onAsk} title="Ask the chat about this concept; it gets the map's evidence and is told to cite files">Ask</button>
