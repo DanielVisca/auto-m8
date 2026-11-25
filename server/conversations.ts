@@ -308,6 +308,20 @@ export function focusSuggestions() {
   return { labels, projects, repos, current: settings.focus }
 }
 
+// When a chat last moved for you: the last message you sent it, or the moment the agent finished
+// answering one. Recent sorts by this, so a chat goes to the top when you write and again when the
+// answer is done, and doesn't jump around while the agent is mid-turn writing its transcript
+// (updated_at). Only perch-run turns count: terminal sessions' transcript turns are backfilled
+// lazily and would sink an active one, so those (and chats with no turns) keep updated_at.
+export function activityBySession(): Map<string, number> {
+  const map = new Map<string, number>()
+  try {
+    for (const r of all<{ id: string; at: number }>(`select conversation_id id, max(max(sent_at, coalesce(finished_at, 0))) at from turns where source = 'perch' group by 1`)) map.set(r.id, r.at)
+  } catch {} // no turns table yet (tests, first boot)
+  return map
+}
+export const activityOf = (r: Row, map: Map<string, number>): number => map.get(r.id) ?? r.updated_at
+
 export function list(input: { q?: string; states?: string[]; source?: string; sort?: string; limit?: number; includeHidden?: boolean; focus?: boolean }) {
   const q = parseQuery(input.q ?? '')
   const where: string[] = []
@@ -371,6 +385,7 @@ export function list(input: { q?: string; states?: string[]; source?: string; so
   if (q.pinned) out = out.filter(r => r.pinned)
 
   const sort = input.sort ?? 'updated'
+  const activity = activityBySession()
   if (scores && (sort === 'relevance' || sort === 'updated')) {
     // Relevance, nudged toward what is recent, live and pinned; done and archived sink.
     const boost: Record<string, number> = { running: 1.4, waiting: 1.4, active: 1.25, later: 1, idle: 0.9, done: 0.75, archived: 0.6 }
@@ -382,7 +397,7 @@ export function list(input: { q?: string; states?: string[]; source?: string; so
   } else {
     const ORDER = ['running', 'waiting', 'active', 'later', 'idle', 'done', 'archived', 'hidden']
     const cmp: Record<string, (a: Row, b: Row) => number> = {
-      updated: (a, b) => b.updated_at - a.updated_at,
+      updated: (a, b) => activityOf(b, activity) - activityOf(a, activity),
       created: (a, b) => b.started_at - a.started_at,
       title: (a, b) => String(a.title ?? a.first_prompt ?? '').localeCompare(String(b.title ?? b.first_prompt ?? '')),
       messages: (a, b) => b.messages - a.messages,
@@ -392,7 +407,7 @@ export function list(input: { q?: string; states?: string[]; source?: string; so
     out.sort(cmp[sort] ?? cmp.updated)
     out.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
   }
-  return { conversations: out.slice(0, input.limit ?? 400).map(r => shared ? { ...r } : r), counts, query: q, focus: focus ? { areas: settings.focus.areas, hidden: hiddenByFocus } : null }
+  return { conversations: out.slice(0, input.limit ?? 400).map(r => ({ ...(shared ? { ...r } : r), activity_at: activityOf(r, activity) }) as Row), counts, query: q, focus: focus ? { areas: settings.focus.areas, hidden: hiddenByFocus } : null }
 }
 
 // Every conversation, hydrated: what the sidebar, home, brief and plain lists all start from. One

@@ -1,7 +1,7 @@
 // The conversation sidebar, organised by state rather than by folders:
 // - Pinned: what you pinned, always on top, set apart.
-// - Now: the few with the latest message (yours or the agent's) among the ones you've been in.
-//   Opening a chat never reorders it; only new messages do.
+// - Now: the few you've been in that moved last: you sent a message, or the agent finished answering
+//   one (activityOf). Opening a chat never reorders it, and neither does an agent mid-turn.
 // - Needs you: an agent asked something, failed, or stalled.
 // - Working: agents running right now that aren't already in Now.
 // - By work: everything else still open, grouped by what it's about: its PR (or the stack the PR
@@ -18,13 +18,13 @@ export function sidebar() {
   let { conversations: rows, counts } = list({ limit: 400 })
   // Pinned: what matters most right now. Always first, whatever its state (even auto-archived or automated; hiding or archiving yourself unpins).
   const pinned = list({ q: 'is:pinned is:any', states: ['running', 'waiting', 'active', 'later', 'idle', 'done', 'archived'], limit: 100, focus: false }).conversations
-    .sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0))
+    .sort((a, b) => (b.activity_at ?? b.updated_at ?? 0) - (a.activity_at ?? a.updated_at ?? 0))
   const pinnedIds = new Set(pinned.map(r => r.id))
   rows = rows.filter(r => !pinnedIds.has(r.id))
   const engaged = (r: Row) => Math.max(r.seen_at ?? 0, r.state_at ?? 0)
   // A conversation you're in stays here while its agent answers you (it shows its running dot);
   // "working" is for agents running in the background.
-  const now = [...rows].filter(r => engaged(r) > 0).sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0)).slice(0, NOW)
+  const now = [...rows].filter(r => engaged(r) > 0).sort((a, b) => (b.activity_at ?? b.updated_at ?? 0) - (a.activity_at ?? a.updated_at ?? 0)).slice(0, NOW)
   const taken = new Set(now.map(r => r.id))
   const needs = rows.filter(r => r.effective === 'waiting' && !taken.has(r.id))
   needs.forEach(r => taken.add(r.id))
@@ -59,14 +59,14 @@ export function sidebar() {
     }
     const cur = groups.get(g.key) ?? { ...g, items: [], last: 0 }
     cur.items.push(r)
-    cur.last = Math.max(cur.last, r.updated_at)
+    cur.last = Math.max(cur.last, r.activity_at ?? r.updated_at)
     groups.set(g.key, cur)
   }
   const archived = counts.archived ?? 0 // the same pool as the list above, so the same number as listing them
   // Agent runs still open, running ones first. Their parent (who delegated it) is named when known.
   const agents = list({ q: 'is:auto', states: ['running', 'waiting', 'active', 'later', 'idle'], limit: 200, focus: false }).conversations
     .filter(r => !pinnedIds.has(r.id))
-    .sort((a, b) => Number(b.effective === 'running') - Number(a.effective === 'running') || (b.updated_at ?? 0) - (a.updated_at ?? 0))
+    .sort((a, b) => Number(b.effective === 'running') - Number(a.effective === 'running') || (b.activity_at ?? b.updated_at ?? 0) - (a.activity_at ?? a.updated_at ?? 0))
   let parents = new Map<string, any>()
   try {
     parents = new Map(all<any>(`select d.child, coalesce(u.title, c.title, c.first_prompt) title, d.parent from delegations d
@@ -76,7 +76,7 @@ export function sidebar() {
   return { pinned, now, needs, working, groups: [...groups.values()].sort((a, b) => b.last - a.last), archived, agents }
 }
 
-// "More recent": the chats you've been in, past the first few shown in Now, newest message first.
+// "More recent": the chats you've been in, past the first few shown in Now, by your last message or the agent's last finished answer.
 // Paged for the sidebar's scroll-to-load list. Reaches done and archived ones too, since finished
 // work you were just in is exactly what you go back for; pinned ones already sit on top.
 export function recentPage(offset = 0, limit = 15) {
@@ -86,6 +86,6 @@ export function recentPage(offset = 0, limit = 15) {
   const inNow = new Set(sidebar().now.map(r => r.id))
   const rows = list({ states: ['running', 'waiting', 'active', 'later', 'idle', 'done', 'archived'], limit: 100_000 }).conversations
     .filter(r => !r.pinned && !inNow.has(r.id) && engaged(r) > 0)
-    .sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0))
+    .sort((a, b) => (b.activity_at ?? b.updated_at ?? 0) - (a.activity_at ?? a.updated_at ?? 0))
   return { conversations: rows.slice(offset, offset + limit), total: rows.length, offset, limit }
 }

@@ -93,7 +93,7 @@ function Row({ c, active, selected, onOpen, onMenu, onSelect }: {
       <div className="row-top">
         <span className={`dot s-${c.effective}`} title={c.effective} />
         <span className="row-title">{c.returned ? '↩ ' : ''}{(c as any).automated ? '🤖 ' : ''}{titleOf(c).replace(/^\[sandbox_prompt:[^\]]*\]\s*/, '')}</span>
-        <span className="muted small" title={snoozed ? `snoozed until ${new Date(c.snooze_until!).toLocaleString()}` : ''}>{snoozed ? `⏾ ${ago(2 * Date.now() - c.snooze_until!)}` : ago(c.updated_at)}</span>
+        <span className="muted small" title={snoozed ? `snoozed until ${new Date(c.snooze_until!).toLocaleString()}` : ''}>{snoozed ? `⏾ ${ago(2 * Date.now() - c.snooze_until!)}` : ago(c.activity_at ?? c.updated_at)}</span>
       </div>
       {c.snippet && <div className="snippet small" dangerouslySetInnerHTML={{ __html: escapeSnippet(c.snippet) }} />}
       {c.reason && <div className="reason small">{c.reason}{c.reason.startsWith('auto-m8 flagged') && <button className="linklike small" title="Not worth my attention: stop flagging it until it moves again" onClick={e => { e.stopPropagation(); post(`/api/conversations/${encodeURIComponent(c.id)}/not-needed`) }}> · not needed</button>}</div>}

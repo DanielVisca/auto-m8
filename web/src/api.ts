@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type PR = { url: string; created?: number; state?: string; draft?: number; review?: string; checks?: string; number?: number; repo?: string; title?: string }
 export type Conversation = {
   id: string; source: 'claude' | 'posthog-code' | 'posthog-task'; title: string | null; first_prompt: string | null
-  cwd: string | null; branch: string | null; started_at: number; updated_at: number; messages: number
+  cwd: string | null; branch: string | null; started_at: number; updated_at: number; activity_at?: number; messages: number
   status: string | null; url: string | null; origin: string | null
   state: string | null; state_auto: number | null; pinned: number | null; note: string | null
   effective: State; prs: PR[]; link_count: number; snippet?: string; labels: string[]; snooze_until: number | null; returned?: boolean; reason?: string | null; slack_url?: string | null
