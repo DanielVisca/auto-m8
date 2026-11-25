@@ -320,17 +320,25 @@ function BrowserFeed({ items, boxRef, onHeight }: { items: FeedItem[]; boxRef: R
     e.preventDefault()
     const el = boxRef.current; if (!el) return
     const panel = el.parentElement?.getBoundingClientRect()
+    // Like the sidebar: drag it down past its smallest size and it collapses to its header; drag a
+    // collapsed one up and it opens again, following the pointer. The last open height is kept.
     const startY = e.clientY, startH = el.offsetHeight
-    let last = startH
-    const move = (ev: PointerEvent) => { last = Math.round(Math.max(90, Math.min((panel?.height ?? 900) - 160, startH + (startY - ev.clientY)))); setHeightState(last); if (collapsed) setCollapsed(false) }
-    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); document.body.style.cursor = ''; try { localStorage.setItem(HKEY, String(last)) } catch {} }
+    let last: number | null = null, shut = collapsed
+    const move = (ev: PointerEvent) => {
+      const want = startH + (startY - ev.clientY)
+      if (want < 60) { if (!shut) { shut = true; setCollapsed(true) } return }
+      if (shut) { shut = false; setCollapsed(false) }
+      last = Math.round(Math.max(90, Math.min((panel?.height ?? 900) - 160, want)))
+      setHeightState(last)
+    }
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); document.body.style.cursor = ''; if (last != null && !shut) try { localStorage.setItem(HKEY, String(last)) } catch {} }
     document.body.style.cursor = 'ns-resize'
     addEventListener('pointermove', move); addEventListener('pointerup', up)
   }
   const latest = items[items.length - 1]
   return (
     <div ref={boxRef} className={`browser-feed ${collapsed ? 'collapsed' : ''}`} style={!collapsed && height ? { height } : undefined}>
-      <div className="feed-grip" onPointerDown={drag} onDoubleClick={() => { setHeightState(null); try { localStorage.removeItem(HKEY) } catch {} }} title="Drag to resize the activity panel. Double-click for the default size." />
+      <div className="feed-grip" onPointerDown={drag} onDoubleClick={() => { setHeightState(null); try { localStorage.removeItem(HKEY) } catch {} }} title="Drag to resize the activity panel; drag it all the way down to collapse it, up to open it. Double-click for the default size." />
       <div className="feed-head" onClick={() => setCollapsed(!collapsed)} title={collapsed ? 'Show the activity panel' : 'Collapse the activity panel'}>
         <span className="chev">{collapsed ? '›' : '⌄'}</span>
         <span className="ttl">Activity</span>
