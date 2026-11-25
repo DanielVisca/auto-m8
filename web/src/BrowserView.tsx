@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, post, useLive } from './api'
 import { Popover } from './Popover'
 import './browser.css'
@@ -43,9 +43,12 @@ function keyOf(e: React.KeyboardEvent): { type: 'key'; key: string } | { type: '
   return null
 }
 
-// fill: the parent sets the height (a dragged dock); the page is fitted inside it. Otherwise the view takes the page's shape.
-export function BrowserView({ owner, compact, onCollapse, fill }: { owner: string; compact?: boolean; onCollapse?: () => void; fill?: boolean }) {
+// The view takes the page's shape at its width. cap: the most the whole view may take (a dragged dock);
+// past it the page is fitted inside instead.
+export function BrowserView({ owner, compact, onCollapse, cap }: { owner: string; compact?: boolean; onCollapse?: () => void; cap?: number | null }) {
   const img = useRef<HTMLImageElement>(null)
+  const root = useRef<HTMLDivElement>(null)
+  const [chrome, setChrome] = useState(0) // header and approval rows above the page
   const stage = useRef<HTMLDivElement>(null)
   const sock = useRef<WebSocket | null>(null)
   const meta = useRef<{ deviceWidth: number; deviceHeight: number }>({ deviceWidth: 0, deviceHeight: 0 })
@@ -55,6 +58,14 @@ export function BrowserView({ owner, compact, onCollapse, fill }: { owner: strin
   const [ratio, setRatio] = useState<number | null>(null) // the page's width/height, so the view fills its width without side bars
   const [err, setErr] = useState<string | null>(null)
 
+  // What sits above the page in the dock (the header, approval rows), so a cap leaves the page the rest.
+  useLayoutEffect(() => {
+    const el = root.current, st = stage.current
+    if (!el || !st) return
+    const dock = el.closest('.browser-dock') as HTMLElement | null
+    const c = Math.round(st.getBoundingClientRect().top - (dock ?? el).getBoundingClientRect().top) + 2 // + the dock's top border and a pixel of slack
+    if (Math.abs(c - chrome) > 1) setChrome(c)
+  })
   // The stream: frames go straight into the <img> (no re-render per frame); reconnects when it drops.
   useEffect(() => {
     let closed = false, retry: any, wait = 1000
@@ -137,7 +148,7 @@ export function BrowserView({ owner, compact, onCollapse, fill }: { owner: strin
   })
 
   return (
-    <div className={`browserview ${compact ? 'compact' : ''}`}>
+    <div ref={root} className={`browserview ${compact ? 'compact' : ''}`}>
       <div className="view-head">
         <div className="grow title ellipsis" title={url}>🌐 {st.title || hostOf(url) || 'Agent browser'} {url && <span className="muted small">{hostOf(url)}</span>}
           {taken ? <span className="term-ask"> · you have control</span> : conn === 'live' ? <span className="muted small" title="The agent in this chat drives this window."> · agent driving</span> : <span className="muted small"> · {conn === 'none' ? 'no window' : 'connecting…'}</span>}
@@ -151,7 +162,7 @@ export function BrowserView({ owner, compact, onCollapse, fill }: { owner: strin
       </div>
       <ApprovalBar approvals={st.approvals} />
       {err && <div className="muted small pad-x bad">{err}</div>}
-      <div ref={stage} className={`browser-stage ${taken ? 'taken' : ''} ${ratio && !fill ? 'fit' : ''}`} tabIndex={0} style={ratio && !fill ? { aspectRatio: String(ratio) } : undefined}
+      <div ref={stage} className={`browser-stage ${taken ? 'taken' : ''} ${ratio ? 'fit' : ''}`} tabIndex={0} style={ratio ? { aspectRatio: String(ratio), maxHeight: cap ? Math.max(80, cap - chrome) : undefined } : undefined}
         onClick={e => { if (!taken) return; const p = toPage(e.clientX, e.clientY); if (p) { stage.current?.focus(); send({ type: 'click', ...p }) } }}
         onKeyDown={e => { if (!taken) return; const k = keyOf(e); if (!k) return; e.preventDefault(); e.stopPropagation(); send(k) }}
         onPaste={e => { if (!taken) return; const text = e.clipboardData.getData('text'); if (text) { e.preventDefault(); send({ type: 'text', text }) } }}>
@@ -192,10 +203,12 @@ export function BrowserDock({ owner, approvals }: { owner: string; approvals: Br
     </div>
   )
   return (
-    <div ref={box} className={`browser-dock ${height ? 'sized' : 'fit'}`} style={height ? { height } : undefined}>
+    // The dragged height is a ceiling, not a size: in a narrow pane the page needs less, and the view
+    // shrinks to it instead of letterboxing the page between empty bands.
+    <div ref={box} className={`browser-dock ${height ? 'sized' : 'fit'}`} style={height ? { maxHeight: height } : undefined}>
       <div className="browser-dock-grip" onPointerDown={startDrag} onDoubleClick={() => setHeight(null)}
         title="Drag to resize the live view. Double-click to fit the page again." />
-      <BrowserView owner={owner} compact fill={!!height} onCollapse={() => toggle(true)} />
+      <BrowserView owner={owner} compact cap={height} onCollapse={() => toggle(true)} />
     </div>
   )
 }

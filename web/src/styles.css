@@ -1193,7 +1193,11 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 
 /* agent browser */
 .browser-dock { border-top: 1px solid var(--line); display: flex; flex-direction: column; }
-.browser-dock:not(.collapsed) { height: 320px; min-height: 140px; max-height: 70vh; resize: vertical; overflow: hidden; }
+.browser-dock:not(.collapsed) { height: 320px; min-height: 140px; max-height: 70vh; overflow: hidden; }
+/* Once the page's shape is known the view is exactly as tall as the page at this width (up to the cap), so no empty bands above and below. */
+.browser-dock:not(.collapsed):has(.browser-stage.fit) { height: auto; }
+.browser-dock:has(.browser-stage.fit) .browserview { height: auto; }
+.browser-stage.fit { flex: 0 1 auto; min-height: 0; }
 .browser-dock-bar { display: flex; gap: 6px; align-items: center; background: none; border: none; border-radius: 0; padding: 4px 12px; text-align: left; font-size: 12.5px; min-width: 0; }
 .browserview { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; }
 .browserview.compact .view-head { padding-top: 4px; padding-bottom: 4px; min-height: 0; }
