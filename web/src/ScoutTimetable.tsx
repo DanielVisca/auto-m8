@@ -1,7 +1,9 @@
+import { useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { humanCron, useLive } from './api'
 
 // The Railyard's scout timetable, merged with the scout list (Library → Scouts).
-type Run = { at: number; status: string; emitted: number; url: string | null }
+type Run = { at: number; done?: number | null; status: string; emitted: number; url: string | null; summary?: string | null; failure?: string | null; findings?: string[]; cost?: number | null; perch?: string | null }
 type Scout = { name: string; skill: string; enabled: boolean; cron: string | null; everyMin: number | null; lastRunAt: number | null; runs: Run[] }
 type RoutineRun = { at: number; done: number | null; status: string; conversation: string | null; detail: string | null }
 type Routine = { id?: string; name: string; cron: string; enabled: boolean; lastRunAt: number | null; lastStatus: string | null; runs?: RoutineRun[] }
@@ -36,6 +38,92 @@ function ago(t: number | null | undefined) {
   return (s < 90 ? `${Math.round(s)}s` : s < 5400 ? `${Math.round(s / 60)}m` : s < 172800 ? `${(s / 3600).toFixed(s < 36000 ? 1 : 0)}h` : `${Math.round(s / 86400)}d`) + ' ago'
 }
 const failed = (st: string) => st === 'failed' || st === 'error'
+const dur = (a: number, b?: number | null) => { if (!b) return ''; const s = (b - a) / 1e3; return s < 90 ? `${Math.round(s)}s` : s < 5400 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h` }
+
+// Scout summaries are markdown from an agent: render only links, code, bold and bullets, everything else as text.
+function Md({ text }: { text: string }) {
+  const inline = (line: string, k: number) => {
+    const out: ReactNode[] = []
+    const re = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|(https?:\/\/[^\s)]+)/g
+    let last = 0, m: RegExpExecArray | null, i = 0
+    while ((m = re.exec(line))) {
+      if (m.index > last) out.push(line.slice(last, m.index))
+      const key = `${k}.${i++}`
+      if (m[1]) out.push(<a key={key} href={m[2]} target="_blank" rel="noreferrer">{m[1]}</a>)
+      else if (m[3]) out.push(<code key={key}>{m[3]}</code>)
+      else if (m[4]) out.push(<b key={key}>{m[4]}</b>)
+      else out.push(<a key={key} href={m[5]} target="_blank" rel="noreferrer">{m[5].replace(/^https?:\/\//, '').slice(0, 48)}</a>)
+      last = re.lastIndex
+    }
+    if (last < line.length) out.push(line.slice(last))
+    return out
+  }
+  return <div className="run-md">{text.split('\n').filter(l => l.trim()).map((l, k) => {
+    const b = l.match(/^\s*[-*]\s+(.*)/)
+    return b ? <div key={k} className="run-li">• {inline(b[1], k)}</div> : <p key={k}>{inline(l, k)}</p>
+  })}</div>
+}
+
+type Hover = { el: HTMLElement; body: ReactNode }
+// One hover card for every run mark: opens on hover, stays while the pointer is on the card (so its links work),
+// and closes shortly after the pointer leaves both.
+function useRunHover() {
+  const [h, setH] = useState<Hover | null>(null)
+  const t = useRef<number | undefined>(undefined)
+  const show = (el: HTMLElement, body: ReactNode) => { clearTimeout(t.current); t.current = window.setTimeout(() => setH({ el, body }), 120) }
+  const hide = () => { clearTimeout(t.current); t.current = window.setTimeout(() => setH(null), 200) }
+  const keep = () => clearTimeout(t.current)
+  let card: ReactNode = null
+  if (h && h.el.isConnected) {
+    const a = h.el.getBoundingClientRect(), w = Math.min(440, innerWidth - 16)
+    const left = Math.max(8, Math.min(a.left + a.width / 2 - w / 2, innerWidth - w - 8))
+    const below = innerHeight - a.bottom > 260 || a.top < innerHeight / 2
+    card = createPortal(
+      <div className="run-card" onMouseEnter={keep} onMouseLeave={hide}
+        style={{ left, width: w, ...(below ? { top: a.bottom + 6 } : { bottom: innerHeight - a.top + 6 }), maxHeight: (below ? innerHeight - a.bottom : a.top) - 16 }}>
+        {h.body}
+      </div>, document.body)
+  }
+  return { show, hide, card }
+}
+
+function RunCard({ r, scout }: { r: Run; scout: string }) {
+  const bad = failed(r.status)
+  const head = r.status === 'in_progress' ? 'Running now' : bad ? 'Failed' : r.emitted ? `Found ${r.emitted}` : 'Nothing to report'
+  return (
+    <>
+      <div className="run-head">
+        <b style={{ color: bad ? '#ef4444' : r.emitted ? '#22c55e' : undefined }}>{head}</b>
+        <span className="muted small"> · {scout} · {new Date(r.at).toLocaleString()}{r.done ? ` · took ${dur(r.at, r.done)}` : ''}{r.cost != null ? ` · $${r.cost.toFixed(2)}` : ''}</span>
+      </div>
+      {bad && <div className="run-fail">{r.failure || 'PostHog gave no failure reason; open the run to see its log.'}</div>}
+      {r.summary ? <Md text={r.summary} /> : !bad && r.status !== 'in_progress' && <div className="muted small">No summary on this run.</div>}
+      {!!r.findings?.length && <div className="muted small run-ids">{r.findings.join(' · ')}</div>}
+      <div className="run-actions">
+        {r.perch && <button className="small" onClick={() => window.dispatchEvent(new CustomEvent('perch-open', { detail: r.perch }))}>Open in auto-m8</button>}
+        {r.url && <a className="small" href={r.url} target="_blank" rel="noreferrer">Open in PostHog ↗</a>}
+        <span className="muted small">or click the mark</span>
+      </div>
+    </>
+  )
+}
+
+function RoutineCard({ x, name }: { x: RoutineRun; name: string }) {
+  const bad = x.status === 'error' || x.status === 'stalled'
+  const head = bad ? (x.status === 'stalled' ? 'Stalled' : 'Failed') : x.status === 'running' ? 'Running now' : x.status === 'noop' ? 'Nothing to do' : 'Done'
+  return (
+    <>
+      <div className="run-head">
+        <b style={{ color: bad ? '#ef4444' : undefined }}>{head}</b>
+        <span className="muted small"> · {name} · {new Date(x.at).toLocaleString()}{x.done ? ` · took ${dur(x.at, x.done)}` : ''}</span>
+      </div>
+      {x.detail ? (bad ? <div className="run-fail">{x.detail}</div> : <Md text={x.detail} />) : <div className="muted small">No detail recorded.</div>}
+      <div className="run-actions">
+        <span className="muted small">{x.conversation ? 'click the mark to open its chat' : 'no chat was kept for this run'}</span>
+      </div>
+    </>
+  )
+}
 
 type Config = { id: string; skill_name: string; display_name?: string; description?: string; enabled?: boolean; status?: string; run_cron_schedule?: string | null; run_interval_minutes?: number | null; last_run_at?: string | null; consecutive_failure_count?: number; pause_reason?: string | null; owners?: { first_name: string }[]; mine?: boolean }
 type TeamRun = { run_id: string; skill_name: string; status: string; emitted_count?: number; created_at: string; posthog_url?: string | null; summary?: string | null; failure_reason?: string | null; perch_id?: string | null }
@@ -59,10 +147,12 @@ export function ScoutTable({ scouts, runs, showRoutines, sortByCadence, cost, ms
     return { c, s, marks, p: period(s) }
   })
   if (sortByCadence) rows.sort((a, b) => a.p - b.p)
-  const open = (m: Run & { team?: TeamRun }) => m.team ? onOpenRun(m.team) : m.url && window.open(m.url, '_blank')
+  // Drill in: the run's chat in auto-m8 when it was imported, else the PostHog task run.
+  const open = (m: Run & { team?: TeamRun }) => m.perch ? window.dispatchEvent(new CustomEvent('perch-open', { detail: m.perch })) : m.team ? onOpenRun(m.team) : m.url && window.open(m.url, '_blank')
+  const hover = useRunHover()
   return (
     <section className="card scout-tt">
-      <div className="muted small">Last runs, newest right · ● found something · ✕ failed · grey · = nothing to do (local) · click a mark to open the run</div>
+      <div className="muted small">Last runs, newest right · ● found something · ✕ failed · grey · = nothing to do (local) · hover a mark for what it found or why it failed, click to drill in</div>
       <table>
         <thead><tr><th>scout</th><th className="tt-wide">every</th><th>last</th><th className="tt-mid">runs</th><th className="tt-wide">7d</th><th /></tr></thead>
         <tbody>
@@ -80,7 +170,8 @@ export function ScoutTable({ scouts, runs, showRoutines, sortByCadence, cost, ms
                 <td className="tt-runs tt-mid">
                   {marks.slice(0, 10).reverse().map((r, i) => (
                     <span key={i} className="clickable" onClick={() => open(r)}
-                      title={`${new Date(r.at).toLocaleString()} · ${r.status}${r.emitted ? ` · ${r.emitted} found` : ''}${r.team?.summary || r.team?.failure_reason ? `\n${r.team.summary ?? r.team.failure_reason}` : ''}`}
+                      onMouseEnter={e => hover.show(e.currentTarget, <RunCard r={{ ...r, summary: r.summary ?? r.team?.summary, failure: r.failure ?? r.team?.failure_reason }} scout={s.name} />)}
+                      onMouseLeave={hover.hide}
                       style={{ color: r.status === 'in_progress' ? 'var(--accent)' : failed(r.status) ? '#ef4444' : '#22c55e', animation: r.status === 'in_progress' ? 'pulse 1.4s infinite' : undefined }}>
                       {failed(r.status) ? '✕' : r.emitted ? '●' : '·'}
                     </span>
@@ -112,7 +203,8 @@ export function ScoutTable({ scouts, runs, showRoutines, sortByCadence, cost, ms
                     return (
                       <span key={i} className={x.conversation ? 'clickable' : undefined}
                         onClick={() => x.conversation && window.dispatchEvent(new CustomEvent('perch-open', { detail: x.conversation }))}
-                        title={`${new Date(x.at).toLocaleString()} · ${x.status}${x.detail ? `\n${x.detail}` : ''}`}
+                        onMouseEnter={e => hover.show(e.currentTarget, <RoutineCard x={x} name={r.name} />)}
+                        onMouseLeave={hover.hide}
                         style={{ color: x.status === 'running' ? 'var(--accent)' : bad ? '#ef4444' : x.status === 'noop' ? 'var(--muted)' : '#22c55e', animation: x.status === 'running' ? 'pulse 1.4s infinite' : undefined }}>
                         {bad ? '✕' : '·'}
                       </span>
@@ -126,6 +218,7 @@ export function ScoutTable({ scouts, runs, showRoutines, sortByCadence, cost, ms
           })}
         </tbody>
       </table>
+      {hover.card}
     </section>
   )
 }

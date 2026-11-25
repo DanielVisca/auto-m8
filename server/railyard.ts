@@ -160,12 +160,16 @@ async function build() {
   const scoutList = mine.map(s => ({
     name: s.display_name || s.skill_name, skill: s.skill_name, enabled: s.enabled && s.status === 'active', cron: s.run_cron_schedule ?? null,
     everyMin: s.run_interval_minutes ?? null, lastRunAt: Date.parse(s.last_run_at ?? '') || null,
-    runs: runs.filter(r => r.skill_name === s.skill_name).slice(0, 10).map(r => ({ at: Date.parse(r.created_at), done: Date.parse(r.completed_at ?? '') || null, status: r.status, emitted: r.emitted_count ?? 0, url: r.posthog_url })),
+    runs: runs.filter(r => r.skill_name === s.skill_name).slice(0, 10).map(r => ({ at: Date.parse(r.created_at), done: Date.parse(r.completed_at ?? '') || null, status: r.status, emitted: r.emitted_count ?? 0, url: r.posthog_url,
+      // What the run found or why it failed, for the run mark's hover card; perch opens the task chat when it has it.
+      summary: r.summary ? String(r.summary).slice(0, 1500) : null, failure: r.failure_reason || r.error || null,
+      findings: [...(r.emitted_finding_ids ?? []), ...(r.emitted_report_ids ?? [])].slice(0, 8), cost: r.total_spend != null ? r.total_spend / 100 : null,
+      perch: r.task_id && get<any>('select 1 from conversations where id = ?', `task:${r.task_id}`) ? `task:${r.task_id}` : null })),
   }))
   const routines = listRoutines().map((r: any) => ({ id: r.id, name: r.name, cron: r.cron, enabled: !!r.enabled, lastRunAt: r.last_run_at, lastStatus: r.last_status,
     // Last 10 runs, newest first, so local routines get the same run marks as cloud scouts.
     runs: all<any>('select outcome, started_at, finished_at, conversation_id, detail from routine_runs where routine_id = ? order by started_at desc limit 10', r.id)
-      .map(x => ({ at: x.started_at, done: x.finished_at, status: x.outcome ?? 'running', conversation: x.conversation_id, detail: x.detail ? String(x.detail).slice(0, 200) : null })) }))
+      .map(x => ({ at: x.started_at, done: x.finished_at, status: x.outcome ?? 'running', conversation: x.conversation_id, detail: x.detail ? String(x.detail).slice(0, 1000) : null })) }))
 
   // The crossing: what is waiting on the user, oldest first.
   const crossing = [
