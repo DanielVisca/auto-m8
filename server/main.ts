@@ -117,7 +117,7 @@ import { moveToSection, onPrSections, resortSections } from './prsections.ts'
 import { approvals, browserEvents, closeIdleWindows, onBrowserChange, pruneRecordings, resumeBrowser, setOwnerBusy } from './browser.ts'
 import { browserRoutes, browserSocket } from './browserroutes.ts'
 import { researchRoutes } from './productresearchroutes.ts'
-import { canvases as exploreCanvases, codebases as exploreCodebases, competitor as exploreCompetitor, competitors as exploreCompetitors, saveThumb, thumbFile } from './explorehub.ts'
+import { canvases as exploreCanvases, competitor as exploreCompetitor, competitors as exploreCompetitors } from './explorehub.ts'
 import { ensureProductBoard } from './productresearchboard.ts'
 import { onResearch } from './productresearch.ts'
 import { restartQueue } from './restartqueue.ts'
@@ -487,7 +487,7 @@ route('GET', '/api/boards', (_m, _r, _s, q) => ({ boards: listBoards(q.get('q') 
 route('POST', '/api/boards', async (_m, req) => { const b = await body(req); return createBoard(b.name, b.about, b.created_by, b) })
 route('GET', '/api/boards/:id', m => getBoard(decodeURIComponent(m[1])) ?? { error: 'No such board' })
 route('POST', '/api/boards/:id', async (m, req) => updateBoard(decodeURIComponent(m[1]), await body(req)))
-route('POST', '/api/boards/:id/activity', m => ({ ok: useBoard(decodeURIComponent(m[1])) }))
+route('POST', '/api/boards/:id/activity', m => { const id = decodeURIComponent(m[1]); const ok = useBoard(id); if (ok) openedBoard(id); return { ok } })
 route('POST', '/api/boards/:id/delete', m => { deleteBoard(decodeURIComponent(m[1])); return { ok: true } })
 route('POST', '/api/boards-tile', async (_m, req) => putTile(await body(req)))
 route('POST', '/api/boards-tile/copy', async (_m, req) => { const b = await body(req); return copyTile(b.tile_id, b.board_id) })
@@ -745,16 +745,6 @@ termEvents.add((owner, id, event, text) => inboxPush(owner, `term:${id}`, event,
 browserRoutes(route, body)
 researchRoutes(route, body)
 route('GET', '/api/explore/canvases', () => ({ boards: exploreCanvases() }))
-route('GET', '/api/explore/codebases', () => swr('explore-codebases', 10 * 60_000, () => exploreCodebases(), { deadline: 4000 }))
-route('POST', '/api/boards/:id/opened', m => { openedBoard(decodeURIComponent(m[1])); return { ok: true } })
-route('POST', '/api/boards/:id/thumb', async (m, req) => { try { return saveThumb(decodeURIComponent(m[1]), (await body(req)).jpeg) } catch (e: any) { return { error: e.message } } })
-route('GET', '/api/boards/:id/thumb', (m, _req, res) => {
-  let file: string | null = null
-  try { file = thumbFile(decodeURIComponent(m[1])) } catch {}
-  if (!file) { res.writeHead(404); res.end('No preview'); return }
-  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=60', 'X-Content-Type-Options': 'nosniff' })
-  createReadStream(file).pipe(res)
-})
 route('GET', '/api/explore/competitors', () => ({ products: exploreCompetitors() }))
 route('GET', '/api/explore/competitors/:id', m => { try { return exploreCompetitor(decodeURIComponent(m[1])) } catch (e: any) { return { error: e.message } } })
 browserEvents.add((owner, event, text) => inboxPush(owner, `browser:${owner}`, event, text))
