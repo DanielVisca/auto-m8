@@ -17,7 +17,7 @@ import { InlineTile } from './InlineTile'
 import { TermView } from './Term'
 import { WaitCard, turnWaits, type PromiseRow } from './Waits'
 import { CloudBar } from './Mobile'
-import { ApprovalBar, BrowserDock, useBrowser } from './BrowserView'
+import { ApprovalBar, BrowserDock, SIDE_MIN_CHAT, useBrowser, useDockMode } from './BrowserView'
 import { createRoot, type Root } from 'react-dom/client'
 import { PR_URL, PrPill, PrRefs, bareRefs, knownPrs, linkPrRefs, type PrKnown } from './PrPill'
 import { agentSender, userBody } from '../../shared/messageOrigin'
@@ -757,6 +757,19 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
   const { data: browserData } = useBrowser()
   const browserOwned = !!id && !!browserData?.sessions.some(s => s.owner === id)
   const browserApprovals = id ? (browserData?.approvals ?? []).filter(a => a.owner === id && a.state === 'pending') : []
+  // Where the live view sits: your last choice; with none, at the side when the chat is wide. A side
+  // panel in a narrow chat drops to the strip below until the chat is wide again.
+  const [dockChoice, setDockChoice] = useDockMode()
+  const [chatW, setChatW] = useState(0)
+  useEffect(() => {
+    const el = root.current
+    if (!el || !browserOwned) return
+    const ro = new ResizeObserver(() => setChatW(el.clientWidth))
+    ro.observe(el); setChatW(el.clientWidth)
+    return () => ro.disconnect()
+  }, [browserOwned])
+  const wide = chatW >= SIDE_MIN_CHAT
+  const dockMode = (dockChoice ?? (wide ? 'side' : 'bottom')) === 'side' && !wide ? 'bottom' : (dockChoice ?? (wide ? 'side' : 'bottom'))
   useEffect(() => {
     const el = root.current
     if (!el) return
@@ -797,7 +810,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
       {id && <OptimizeStrip id={id} />}
       {showDecisions && id && <DecisionStrip id={id} />}
       {id && btwOpen && <Btw id={id} onClose={() => setBtwOpen(false)} />}
-      {id && browserOwned && <BrowserDock owner={id} approvals={browserApprovals} />}
+      {id && browserOwned && <BrowserDock owner={id} approvals={browserApprovals} mode={dockMode} onMode={setDockChoice} />}
       {id && !browserOwned && browserApprovals.length > 0 && <div className="browser-dock collapsed"><ApprovalBar approvals={browserApprovals} /></div>}
       <JumpToMine items={items} convId={id} scroller={scroller} />
       <Composer id={id} running={running} settings={settings} onStarted={onOpen} onBtw={() => setBtwOpen(true)} compact={compact} conv={conv} shownInThread={lastFailureBlocked(items)} />

@@ -16,3 +16,20 @@
 .browser-dock-grip { position: absolute; top: 0; left: 0; right: 0; height: 9px; cursor: ns-resize; z-index: 5; }
 .browser-dock-grip::after { content: ''; position: absolute; left: 50%; top: 3px; width: 36px; height: 3px; margin-left: -18px; border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .15s; }
 .browser-dock-grip:hover::after, .browser-dock-grip:active::after { opacity: 1; background: var(--accent, #f5a623); }
+/* Side panel: the live view takes the chat's right side at full height; the chat keeps the rest. */
+.chat.with-side-browser { position: relative; padding-right: var(--side-w, 50%); }
+.chat .browser-dock.side:not(.collapsed) { position: absolute; top: 0; right: 0; bottom: 0; width: var(--side-w, 50%); height: auto; max-height: none; border-top: none; border-left: 1px solid var(--line); background: var(--bg); z-index: 20; }
+.browser-dock.side .browserview { height: 100%; }
+.browser-dock.side .browser-stage.fit { max-height: none; }
+.browser-dock-grip.side { top: 0; bottom: 0; left: -4px; right: auto; width: 9px; height: auto; cursor: ew-resize; }
+.browser-dock-grip.side::after { left: 3px; top: 50%; width: 3px; height: 36px; margin-left: 0; margin-top: -18px; }
+/* Picture in picture: a small live picture in the chat's top right corner, over the thread. */
+.chat:has(> .browser-dock.pip) { position: relative; }
+.chat .browser-dock.pip:not(.collapsed) { position: absolute; top: 52px; right: 18px; width: 340px; height: auto; max-height: none; z-index: 25; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); box-shadow: 0 8px 28px rgba(0,0,0,.35); }
+.browser-dock.pip .browserview { height: auto; position: relative; }
+.browser-dock.pip .browser-stage { cursor: zoom-in; }
+.browser-dock.pip .browser-stage.taken { cursor: pointer; }
+.browser-dock.pip .browser-stage.fit { max-height: 260px; }
+.browserview.mini .pip-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; padding: 2px 6px; gap: 2px; background: color-mix(in srgb, var(--bg) 88%, transparent); opacity: 0; transition: opacity .15s; }
+.browserview.mini:hover .pip-head { opacity: 1; }
+.browserview.mini .pip-head button.icon { padding: 0 5px; font-size: 13px; }

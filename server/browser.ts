@@ -832,15 +832,16 @@ export async function watchFrames(owner: string, f: (jpegB64: string, meta: any)
   const s = await session(owner, false)
   if (!s) throw new Error('no browser window for this conversation')
   s.frames.add(f)
+  const c = await ensureBrowser()
   if (!s.casting) {
     s.casting = true
-    const c = await ensureBrowser()
     await c.send('Page.startScreencast', { format: 'jpeg', quality: 80, maxWidth: 2560, maxHeight: 1800, everyNthFrame: 1 }, s.sid)
-    // first frame right away even if nothing repaints
-    // with the viewport in CSS px, so the live view maps clicks right on a Retina screen too
-    Promise.all([screenshot(s, { quality: 80 }), c.send('Page.getLayoutMetrics', {}, s.sid)])
-      .then(([d, lm]) => f(d, { offsetTop: 0, pageScaleFactor: 1, deviceWidth: lm.cssLayoutViewport.clientWidth, deviceHeight: lm.cssLayoutViewport.clientHeight, first: true })).catch(() => {})
   }
+  // First frame right away for every new viewer, even if nothing repaints: a second view of a window
+  // already being cast (switching the dock's layout, a board tile) would otherwise wait for a repaint.
+  // With the viewport in CSS px, so the live view maps clicks right on a Retina screen too.
+  Promise.all([screenshot(s, { quality: 80 }), c.send('Page.getLayoutMetrics', {}, s.sid)])
+    .then(([d, lm]) => f(d, { offsetTop: 0, pageScaleFactor: 1, deviceWidth: lm.cssLayoutViewport.clientWidth, deviceHeight: lm.cssLayoutViewport.clientHeight, first: true })).catch(() => {})
   return async () => {
     s.frames.delete(f)
     if (!s.frames.size && s.casting) { s.casting = false; try { const c = await ensureBrowser(); await c.send('Page.stopScreencast', {}, s.sid) } catch {} }
@@ -924,6 +925,32 @@ export async function showWindow(owner: string) {
   activatePid(lockPid() ?? 0)
   s.shown = true
   await pill(s)
+}
+
+// The live view's shape. Docked at the side, the panel is tall, so the page keeps a desktop width
+// (WIDTH CSS px) and takes the panel's height: no empty bars, more of the page in view. ratio null
+// puts the window back to its launch size (--window-size above). Called after a drag settles, never
+// mid-drag; the page reflows once, which the agent's next snapshot picks up.
+export const FIT_WIDTH = 1280
+export async function fitViewport(owner: string, ratio: number | null) {
+  const s = await session(owner, false)
+  if (!s) throw new Error('no browser window for this conversation')
+  const c = await ensureBrowser()
+  const { windowId } = await c.send('Browser.getWindowForTarget', { targetId: s.targetId })
+  if (ratio == null) {
+    // Only when it is off its launch size (a side panel reshaped it, also before a restart).
+    const { bounds } = await c.send('Browser.getWindowBounds', { windowId })
+    if (bounds.windowState !== 'normal' || (bounds.width === 1280 && bounds.height === 860)) return { ok: true, unchanged: true }
+    await c.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal', width: 1280, height: 860 } })
+    return { ok: true, width: 1280, height: 860 }
+  }
+  const r = Math.max(0.4, Math.min(3, ratio))
+  // The window's own toolbars sit outside the page: size the window so the page itself gets the shape.
+  const [dw, dh] = await evalIn(s, '[outerWidth - innerWidth, outerHeight - innerHeight]', { page: true, timeoutMs: 5000 }).catch(() => [0, 87]) as [number, number]
+  const height = Math.round(Math.max(500, Math.min(2400, FIT_WIDTH / r)))
+  await c.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => {})
+  await c.send('Browser.setWindowBounds', { windowId, bounds: { width: FIT_WIDTH + dw, height: height + dh } })
+  return { ok: true, width: FIT_WIDTH, height }
 }
 
 // Someone clicked "← perch" in the Agent Chrome: perch comes forward on that chat.
