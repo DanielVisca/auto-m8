@@ -1170,10 +1170,9 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .attach-thumb { padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg3); cursor: zoom-in; line-height: 0; }
 .attach-thumb img { display: block; max-width: 160px; max-height: 120px; object-fit: cover; }
 .attach-thumb:hover { border-color: var(--muted); }
-/* "[Image 1]": matches the marker left in the text where it was attached. */
-.attach-label { font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 4px; background: var(--bg3); color: var(--muted); border: 1px solid var(--line); line-height: 14px; }
-.attach-thumb { position: relative; }
-.attach-label.on-thumb { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.6); color: #fff; border: none; }
+/* Where in the message an attachment was added: a tiny preview inline in the text. */
+.inline-attach { display: inline-block; width: 16px; height: 16px; object-fit: cover; border-radius: 3px; vertical-align: -3px; margin: 0 2px; cursor: zoom-in; border: 1px solid var(--line); }
+.inline-attach.file { width: auto; border: none; font-size: 12px; cursor: pointer; }
 .attach-file { cursor: pointer; }
 /* Boards */
 .start-all.row-flex { gap: 16px; justify-content: center; flex-wrap: wrap; }

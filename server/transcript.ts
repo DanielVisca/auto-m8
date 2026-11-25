@@ -111,6 +111,7 @@ export function readableTitle(s: string): string {
     .replace(/<(system-reminder|attached-files|attached-images|shared-from-browser|context|pasted_content)[^>]*>[\s\S]*?(<\/\1>|$)/g, ' ')
     // Attachment markers name the image, not the ask: "[Image: source: /tmp/…]", "🖼 2 images attached".
     .replace(/\[Image(?: #\d+)?(?::[^\]]*)?\]/g, ' ')
+    .replace(/\[(?:Image|File) \d+\]/g, ' ')
     .replace(/🖼 \d+ images? attached|\(see the attached (?:image|file|\d+ attachments)\)/g, ' ')
     .replace(/^\s*\[sandbox_prompt:[\w-]+:([\w.-]+)\][\s\S]*/, (_m, n) => `Scout: ${n}`)
     .replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '$2') // Slack <url|label>

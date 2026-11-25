@@ -297,6 +297,19 @@ function AgentBubble({ text }: { text: string }) {
   return <div className="bubble agent"><div>{from}</div>{body}</div>
 }
 
+// "[Image 1]" in a sent message: a tiny preview where it was attached, instead of the label.
+function inlineAttachments(t: string, labels: Record<string, string>) {
+  const byLabel = Object.fromEntries(Object.entries(labels).map(([p, l]) => [l, p]))
+  if (!Object.keys(byLabel).length) return t
+  return t.split(/(\[(?:Image|File) \d+\])/).map((part, i) => {
+    const p = byLabel[part.slice(1, -1)]
+    if (!p) return part
+    const open = () => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))
+    return part.startsWith('[Image')
+      ? <img key={i} className="inline-attach" src={rawUrl(p)} alt="" title={`${baseName(p)}\nClick to view`} onClick={open} />
+      : <span key={i} className="inline-attach file" title={baseName(p).replace(/^[0-9a-f]{8}-/, '')} onClick={open}>📄</span>
+  })
+}
 function UserBubble({ text }: { text: string }) {
   if (agentSender(text)) return <AgentBubble text={text} />
   const body = userBody(text)
@@ -320,10 +333,10 @@ function UserBubble({ text }: { text: string }) {
     {prs.length > 0 && <div className="pr-inline-row">{prs.map((u, i) => <PrPill key={i} url={u} />)}</div>}
     {(imgs.length > 0 || files.length > 0) && <div className="attach-row">
       {imgs.map(p => <button key={p} className="attach-thumb" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={`${labels[p] ? `[${labels[p]}] ` : ''}${baseName(p)}\nClick to view`}>
-        {labels[p] && <b className="attach-label on-thumb">{labels[p]}</b>}<img src={`/api/files/raw?path=${encodeURIComponent(p)}`} alt={baseName(p)} loading="lazy" /></button>)}
-      {files.map(p => <button key={p} className="chip attach-file" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={p}>📄 {labels[p] && <b className="attach-label">{labels[p]}</b>} {baseName(p).replace(/^[0-9a-f]{8}-/, '')}</button>)}
+<img src={`/api/files/raw?path=${encodeURIComponent(p)}`} alt={baseName(p)} loading="lazy" /></button>)}
+      {files.map(p => <button key={p} className="chip attach-file" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={p}>📄 {baseName(p).replace(/^[0-9a-f]{8}-/, '')}</button>)}
     </div>}
-    {rest && <div className="bubble">{rest}</div>}
+    {rest && <div className="bubble">{inlineAttachments(rest, labels)}</div>}
   </>
 }
 
@@ -887,7 +900,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
   }
   const research = (q: string) => window.dispatchEvent(new CustomEvent('perch-research', { detail: q }))
   const [opt, setOpt] = useState<{ brief: string; direction: string; iterations: number; target: string } | null>(null)
-  const [shared, setShared] = useState<Shared[]>([])
+  const [shared, setShared] = useSharedDraft(id)
   // Attached images: click a thumbnail to see it large above the box, keep typing, step through them.
   const [viewKey, setViewKey] = useState<string | null>(null)
   const [viewBig, setViewBig] = useState(false)
@@ -896,29 +909,46 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
   const viewing = viewAt >= 0 ? images[viewAt] : null
   const step = (d: number) => images.length && setViewKey(images[(viewAt + d + images.length) % images.length].key!)
   // Files, images and long pastes: uploaded at once, sent as attachments with the message.
-  // Each attachment drops a "[Image 1]" / "[File 2]" marker at the cursor, so the agent sees where in
-  // the writing it was added; the label travels with the file and names it in the prompt.
-  const attachNums = useRef({ image: 0, file: 0 })
-  const markAt = (kinds: ('image' | 'file')[]) => {
-    const labels = kinds.map(k => `${k === 'image' ? 'Image' : 'File'} ${++attachNums.current[k]}`)
-    if (!labels.length) return labels
-    const el = ta.current
-    const at = Math.min(el?.selectionEnd ?? caret, text.length)
-    const before = text.slice(0, at), after = text.slice(at)
-    const ins = `${before && !/\s$/.test(before) ? ' ' : ''}${labels.map(l => `[${l}]`).join(' ')}${after && !/^\s/.test(after) ? ' ' : after ? '' : ' '}`
-    setText(before + ins + after); setCaret(at + ins.length)
-    requestAnimationFrame(() => { if (el) el.selectionStart = el.selectionEnd = at + ins.length })
-    return labels
+  // Each attachment drops an invisible mark at the cursor (one Unicode tag character, unique per
+  // attachment). On send it becomes "[Image 1]" / "[File 2]", so the agent knows where in the writing
+  // it was added, without the marker cluttering the box. Numbers continue from what's already attached.
+  const nextNum = (k: 'image' | 'file', taken: string[]) => {
+    const used = shared.map(x => x.file?.label).concat(taken).filter((l): l is string => !!l && l.startsWith(k === 'image' ? 'Image ' : 'File ')).map(l => +l.split(' ')[1])
+    return `${k === 'image' ? 'Image' : 'File'} ${Math.max(0, ...used) + 1}`
   }
-  const attach = async (f: Blob, name: string, kind: 'image' | 'file', label: string, text?: string, mark?: string) => {
+  const markAt = (kinds: ('image' | 'file')[]) => {
+    const out: { label: string; mark: string }[] = [], inUse = new Set([...text].filter(isMark).concat(shared.map(x => x.file?.mark ?? '')))
+    for (const k of kinds) {
+      const label = nextNum(k, out.map(o => o.label))
+      let c = 0; while (c < MARKS && inUse.has(markChar(c))) c++
+      const mark = c < MARKS ? markChar(c) : ''
+      inUse.add(mark); out.push({ label, mark })
+    }
+    // At the cursor while typing; dropped on an unfocused box or handed over from Home: where the cursor
+    // last was, or the end of the text when it never had one.
+    const el = ta.current, focused = !!el && document.activeElement === el
+    const at = Math.min(focused ? el!.selectionEnd : (caret || text.length), text.length), ins = out.map(o => o.mark).join('')
+    if (ins) {
+      setText(text.slice(0, at) + ins + text.slice(at)); setCaret(at + ins.length)
+      requestAnimationFrame(() => { if (el) el.selectionStart = el.selectionEnd = at + ins.length })
+    }
+    return out
+  }
+  const markAtNone = (kinds: ('image' | 'file')[]) => {
+    const out: { label: string; mark: string }[] = [], inUse = new Set([...text].filter(isMark).concat(shared.map(x => x.file?.mark ?? '')))
+    for (const k of kinds) { let c = 0; while (c < MARKS && inUse.has(markChar(c))) c++; const mark = c < MARKS ? markChar(c) : ''; inUse.add(mark); out.push({ label: nextNum(k, out.map(o => o.label)), mark }) }
+    return out
+  }
+  const attach = async (f: Blob, name: string, kind: 'image' | 'file', label: string, text?: string, mark?: { label: string; mark: string }) => {
     const key = Math.random().toString(36).slice(2)
     const thumb = kind === 'image' ? URL.createObjectURL(f) : undefined
-    setShared(s => [...s, { key, title: name, summary: label, context: '', loading: true, thumb, file: { path: '', name, kind, media_type: f.type, label: mark } }])
+    setShared(s => [...s, { key, title: name, summary: label, context: '', loading: true, thumb, file: { path: '', name, kind, media_type: f.type, label: mark?.label, mark: mark?.mark } }])
     if (thumb) setViewKey(k => k ?? key)
     try {
       const r = await post<any>('/api/attachments', text != null ? { name, text } : { name, base64: await toBase64(f) })
       if (r.error) throw new Error(r.error)
       setShared(s => s.map(x => x.key === key ? { ...x, loading: false, summary: r.lines ? `${r.lines} lines` : label, file: { ...x.file!, path: r.path, bytes: r.bytes, lines: r.lines } } : x))
+      if (thumb) setShared(s => s.map(x => x.key === key ? { ...x, thumb: rawUrl(r.path) } : x)) // a blob: URL wouldn't survive the box being rebuilt
     } catch (e: any) { setShared(s => s.map(x => x.key === key ? { ...x, loading: false, failed: true, summary: e.message ?? 'couldn’t attach it' } : x)) }
   }
   const takeFiles = (files: File[]) => {
@@ -979,7 +1009,9 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
 
   async function submit() {
     const files = shared.filter(x => x.file?.path)
-    const prompt = text.trim() || (files.length ? `(see the attached ${files.length === 1 ? (files[0].file!.kind === 'image' ? 'image' : 'file') : `${files.length} attachments`})` : '')
+    const byMark = new Map(files.filter(x => x.file!.mark && x.file!.label).map(x => [x.file!.mark!, `[${x.file!.label}]`]))
+    const typed = [...text].map(c => isMark(c) ? (byMark.get(c) ?? '') : c).join('')
+    const prompt = typed.trim() || (files.length ? `(see the attached ${files.length === 1 ? (files[0].file!.kind === 'image' ? 'image' : 'file') : `${files.length} attachments`})` : '')
     if (!prompt || shared.some(x => x.loading)) return
     if (prompt.startsWith('/btw ') && id) { window.dispatchEvent(new CustomEvent('perch-btw', { detail: prompt.slice(5) })); onBtw(); setText(''); return }
     if (/^\/research\b/.test(prompt)) { research(prompt.replace(/^\/research\s*/, '')); setText(''); return }
@@ -1001,7 +1033,6 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
     const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt, cwd: id ? undefined : cwd, mode, context, contextIds: pulled.map(p => p.id), folderId: folder?.id, shared: shared.filter(x => !x.loading && !x.file), attachments: files.map(x => x.file), turbo, engine })
     setPulled([])
     setShared([])
-    attachNums.current = { image: 0, file: 0 }
     setRelated([])
     if (!id || r.id !== id) onStarted(r.id) // a carried-over conversation continues in a new chat
   }
@@ -1063,8 +1094,8 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
         <div className="chips">
           {shared.map((x, i) => <span key={x.key ?? i} className={`chip shared${x.thumb ? ' has-thumb' : ''}${x.failed ? ' failed' : ''}${x.thumb && x.key === viewKey ? ' viewing' : ''}`} title={x.thumb ? 'Click to preview' : x.file?.path || x.summary}
             onClick={x.thumb ? () => setViewKey(k => k === x.key ? null : x.key!) : undefined}>
-            {x.thumb ? <img src={x.thumb} alt="" /> : x.loading ? '…' : x.file ? '📄' : x.url?.includes('/pull/') ? '⇅' : '🔗'} {x.file?.label && <b className="attach-label">{x.file.label}</b>} {x.title.slice(0, 56)}<span className="muted"> {x.loading && x.file ? 'attaching…' : x.summary}</span>
-            <button onClick={e => { e.stopPropagation(); if (x.key === viewKey) setViewKey(null); if (x.thumb) URL.revokeObjectURL(x.thumb); setShared(shared.filter((_, j) => j !== i)); const l = x.file?.label; if (l) setText(t => t.replace(` [${l}]`, '').replace(`[${l}] `, '').replace(`[${l}]`, '')) }} title="Remove">×</button></span>)}
+            {x.thumb ? <img src={x.thumb} alt="" /> : x.loading ? '…' : x.file ? '📄' : x.url?.includes('/pull/') ? '⇅' : '🔗'} {x.title.slice(0, 56)}<span className="muted"> {x.loading && x.file ? 'attaching…' : x.summary}</span>
+            <button onClick={e => { e.stopPropagation(); if (x.key === viewKey) setViewKey(null); if (x.thumb) URL.revokeObjectURL(x.thumb); setShared(shared.filter((_, j) => j !== i)); const m = x.file?.mark; if (m) setText(t => t.split(m).join('')) }} title="Remove">×</button></span>)}
         </div>
       )}
       {!dismissed && suggestions.length > 0 && (
@@ -1105,9 +1136,13 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
             const copied = copiedMessage(t)
             if (copied) {
               e.preventDefault()
-              for (const f of copied.files) setShared(s => s.some(x => x.file?.path === f.path) ? s : [...s, f.kind === 'image'
-                ? { key: f.path, title: f.name, summary: 'image', context: '', thumb: `/api/files/raw?path=${encodeURIComponent(f.path)}`, file: f }
-                : { key: f.path, title: f.name, summary: 'file', context: '', file: f }])
+              const fresh = copied.files.filter(f => !shared.some(x => x.file?.path === f.path))
+              const marks = markAtNone(fresh.map(f => f.kind))
+              fresh.forEach((f, i) => { if (f.label) copied.text = copied.text.split(`[${f.label}]`).join(marks[i].mark); f.label = marks[i].label; f.mark = marks[i].mark })
+              copied.text = copied.text.replace(/\[(?:Image|File) \d+\]/g, '')
+              setShared(s => [...s, ...fresh.map(f => f.kind === 'image'
+                ? { key: f.path, title: f.name, summary: 'image', context: '', thumb: rawUrl(f.path), file: f }
+                : { key: f.path, title: f.name, summary: 'file', context: '', file: f })])
               if (copied.text) {
                 const el = e.currentTarget, a = el.selectionStart ?? text.length, b = el.selectionEnd ?? a
                 const next = text.slice(0, a) + copied.text + text.slice(b)
@@ -1343,7 +1378,22 @@ function PlusMenu({ onAutoresearch, onResearch, onSkill, onLink }: { onAutoresea
 // Files from Home's start box, handed to the new chat it opens.
 export const handedFiles: File[] = []
 type Shared = { key?: string; url?: string; title: string; summary: string; context: string; loading?: boolean; failed?: boolean; thumb?: string
-  file?: { path: string; name: string; kind: 'image' | 'file'; media_type?: string; bytes?: number; lines?: number | null; label?: string } }
+  file?: { path: string; name: string; kind: 'image' | 'file'; media_type?: string; bytes?: number; lines?: number | null; label?: string; mark?: string } }
+// Invisible per-attachment marks in the composer text: Unicode tag characters, which render as nothing.
+const MARK_BASE = 0xE0021, MARKS = 94
+const markChar = (i: number) => String.fromCodePoint(MARK_BASE + i)
+const isMark = (c: string) => { const n = c.codePointAt(0) ?? 0; return n >= MARK_BASE && n < MARK_BASE + MARKS }
+const rawUrl = (p: string) => `/api/files/raw?path=${encodeURIComponent(p)}`
+// Attachments (and shared links) survive the composer being rebuilt on resize, like the typed draft.
+function useSharedDraft(id: string | null) {
+  const key = `perch.compose.shared.${id ?? 'new'}`
+  const [shared, setShared] = useState<Shared[]>(() => { try { return JSON.parse(sessionStorage.getItem(key) ?? '[]') } catch { return [] } })
+  useEffect(() => {
+    const keep = shared.filter(x => !x.loading && !x.failed).map(x => x.thumb?.startsWith('blob:') ? (x.file?.path ? { ...x, thumb: rawUrl(x.file.path) } : null) : x).filter(Boolean)
+    try { keep.length ? sessionStorage.setItem(key, JSON.stringify(keep)) : sessionStorage.removeItem(key) } catch {}
+  }, [key, shared])
+  return [shared, setShared] as const
+}
 // A message copied out of a chat: its <attached-images>/<attached-files> blocks, the "🖼 1 image
 // attached" footer and "[Image: source: …]" markers become attachments again instead of raw markup.
 // "- [Image 1] /path/a.png" or "- /path/b.log (b.log, 3 lines)": the path, label and size note dropped.
@@ -1358,14 +1408,14 @@ export function copiedMessage(t: string): { text: string; files: NonNullable<Sha
   const files: NonNullable<Shared['file']>[] = []
   const name = (p: string) => (p.split('/').pop() ?? p).replace(/^[0-9a-f]{8}-/, '')
   let rest = t.replace(/<attached-images>([\s\S]*?)<\/attached-images>\s*/g, (_m, inner: string) => {
-    for (const path of attachedPaths(inner)) {
+    for (const { path, label } of attachedItems(inner)) {
       const ext = path.split('.').pop()?.toLowerCase() ?? ''
-      files.push({ path, name: name(path), kind: 'image', media_type: IMG_TYPES[ext] ?? 'image/png' })
+      files.push({ path, name: name(path), kind: 'image', media_type: IMG_TYPES[ext] ?? 'image/png', label })
     }
     return ''
   })
   rest = rest.replace(/<attached-files>([\s\S]*?)<\/attached-files>\s*/g, (_m, inner: string) => {
-    for (const path of attachedPaths(inner)) files.push({ path, name: name(path), kind: 'file' })
+    for (const { path, label } of attachedItems(inner)) files.push({ path, name: name(path), kind: 'file', label })
     return ''
   })
   rest = rest.replace(/^\s*🖼\uFE0F? ?\d+ images? attached\s*$/gmu, '').replace(/^\s*\[Image: source: [^\]]*\]\s*$/gm, '')
