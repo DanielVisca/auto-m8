@@ -289,9 +289,10 @@ export function matchTables(tables: ChTable[], opts: { tokens: string[]; codeNam
     const where = opts.codeNames.get(n)
     if (where) how.push(`named in code at ${where}`)
     if (dbt.has(n)) how.push('db_table of a model in this concept')
-    const words = n.split(/[_\d]+/).filter(Boolean)
-    const tok = opts.tokens.find(k => words.some(w => w === k || w === `${k}s` || (w.startsWith(k) && w.length <= k.length + 2)))
-    if (tok) how.push(`table name contains “${tok}”`)
+    // The concept's name must lead the table name (metrics4_samples, sharded_logs34): app_metrics2 or query_log_archive are other concepts' tables.
+    const words = n.replace(/^(sharded|writable|kafka|distributed)_/, '').split(/[_\d]+/).filter(Boolean)
+    const tok = opts.tokens.find(k => words[0] === k || words[0] === `${k}s`)
+    if (tok) how.push(`table name starts with “${tok}”`)
     if (how.length) out.push({ ...t, how })
   }
   const rank = (m: TableMatch) => (m.how.some(h => h.startsWith('named in code')) ? 2 : 0) + (m.how.some(h => h.startsWith('db_table')) ? 1 : 0)
@@ -408,7 +409,10 @@ async function dataForNow(concept: string, repos: string[]) {
     const m = matchTables(chTables, { tokens: toks, codeNames: code.names, dbTables: code.dbTables })
       // Only the kinds of table that hold or route data; skip views of views and Kafka consumers' noise last.
       .filter(t => !/^(View|LiveView|Dictionary)$/.test(t.engine)).slice(0, 40)
-    for (const t of m) tables.push({ ...t, ds: s.ds.name, host: s.host })
+    // The same table is visible through several datasources: keep the first (datasources are listed with the data's own cluster first or not; sizes are filled per datasource below, so dedupe after).
+    // A local (non-Distributed) table lives on the node this datasource reaches: its cluster is the smallest one listing that host.
+    const hostCluster = s.clusters.filter(c => arr(c.hosts).includes(s.host)).sort((a, b) => arr(a.hosts).length - arr(b.hosts).length)[0]?.cluster
+    for (const t of m) if (!tables.some(x => x.db === t.db && x.table === t.table && x.engine === t.engine)) tables.push({ ...t, cluster: t.cluster ?? (/MergeTree|Buffer/.test(t.engine) && hostCluster ? String(hostCluster) : null), ds: s.ds.name, host: s.host })
   }
   // Sizes: across every replica of the data's cluster when we know it, else on the node the datasource reaches.
   await Promise.all(seen.filter(Boolean).map(async s => {

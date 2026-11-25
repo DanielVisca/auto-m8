@@ -63,10 +63,11 @@ test('tables match by code, db_table or name, strongest first', () => {
     { db: 'posthog', table: 'logs32', engine: 'Distributed', cluster: 'logs' },
     { db: 'posthog', table: 'events', engine: 'Distributed', cluster: 'posthog' },
     { db: 'posthog', table: 'posthog_metricalert', engine: 'MergeTree' },
+    { db: 'posthog', table: 'app_metrics2', engine: 'Distributed', cluster: 'aux' },
   ]
   const m = matchTables(tables, { tokens: ['metric'], codeNames: new Map([['metrics4_samples', 'products/metrics/backend/q.py:12']]), dbTables: ['posthog_metricalert'] })
   assert.deepEqual(m.map(x => x.table), ['metrics4_samples', 'posthog_metricalert', 'sharded_metrics4_samples'])
-  assert.deepEqual(m[0].how, ['named in code at products/metrics/backend/q.py:12', 'table name contains “metric”'])
+  assert.deepEqual(m[0].how, ['named in code at products/metrics/backend/q.py:12', 'table name starts with “metric”'])
   assert.equal(matchTables(tables, { tokens: ['log'], codeNames: new Map() }).map(x => x.table).join(), 'logs32')
 })
 
