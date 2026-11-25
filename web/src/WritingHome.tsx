@@ -223,8 +223,8 @@ export function WritingArt({ data, posts = [] }: { data?: WritingData; posts?: s
 }
 
 // ── Published: pages on the site repo you created or have a byline on, with their views ──
-type PubPage = { file: string; path: string; url: string; title: string; kind: 'article' | 'docs' | 'page'; byline: boolean; pr: number | null; published_at: number | null; weekly: number[]; views30: number; visitors30: number; total: number }
-type Pub = { login: string; handle: string | null; repo: string; host: string; weeks: number[]; pages: PubPage[]; insight: string; pending_views?: boolean; views_error?: string; pending?: boolean; error?: string }
+type PubPage = { file: string; path: string; url: string; title: string; kind: 'article' | 'docs' | 'page'; byline: boolean; pr: number | null; published_at: number | null; weekly: number[]; views30: number; visitors30: number; reads30: number; leaves30: number; total: number }
+type Pub = { login: string; handle: string | null; repo: string; host: string; weeks: number[]; pages: PubPage[]; insight: string; pending_views?: boolean; views_error?: string; summary?: { views: number; visitors: number; reads: number; leaves: number }; pending?: boolean; error?: string }
 export function usePublished() {
   const [d, setD] = useState<Pub | null>(null)
   useEffect(() => {
@@ -280,14 +280,20 @@ function Published({ pub, expanded }: { pub: Pub | null; expanded?: boolean }) {
         <a className="link small" href={pub.insight} target="_blank" rel="noreferrer">See more in PostHog ↗</a></h3>
       {pub.views_error && <div className="muted small">Views unavailable: {pub.views_error}</div>}
       {pub.pending_views && <div className="muted small">Loading views…</div>}
+      {pub.summary && <div className="wh-sum">
+        <div><b>{fmt(pub.summary.views)}</b><span className="small">views</span><span className="muted small">last 30 days</span></div>
+        <div><b>{fmt(pub.summary.visitors)}</b><span className="small">distinct visitors</span><span className="muted small">people, counted once across all pages</span></div>
+        <div title="The visit ended after scrolling through at least 60% of the page and staying 30 seconds or more"><b>{fmt(pub.summary.reads)}</b><span className="small">reads</span><span className="muted small">{pub.summary.views ? `${Math.round((pub.summary.reads / pub.summary.views) * 100)}% of views read through (60%+ scrolled, 30s+)` : 'scrolled 60%+ and stayed 30s+'}</span></div>
+      </div>}
       {pub.weeks.length > 0 && <ViewsChart weeks={pub.weeks} pages={pages} />}
       <div className="wh-pub">
-        <div className="wh-pub-row wh-pub-head muted small"><span>Page</span><span>26 weeks</span><span>30d views</span><span>30d visitors</span><span>Published</span></div>
+        <div className="wh-pub-row wh-pub-head muted small"><span>Page</span><span>26 weeks</span><span>30d views</span><span>30d visitors</span><span title="Scrolled 60%+ and stayed 30s+">30d reads</span><span>Published</span></div>
         {pages.slice(0, all ? 200 : 6).map(p => (
           <a key={p.file} className="wh-pub-row" href={p.url} target="_blank" rel="noreferrer" title={p.url}>
             <span className="ellipsis"><b>{p.title}</b> <span className={`chip small ${p.kind === 'article' ? 'final' : ''}`}>{p.byline ? 'your post' : p.kind}</span> <span className="muted small">{p.path}</span></span>
             <Spark v={p.weekly} />
             <span>{fmt(p.views30)}</span><span>{fmt(p.visitors30)}</span>
+            <span title={p.views30 ? `${p.reads30} of ${p.views30} views read through` : ''}>{fmt(p.reads30)}{p.views30 > 0 && <span className="muted small"> {Math.round((p.reads30 / p.views30) * 100)}%</span>}</span>
             <span className="muted small">{p.published_at ? new Date(p.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</span>
           </a>))}
       </div>

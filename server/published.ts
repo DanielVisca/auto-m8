@@ -66,26 +66,35 @@ async function discover(): Promise<{ login: string; handle: string | null; pages
 const hogql = async (query: string) => ((await posthogFetch(`/api/projects/${PROJECT()}/query/`, { method: 'POST', body: JSON.stringify({ query: { kind: 'HogQLQuery', query }, name: 'auto-m8-writing-published' }) })) as any)?.results ?? []
 const sqlList = (xs: string[]) => xs.map(x => `'${x.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`).join(', ')
 
+type PageViews = { weekly: number[]; views30: number; visitors30: number; reads30: number; leaves30: number; total: number }
 async function views(paths: string[]) {
-  if (!paths.length) return { weeks: [] as number[], byPath: {} as Record<string, { weekly: number[]; views30: number; visitors30: number; total: number }> }
+  if (!paths.length) return { weeks: [] as number[], byPath: {} as Record<string, PageViews>, summary: { views: 0, visitors: 0, reads: 0, leaves: 0 } }
   const norm = `if(length(properties.$pathname) > 1, replaceRegexpOne(properties.$pathname, '/+$', ''), properties.$pathname)`
   const where = `event = '$pageview' AND properties.$host = '${HOST().replace(/'/g, '')}' AND ${norm} IN (${sqlList(paths)})`
-  const [weekly, recent] = await Promise.all([
+  // A read: the visit ended ($pageleave) after scrolling through at least 60% of the page's content
+  // and staying 30 seconds or more. Visits with no $pageleave (tab killed, app closed) can't count.
+  const leaveWhere = where.replace("event = '$pageview'", "event = '$pageleave'")
+  const read = `toFloat(properties.$prev_pageview_max_content_percentage) >= 0.6 AND toFloat(properties.$prev_pageview_duration) >= 30`
+  const [weekly, recent, reads, total] = await Promise.all([
     hogql(`SELECT ${norm} AS p, toStartOfWeek(timestamp) AS w, count() FROM events WHERE ${where} AND timestamp > now() - interval 26 week GROUP BY p, w ORDER BY w LIMIT 10000`),
     hogql(`SELECT ${norm} AS p, count(), count(DISTINCT person_id) FROM events WHERE ${where} AND timestamp > now() - interval 30 day GROUP BY p LIMIT 10000`),
+    hogql(`SELECT ${norm} AS p, count(), countIf(${read}) FROM events WHERE ${leaveWhere} AND timestamp > now() - interval 30 day GROUP BY p LIMIT 10000`),
+    hogql(`SELECT countIf(event = '$pageview'), count(DISTINCT if(event = '$pageview', person_id, NULL)), countIf(event = '$pageleave'), countIf(event = '$pageleave' AND ${read}) FROM events WHERE (${where} OR ${leaveWhere}) AND timestamp > now() - interval 30 day`),
   ])
   const start = Date.now() - 26 * 7 * 86400_000
   const weeks: number[] = []
   for (let t = start; t <= Date.now(); t += 7 * 86400_000) { const d = new Date(t); d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - d.getUTCDay()); weeks.push(d.getTime()) }
-  const byPath: Record<string, { weekly: number[]; views30: number; visitors30: number; total: number }> = {}
-  for (const p of paths) byPath[p] = { weekly: weeks.map(() => 0), views30: 0, visitors30: 0, total: 0 }
+  const byPath: Record<string, PageViews> = {}
+  for (const p of paths) byPath[p] = { weekly: weeks.map(() => 0), views30: 0, visitors30: 0, reads30: 0, leaves30: 0, total: 0 }
   for (const [p, w, n] of weekly as [string, string, number][]) {
     // Nearest bucket, so a project timezone or week-start mode a day off still lands in the right week.
     const t = Date.parse(String(w).length <= 10 ? `${w}T00:00:00Z` : String(w)), i = Math.round((t - weeks[0]) / (7 * 86400_000))
     if (byPath[p]) { if (i >= 0 && i < weeks.length) byPath[p].weekly[i] += n; byPath[p].total += n }
   }
   for (const [p, n, u] of recent as [string, number, number][]) if (byPath[p]) { byPath[p].views30 = n; byPath[p].visitors30 = u }
-  return { weeks, byPath }
+  for (const [p, l, r] of reads as [string, number, number][]) if (byPath[p]) { byPath[p].leaves30 = l; byPath[p].reads30 = r }
+  const [views, visitors, leaves, readN] = (total[0] ?? [0, 0, 0, 0]) as number[]
+  return { weeks, byPath, summary: { views, visitors, reads: readN, leaves } }
 }
 
 // A PostHog trends insight of these pages' views, broken down by page, for "See more in PostHog".
@@ -101,9 +110,9 @@ export async function published() {
   const found = await swr('writing-published-pages', 12 * 3600_000, discover, { deadline: 300 })
   if ('pending' in found || 'error' in (found as any)) return found
   const paths = found.pages.map(p => p.path)
-  const v = await swr(`writing-published-views2:${paths.join(',')}`, 3600_000, () => views(paths), { deadline: 300 })
-  if ('pending' in v) return { ...found, repo: REPO(), host: HOST(), pending_views: true, weeks: [], pages: found.pages.map(p => ({ ...p, weekly: [], views30: 0, visitors30: 0, total: 0 })), insight: insightUrl(paths) }
-  if ('error' in (v as any)) return { ...found, repo: REPO(), host: HOST(), views_error: (v as any).error, weeks: [], pages: found.pages.map(p => ({ ...p, weekly: [], views30: 0, visitors30: 0, total: 0 })), insight: insightUrl(paths) }
-  return { ...found, repo: REPO(), host: HOST(), weeks: v.weeks, insight: insightUrl(paths),
+  const v = await swr(`writing-published-views3:${paths.join(',')}`, 3600_000, () => views(paths), { deadline: 300 })
+  if ('pending' in v) return { ...found, repo: REPO(), host: HOST(), pending_views: true, weeks: [], pages: found.pages.map(p => ({ ...p, weekly: [], views30: 0, visitors30: 0, reads30: 0, leaves30: 0, total: 0 })), insight: insightUrl(paths) }
+  if ('error' in (v as any)) return { ...found, repo: REPO(), host: HOST(), views_error: (v as any).error, weeks: [], pages: found.pages.map(p => ({ ...p, weekly: [], views30: 0, visitors30: 0, reads30: 0, leaves30: 0, total: 0 })), insight: insightUrl(paths) }
+  return { ...found, repo: REPO(), host: HOST(), weeks: v.weeks, insight: insightUrl(paths), summary: v.summary,
     pages: found.pages.map(p => ({ ...p, ...v.byPath[p.path] })).sort((a, b) => Number(b.byline) - Number(a.byline) || b.views30 - a.views30 || b.total - a.total) }
 }
