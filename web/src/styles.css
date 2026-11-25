@@ -1426,10 +1426,10 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 /* Narrow chat pane (beside a canvas or board): the Working card's bar and mood drop under the title instead of squeezing the stats into a word-per-line column. */
 @container (max-width: 520px) { .work-health { order: 9; flex-basis: 100%; padding-left: 16px; } .work-marks { flex: 1; justify-content: flex-start; } }
 
-/* "↑ your last message": sits on the line between the thread and the chat box (half above, half below,
-   inside both paddings) so it never covers text; only while your last message is scrolled off. */
-.jump-mine-wrap { position: relative; height: 0; z-index: 30; display: flex; justify-content: center; pointer-events: none; }
-.jump-mine { pointer-events: auto; transform: translateY(-50%); font-size: 11px; line-height: 14px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg2); color: var(--muted); cursor: pointer; }
+/* "↑ your last message": sits just above the line between the thread and the chat box (never on the box);
+   only while your last message is scrolled off. */
+.jump-mine-wrap { position: relative; height: 0; z-index: 30; display: flex; justify-content: center; align-items: flex-start; pointer-events: none; }
+.jump-mine { pointer-events: auto; transform: translateY(calc(-100% - 4px)); font-size: 11px; line-height: 14px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg2); color: var(--muted); cursor: pointer; }
 .jump-mine:hover { color: var(--fg); border-color: var(--muted); }
 /* Composer image preview: docked above the box, so typing continues while you look. */
 .chip.shared.has-thumb { cursor: zoom-in; }
