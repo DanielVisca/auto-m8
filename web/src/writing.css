@@ -50,7 +50,8 @@
 .who { font-weight: 600; }
 .who.agent { color: #16a085; }
 .who.person { color: #b8860b; }
-.doc-new-comment { display: flex; flex-direction: column; gap: 6px; }
+.doc-comments { display: flex; flex-direction: column; gap: 12px; }
+.doc-new-comment { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .doc-comment, .doc-research-item, .doc-version { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
 .doc-comment { cursor: pointer; border-left: 3px solid #e0a800; }
 .doc-comment.agent, .doc-research-item.agent { border-left: 3px solid #16a085; }
