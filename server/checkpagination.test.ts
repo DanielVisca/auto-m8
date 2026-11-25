@@ -16,7 +16,7 @@ const url = 'https://github.com/PostHog/posthog/pull/135915'
 const zero = { seen_comment: 0, seen_thread: 0, seen_review: 0, handled_ci: null, handled_stamp: null }
 const failing = ['Test Rust (logs-ingestion)', 'Rust Tests Pass']
 
-function fixture(options: { singlePage?: boolean; brokenPage?: boolean; noNames?: boolean; nodes?: object[]; rollup?: string } = {}) {
+function fixture(options: { singlePage?: boolean; brokenPage?: boolean; noNames?: boolean; nodes?: object[]; rollup?: string; pr?: object } = {}) {
   writeFileSync(calls, '')
   clearCheckCache(); resetSnapshotCache(); clearBriefs()
   const nodes = options.nodes ?? Array.from({ length: options.singlePage ? 3 : 205 }, (_, i) => ({
@@ -32,7 +32,7 @@ const after = q.match(/after:\\s*"([^\"]+)"/)
 const offset = after ? Number(after[1]) : 0
 const contexts = { totalCount: nodes.length, nodes: nodes.slice(offset, offset + 100), pageInfo: { hasNextPage: offset + 100 < nodes.length, endCursor: String(offset + 100) } }
 const rollup = { id: 'rollup-original-head', state: ${JSON.stringify(options.rollup ?? 'FAILURE')}, contexts }
-const p = { updatedAt:'2026-11-14T04:00:00Z', title:'retry', number:135915, state:'OPEN', isDraft:false, headRefOid:'original-head', headRefName:'fix/retry', baseRefName:'master', reviewDecision:'APPROVED', author:{login:'author'}, body:'', labels:{nodes:[]}, commits:{nodes:[{commit:{oid:'original-head', committedDate:'2026-11-14T04:00:00Z', statusCheckRollup:rollup}}]}, comments:{totalCount:0,nodes:[]}, reviews:{nodes:[]}, latestReviews:{nodes:[]}, reviewThreads:{nodes:[]}, files:{nodes:[]} }
+const p = { updatedAt:'2026-11-14T04:00:00Z', title:'retry', number:135915, state:'OPEN', isDraft:false, headRefOid:'original-head', headRefName:'fix/retry', baseRefName:'master', reviewDecision:'APPROVED', author:{login:'author'}, body:'', labels:{nodes:[]}, commits:{nodes:[{commit:{oid:'original-head', committedDate:'2026-11-14T04:00:00Z', statusCheckRollup:rollup}}]}, comments:{totalCount:0,nodes:[]}, reviews:{nodes:[]}, latestReviews:{nodes:[]}, reviewThreads:{nodes:[]}, files:{nodes:[]}, ...${JSON.stringify(options.pr ?? {})} }
 if (after && ${!!options.brokenPage}) { console.log(JSON.stringify({data:{node:null},errors:[{message:'page unavailable'}]})); process.exit(1) }
 console.log(JSON.stringify({ data: after ? {node:rollup} : q.includes('p0:') ? {p0:{pullRequest:p},p1:{pullRequest:{...p,commits:{nodes:[]}}}} : {repository:{pullRequest:p}} }))
 `
@@ -179,6 +179,19 @@ test('PR pills asking at once share one light call, and an hour-old answer is re
   const q = queries()
   assert.equal(q.length, 1)
   assert.doesNotMatch(q[0], /statusCheckRollup/)
+})
+
+test('a merged PR pill says whether it is live in production', async () => {
+  const bot = (us: string) => `<!-- deploy-notify-bot -->\n| Environment | Status | Time |\n|---|---|---|\n| **prod-us** | ${us} | 2026-11-25 12:29 UTC |\n| **prod-eu** | :white_check_mark: Deployed | 2026-11-25 12:31 UTC |`
+  const merged = { state: 'MERGED', mergedAt: new Date(Date.now() - 3600_000).toISOString() }
+  fixture({ singlePage: true, pr: { ...merged, comments: { totalCount: 1, nodes: [{ author: { login: 'github-actions' }, body: bot(':white_check_mark: Deployed') }] } } })
+  const b = await prBrief(url)
+  assert.equal(b.state, 'merged'); assert.equal(b.deploy, 'deployed')
+  assert.match(queries()[0], /comments\(last: 30\)/)
+  fixture({ singlePage: true, pr: { ...merged, comments: { totalCount: 1, nodes: [{ author: { login: 'github-actions' }, body: bot(':hourglass: Deploying') }] } } })
+  assert.equal((await prBrief(url)).deploy, 'deploying')
+  fixture({ singlePage: true })
+  assert.equal((await prBrief(url)).deploy, undefined, 'open PRs carry no deploy state')
 })
 
 test('a PR pill falls back to perch\'s own index when GitHub refuses', async () => {

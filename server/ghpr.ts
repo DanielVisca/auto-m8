@@ -3,6 +3,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { checkContextFields, checkContexts, summarizeChecks, ghExec, prBatch } from './gh.ts'
+import { deployFor, type Deploy } from './deploys.ts'
 
 const exec = promisify(execFile)
 
@@ -111,9 +112,13 @@ export function prLine(s: PrState, extra = '') {
 // threads, reviews; two calls for PostHog PRs): /api/pr/brief alone hit the rate limit dozens of
 // times a day. A brief needs four fields, so pills asking within 50ms share one call (25 PRs per
 // call), answers are kept for an hour, and with GitHub out of reach perch's own index answers.
-export type PrBrief = { url: string; title: string; state: PrState['state']; repo: string; number: number; author: string | null }
+// deploy: only on merged PRs, so the pill's dot can tell merged (purple) from live in production.
+export type PrBrief = { url: string; title: string; state: PrState['state']; repo: string; number: number; author: string | null; deploy?: Deploy['state'] }
 const briefs = new Map<string, { at: number; b: PrBrief }>()
 const BRIEF_MS = 3600_000
+// Merged but not yet live: re-read sooner so the dot turns over within minutes of the deploy.
+const DEPLOYING_MS = 5 * 60_000
+const briefTtl = (b: PrBrief) => b.state === 'merged' && b.deploy !== 'deployed' ? DEPLOYING_MS : BRIEF_MS
 let queued: { pr: NonNullable<ReturnType<typeof parsePr>>; done: (b: PrBrief | Error) => void }[] = []
 let flush: NodeJS.Timeout | null = null
 export const clearBriefs = () => briefs.clear()
@@ -122,14 +127,15 @@ export function prBrief(url: string, local?: (url: string) => { title: string; s
   const pr = parsePr(url)
   if (!pr) return Promise.reject(new Error(`Not a PR link: ${url}`))
   const hit = briefs.get(pr.url)
-  if (hit && Date.now() - hit.at < BRIEF_MS) return Promise.resolve(hit.b)
+  if (hit && Date.now() - hit.at < briefTtl(hit.b)) return Promise.resolve(hit.b)
   const fallback = (e: Error): PrBrief => {
     if (hit) return hit.b
     const row = local?.(pr.url)
     if (!row?.title) throw e
     const st = String(row.state).toLowerCase()
-    return { url: pr.url, title: row.title, repo: `${pr.owner}/${pr.repo}`, number: pr.number, author: null,
-      state: st === 'merged' ? 'merged' : st === 'closed' ? 'closed' : row.draft ? 'draft' : 'open' }
+    const state = st === 'merged' ? 'merged' : st === 'closed' ? 'closed' : row.draft ? 'draft' : 'open'
+    return { url: pr.url, title: row.title, repo: `${pr.owner}/${pr.repo}`, number: pr.number, author: null, state,
+      ...(state === 'merged' ? { deploy: deployFor(pr.url, null, []).state } : {}) }
   }
   return new Promise<PrBrief | Error>(done => {
     queued.push({ pr, done })
@@ -140,14 +146,17 @@ export function prBrief(url: string, local?: (url: string) => { title: string; s
 async function readBriefs(batch: typeof queued) {
   const urls = [...new Set(batch.map(x => x.pr.url))]
   let res: Awaited<ReturnType<typeof prBatch>> | null = null, err: Error | null = null
-  try { res = await prBatch(urls, 'title state isDraft author { login }', { size: 25, timeout: 30_000 }) } catch (e: any) { err = e }
+  // Only PostHog/posthog has the deploy bot's comment; elsewhere the shepherd's stage is the signal.
+  const fields = (u: string) => `title state isDraft mergedAt author { login }${/github\.com\/PostHog\/posthog\/pull\//i.test(u) ? ' comments(last: 30) { nodes { author { login } body } }' : ''}`
+  try { res = await prBatch(urls, fields, { size: 25, timeout: 30_000 }) } catch (e: any) { err = e }
   for (const { pr, done } of batch) {
     const p = res?.prs.get(pr.url)
     if (!p) { done(err ?? res?.failed ?? new Error(`GitHub doesn't know ${pr.url}`)); continue }
-    const b: PrBrief = { url: pr.url, title: p.title, repo: `${pr.owner}/${pr.repo}`, number: pr.number, author: p.author?.login ?? null,
-      state: p.state === 'MERGED' ? 'merged' : p.state === 'CLOSED' ? 'closed' : p.isDraft ? 'draft' : 'open' }
+    const state = p.state === 'MERGED' ? 'merged' : p.state === 'CLOSED' ? 'closed' : p.isDraft ? 'draft' : 'open'
+    const b: PrBrief = { url: pr.url, title: p.title, repo: `${pr.owner}/${pr.repo}`, number: pr.number, author: p.author?.login ?? null, state,
+      ...(state === 'merged' ? { deploy: deployFor(pr.url, p.mergedAt ? Date.parse(p.mergedAt) : null, p.comments?.nodes ?? []).state } : {}) }
     briefs.set(pr.url, { at: Date.now(), b })
     done(b)
   }
-  if (briefs.size > 2000) for (const [k, v] of briefs) if (Date.now() - v.at > BRIEF_MS) briefs.delete(k)
+  if (briefs.size > 2000) for (const [k, v] of briefs) if (Date.now() - v.at > briefTtl(v.b)) briefs.delete(k)
 }

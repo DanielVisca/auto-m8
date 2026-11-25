@@ -19,12 +19,21 @@ export function openPr(url: string) {
     .then(r => r.json()).then(d => { if (d?.error) window.open(url, '_blank') }).catch(() => window.open(url, '_blank'))
 }
 
-export type Brief = { url: string; title: string; state: 'open' | 'draft' | 'merged' | 'closed'; repo: string; number: number; author?: string }
+export type Brief = { url: string; title: string; state: 'open' | 'draft' | 'merged' | 'closed'; repo: string; number: number; author?: string
+  deploy?: 'deployed' | 'deploying' | 'stuck' | 'failed' | 'unknown' }
 const briefs = new Map<string, Promise<Brief | null>>()
 function brief(url: string) {
   let p = briefs.get(url)
   if (!p) { p = fetch(`/api/pr/brief?url=${encodeURIComponent(url)}`).then(r => r.ok ? r.json() : null).then(d => d?.title ? d : null).catch(() => null); briefs.set(url, p) }
   return p
+}
+
+// Dot: green open, grey draft, purple merged, blue live in production, red closed; a red ring on a merged
+// PR that failed or stalled on its way to production.
+const DOT_TITLE: Record<string, string> = {
+  open: 'Open', draft: 'Draft', closed: 'Closed', merged: 'Merged', deploying: 'Merged, deploying',
+  deployed: 'Merged and live in production', stuck: 'Merged, not in production after a day', failed: 'Merged, deploy failed',
+  unknown: 'Merged, nothing reports where it runs',
 }
 
 export function PrPill({ url }: { url: string }) {
@@ -43,9 +52,9 @@ export function PrPill({ url }: { url: string }) {
   const leave = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setHover(false), 250) }
   return (
     <>
-    <a ref={aRef} className={`pr-inline st-${b?.state ?? 'unknown'}`} href={url} onMouseEnter={enter} onMouseLeave={leave}
+    <a ref={aRef} className={`pr-inline st-${b?.state ?? 'unknown'}${b?.deploy ? ` dp-${b.deploy}` : ''}`} href={url} onMouseEnter={enter} onMouseLeave={leave}
       onClick={e => { e.preventDefault(); e.stopPropagation(); openPr(url) }}>
-      <span className="pr-inline-dot" />
+      <span className="pr-inline-dot" title={b ? DOT_TITLE[b.deploy ?? b.state] : undefined} />
       <span className="pr-inline-title">{b === undefined ? '…' : b ? b.title : 'pull request'}{anchor}</span>
       <span className="pr-inline-ref">{ref}</span>
       <PrAgents url={base} size={14} />
