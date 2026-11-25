@@ -5,6 +5,7 @@ import { useEffect, useId, useState } from 'react'
 import { waitsOf, type Wait } from '../../shared/waits.ts'
 import { shortDuration, type Entry } from './chatActivity'
 import { api } from './api'
+import { Markdown } from './Chat'
 
 export type PromiseRow = { id: string; text: string; due_at: number | null; pr_url: string | null; until: string | null; status: string; note: string | null; nudged_at: number | null; created_at: number }
 
@@ -76,6 +77,17 @@ type Output =
 
 const STEP_ICON = { prompt: '✉', text: '💬', tool: '▸', result: '↳' } as const
 
+// A transcript step: a tool call shows its name as a chip and its argument as code
+// ("Bash: git grep …" → [Bash] `git grep …`); tool output reads as code; agent prose as markdown.
+function StepText({ s }: { s: Step }) {
+  if (s.kind === 'tool') {
+    const m = /^([A-Za-z_][\w.-]{0,60}): ([\s\S]*)$/.exec(s.text)
+    return m ? <span className="wstep-call"><span className="wstep-tool">{m[1].replace(/^mcp__/, '').replace(/__/g, ' · ')}</span><code className="wstep-arg">{m[2]}</code></span> : <code className="wstep-arg">{s.text}</code>
+  }
+  if (s.kind === 'result') return <code className="wstep-out">{s.text}</code>
+  return <div className="wstep-md"><Markdown text={s.text} /></div>
+}
+
 // One wait opened up: what it was asked to do, and what it has written so far (refreshed while live).
 function WaitDrill({ row }: { row: Row }) {
   const w = row.wait
@@ -90,10 +102,13 @@ function WaitDrill({ row }: { row: Row }) {
     return () => { stop = true; if (t) clearInterval(t) }
   }, [path, row.live])
   const pre = (t: string) => <pre className="wait-pre">{t}</pre>
+  // Prose (prompts, results, notes) renders as markdown so `code`, lists and paths read like chat.
+  const md = (t: string) => <div className="wait-pre wait-md"><Markdown text={t} /></div>
+  const cmd = (t: string) => <pre className={`wait-pre wait-cmd${w.what === 'command' ? ' wait-shell' : ''}`}><code>{t}</code></pre>
   return <div className="wait-drill">
-    {w.kind === 'task' && w.input && <><div className="wait-h">{w.what === 'agent' ? 'Prompt' : w.what === 'workflow' ? 'Workflow' : 'Command'} <span className="wait-tool">{w.tool}</span></div>{pre(w.input)}</>}
-    {w.kind === 'timer' && <><div className="wait-h">Note</div>{pre(w.label)}{w.prUrl && <a href={w.prUrl} target="_blank" rel="noreferrer">{w.prUrl}</a>}</>}
-    {w.kind === 'task' && w.done?.summary && <><div className="wait-h">Result</div>{pre(w.done.summary)}</>}
+    {w.kind === 'task' && w.input && <><div className="wait-h">{w.what === 'agent' ? 'Prompt' : w.what === 'workflow' ? 'Workflow' : 'Command'} <span className="wait-tool">{w.tool}</span></div>{w.what === 'agent' ? md(w.input) : cmd(w.input)}</>}
+    {w.kind === 'timer' && <><div className="wait-h">Note</div>{md(w.label)}{w.prUrl && <a href={w.prUrl} target="_blank" rel="noreferrer">{w.prUrl}</a>}</>}
+    {w.kind === 'task' && w.done?.summary && <><div className="wait-h">Result</div>{md(w.done.summary)}</>}
     {w.kind === 'task' && <>
       <div className="wait-h">Output{out && 'updatedAt' in out ? <span className="wait-tool"> updated {shortDuration(Date.now() - out.updatedAt)} ago</span> : null}{path && <span className="wait-tool" title={path}> · {path.split('/').slice(-2).join('/')}</span>}</div>
       {!path ? <div className="wait-detail">This task didn’t report an output file.</div>
@@ -101,7 +116,7 @@ function WaitDrill({ row }: { row: Row }) {
         : out.kind === 'missing' || out.kind === 'error' ? <div className="wait-detail">{out.reason}</div>
         : out.kind === 'log' ? pre((out.truncated ? '…\n' : '') + (out.text.trim() || '(no output yet)'))
         : out.kind === 'transcript' ? <ol className="wait-steps">{out.truncated && <li className="wait-step">…earlier steps cut</li>}
-            {out.steps.length ? out.steps.map((s, i) => <li key={i} className={`wait-step ${s.kind}`}><span aria-hidden="true">{STEP_ICON[s.kind]}</span><span>{s.text}</span></li>) : <li className="wait-step">(nothing yet)</li>}</ol>
+            {out.steps.length ? out.steps.map((s, i) => <li key={i} className={`wait-step ${s.kind}`}><span aria-hidden="true">{STEP_ICON[s.kind]}</span><StepText s={s} /></li>) : <li className="wait-step">(nothing yet)</li>}</ol>
         : <ul className="wait-steps">{out.agents.length ? out.agents.map(a => <li key={a.id} className="wait-step"><span className={`dot ${a.finished ? 'ok' : 'wait-live'}`} /><span><b>{a.description}</b>{a.last && <> — {a.last}</>}</span></li>) : <li className="wait-step">(no agents yet)</li>}</ul>}
     </>}
   </div>

@@ -228,12 +228,12 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .wait-md .md code { font-size: 11px; }
 .wait-cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .wait-shell code::before { content: '$ '; color: var(--muted); user-select: none; }
-.step-call { display: flex; flex: 1; gap: 6px; align-items: baseline; min-width: 0; }
-.step-tool { flex: none; font-size: 10px; font-weight: 600; color: var(--accent); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; line-height: 16px; }
-.step-arg, .step-out { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.step-arg { color: var(--fg); background: var(--code); padding: 1px 5px; border-radius: 4px; }
-.step-out { display: block; padding-left: 2px; border-left: 2px solid var(--line); padding: 0 0 0 6px; }
-.step-md { min-width: 0; white-space: normal; } .step-md .md p { margin: 0; }
+.wstep-call { display: flex; flex: 1; gap: 6px; align-items: baseline; min-width: 0; }
+.wstep-tool { flex: none; font-size: 10px; font-weight: 600; color: var(--accent); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; line-height: 16px; }
+.wstep-arg, .wstep-out { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wstep-arg { color: var(--fg); background: var(--code); padding: 1px 5px; border-radius: 4px; }
+.wstep-out { display: block; padding-left: 2px; border-left: 2px solid var(--line); padding: 0 0 0 6px; }
+.wstep-md { min-width: 0; white-space: normal; } .wstep-md .md p { margin: 0; }
 .wait-kind { width: 15px; text-align: center; font-size: 12px; line-height: 18px; }
 .wait-main { flex: 1; min-width: 0; }
 .wait-label { font-size: 12px; overflow-wrap: anywhere; }
