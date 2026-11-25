@@ -13,6 +13,7 @@ import { listRoutines } from './routines.ts'
 import { posthogFetch } from './indexer.ts'
 import { settings } from './settings.ts'
 import { proofOf } from './proof.ts'
+import { waitingOn } from './shepherd.ts'
 
 db.exec(`create table if not exists railyard_events (url text not null, station text not null, at integer not null, primary key (url, at, station))`)
 try { db.exec(`alter table railyard_events add column guess integer default 0`) } catch {}
@@ -80,7 +81,10 @@ async function build() {
     const wins = windows(w)
     const working = wins.at(-1)?.[1] === null || !!w?.awaiting || (p?.agents?.length ?? 0) > 0 || (w?.conversation_id && live.has(w.conversation_id))
     const after: string[] = (() => { try { return JSON.parse(w?.after_urls ?? '[]') } catch { return [] } })()
-    const signal = after.filter(a => watch.get(a)?.stage !== 'verified')
+    // Red signal: an `after:` prerequisite that hasn't passed a production check yet, by the same rule
+    // the shepherd's merge gate uses. Only before merge: once merged nothing is held any more.
+    const merged = !!w?.merged_at || ['deploy', 'check2', 'verified', 'proven'].includes(station)
+    const signal = merged ? [] : waitingOn({ after } as any, Object.fromEntries(after.map(a => [a, watch.get(a)?.stage ?? null])))
     const decision = decisionFor.get(url)
     const needsYou = !!decision || /^NEEDS YOU/.test(w?.outcome ?? '') || /NEEDS YOU/.test(w?.last_detail ?? '') || w?.stage === 'blocked'
       || (station === 'approved' && /merge: manual/.test(w?.outcome ?? ''))
