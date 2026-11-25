@@ -312,7 +312,7 @@ export function App() {
   const showPrSide = mode === 'wide' && detailsOpen && !zen && view.kind === 'pr' && view.id
   if (custom) {
     // What a layout tile may ask for. Each one only navigates; none changes data.
-    const PAGES = ['home', 'needs', 'settings', 'insights', 'library', 'automations', 'evolve', 'paused']
+    const PAGES = ['home', 'needs', 'settings', 'insights', 'library', 'automations', 'evolve', 'explore', 'paused']
     const run: Run = (c, a) => {
       if (c === 'open') { if (typeof a?.id !== 'string') return 'open needs {id}'; openById(a.id); return null }
       if (c === 'view') {
@@ -396,7 +396,7 @@ function Toasts({ zen }: { zen?: boolean }) {
 
 function Nav({ view, setView }: { view: View; setView: (v: View) => void }) {
   const paused = !!usePause().data?.paused
-  const items: [View['kind'], string, string][] = [['insights', '▤', 'Insights'], ['evolve', '✦', 'Evolve'], ['library', '◇', 'Skills & scouts'], ['automations', '↻', 'Automations'], ['paused', paused ? '▶' : '⏸', paused ? 'Paused: resume' : 'Pause all'], ['settings', '⚙', 'Settings  ⌘,']]
+  const items: [View['kind'], string, string][] = [['insights', '▤', 'Insights'], ['evolve', '✦', 'Evolve'], ['explore', '⌬', 'Explore'], ['library', '◇', 'Skills & scouts'], ['automations', '↻', 'Automations'], ['paused', paused ? '▶' : '⏸', paused ? 'Paused: resume' : 'Pause all'], ['settings', '⚙', 'Settings  ⌘,']]
   return (
     <nav className="nav">
       {items.map(([k, icon, label]) => (
