@@ -108,7 +108,10 @@ const ts = (s: unknown) => (typeof s === 'string' ? Date.parse(s) || null : null
 export function readableTitle(s: string): string {
   let t = String(s ?? '')
     .replace(/<earlier-conversations>[\s\S]*?(<\/earlier-conversations>|$)/g, ' ')
-    .replace(/<(system-reminder|attached-files|shared-from-browser|context|pasted_content)[^>]*>[\s\S]*?(<\/\1>|$)/g, ' ')
+    .replace(/<(system-reminder|attached-files|attached-images|shared-from-browser|context|pasted_content)[^>]*>[\s\S]*?(<\/\1>|$)/g, ' ')
+    // Attachment markers name the image, not the ask: "[Image: source: /tmp/…]", "🖼 2 images attached".
+    .replace(/\[Image(?: #\d+)?(?::[^\]]*)?\]/g, ' ')
+    .replace(/🖼 \d+ images? attached|\(see the attached (?:image|file|\d+ attachments)\)/g, ' ')
     .replace(/^\s*\[sandbox_prompt:[\w-]+:([\w.-]+)\][\s\S]*/, (_m, n) => `Scout: ${n}`)
     .replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '$2') // Slack <url|label>
     .replace(/<(https?:\/\/[^>]+)>/g, '$1')
@@ -117,6 +120,8 @@ export function readableTitle(s: string): string {
     .replace(/<\/?[a-z][\w-]*[^>]*>/gi, ' ')
     .replace(/[*_`]{1,3}([^*_`]+)[*_`]{1,3}/g, '$1')
   t = t.replace(/\s+/g, ' ').trim()
+  if (!t && /<attached-images>|\[Image/.test(String(s ?? ''))) return 'Image'
+  if (!t && /<attached-files>/.test(String(s ?? ''))) return 'Attached file'
   return t || String(s ?? '').replace(/\s+/g, ' ').trim()
 }
 

@@ -584,6 +584,35 @@ function useStickToBottom(dep: unknown) {
   return ref
 }
 
+// Long agent-driven chats bury your own last message under event batches and follow-ups. When it has
+// scrolled off the top, a small pill on the line above the chat box takes you back to it; otherwise nothing shows.
+const isHumanMsg = (it: Item) => it.kind === 'user' && !agentSender(it.text) && !(userBody(it.text) === it.text && perchSummary(it.text))
+function JumpToMine({ items, convId, scroller }: { items: Item[]; convId: string | null; scroller: React.RefObject<HTMLDivElement | null> }) {
+  const idx = items.findLastIndex(isHumanMsg)
+  const [above, setAbove] = useState(false)
+  useEffect(() => {
+    const el = scroller.current
+    if (!el || idx < 0 || !convId) { setAbove(false); return }
+    let raf = 0
+    const check = () => {
+      raf = 0
+      const m = el.querySelector<HTMLElement>(`[data-item="${CSS.escape(`${convId}:${idx}`)}"]`)
+      // Not drawn yet (only the latest turns paint first) means it is above the view.
+      setAbove(m ? m.getBoundingClientRect().bottom < el.getBoundingClientRect().top + 4 : el.scrollHeight > el.clientHeight)
+    }
+    const on = () => { if (!raf) raf = requestAnimationFrame(check) }
+    check()
+    el.addEventListener('scroll', on, { passive: true })
+    const ro = new ResizeObserver(on); ro.observe(el)
+    return () => { el.removeEventListener('scroll', on); ro.disconnect(); if (raf) cancelAnimationFrame(raf) }
+  }, [idx, convId, items.length]) // eslint-disable-line
+  if (!above || idx < 0 || !convId) return null
+  const it = items[idx] as Extract<Item, { kind: 'user' }>
+  const preview = userBody(it.text).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+  return <div className="jump-mine-wrap"><button className="jump-mine" title={`Jump to your last message${preview ? `:\n${preview.slice(0, 160)}` : ''}`}
+    onClick={() => focusInChat(convId, { uuid: (it as any).uuid, ts: (it as any).ts })}>↑ your last message</button></div>
+}
+
 type Related = { id: string; title: string; snippet: string; updated_at: number; cwd: string | null; source: string }
 
 export function Chat({ id, onOpen, onTerminal, settings, compact, panel, detailsOpen, onToggleDetails }: {
@@ -722,6 +751,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
       {id && browserOwned && <BrowserDock owner={id} approvals={browserApprovals} />}
       {id && !browserOwned && browserApprovals.length > 0 && <div className="browser-dock collapsed"><ApprovalBar approvals={browserApprovals} /></div>}
       {dock && <div className="term-dock"><TermView key={dock.id} term={dock} compact onClose={reloadTerms} /></div>}
+      <JumpToMine items={items} convId={id} scroller={scroller} />
       <Composer id={id} running={running} settings={settings} onStarted={onOpen} onBtw={() => setBtwOpen(true)} compact={compact} conv={conv} shownInThread={lastFailureBlocked(items)} />
     </div>
   )

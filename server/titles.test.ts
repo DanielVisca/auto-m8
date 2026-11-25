@@ -12,6 +12,8 @@ test('titles drop pulled-in context, link markup and scout boilerplate', () => {
   assert.equal(readableTitle('*<https://github.com/octocat|@octocat>* teams can set keys'), '@octocat teams can set keys')
   assert.equal(readableTitle('look at https://github.com/PostHog/posthog/pull/134625 again'), 'look at posthog#134625 again')
   assert.equal(tidy('"Get all metrics into PostHog."'), 'Get all metrics into PostHog')
+  assert.equal(readableTitle('<attached-images>\n- /Users/x/Library/Application Support/perch/attachments/a.png\n</attached-images>\n\ngreat, also fix the names\n[Image: source: /private/tmp/1.png]'), 'great, also fix the names')
+  assert.equal(readableTitle('<attached-images>\n- /Users/x/a.png\n</attached-images>'), 'Image')
 })
 
 test('a chat shows where it branched from and every branch off it', () => {

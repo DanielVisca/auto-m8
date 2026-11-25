@@ -329,8 +329,21 @@ export async function syncMyPrs() {
   } catch (e: any) { recordError('GitHub PR status', e, 'Listing your open PRs') }
 }
 
+// Chats started with a pasted image were named after its path ("- /Users/…/perch/attachments/…") until
+// titles learned to skip attachment blocks. Re-read those once so they take their name from the ask.
+export function renameAttachmentTitled() {
+  const rows = all<{ path: string }>(`select path from conversations where path is not null and first_prompt like '- /%/perch/attachments/%'`)
+  for (const r of rows) {
+    const source = allSources().find(s => r.path.startsWith(s.dir + '/'))
+    if (source) try { indexFile(r.path, source, true) } catch {}
+  }
+  return rows.length
+}
+
 export function startIndexer() {
   const t0 = Date.now()
+  const renamed = renameAttachmentTitled()
+  if (renamed) console.log(`[index] re-read ${renamed} chats named after an attachment path`)
   const n = scanAll()
   console.log(`[index] ${n} transcripts updated in ${Date.now() - t0}ms`)
   watchSources()
