@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ago, api, post, shell, useLive } from './api'
+import { ago, api, post, sendChat, shell, useLive } from './api'
 import { Brand, brandFor } from './Brand'
 import { ProfilesCard } from './Profile'
 import { ClaudeBillingCard } from './ClaudeAccounts'
@@ -631,6 +631,7 @@ function LayoutPicker() {
   const l = useLayout()
   const [as, setAs] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
+  const [change, setChange] = useState('')
   if (!l) return null
   const pick = async (name: string) => { const r = await api.send<any>('PUT', '/api/layouts/active', { name }); setMsg(r?.error ?? null) }
   const copy = async () => {
@@ -639,7 +640,24 @@ function LayoutPicker() {
     if (r?.error) return setMsg(r.error)
     setAs(''); await pick(name); setMsg(`Copied to ${l.dir}/${name}.json. Edit that file and the window follows.`)
   }
+  // Ask an agent for a UI change in plain words: it works in the layouts folder (AGENTS.md there
+  // says how), copies a shipped layout before changing it, and the window redraws when it saves.
+  const ask = async () => {
+    const want = change.trim()
+    if (!want) return
+    const shipped = l.layouts.find(x => x.name === l.active)?.shipped
+    const prompt = `Change how auto-m8 looks: ${want}\n\nWork only in this layouts folder (${l.dir}) and follow its AGENTS.md. The active layout is "${l.active}"${shipped ? ', which ships with auto-m8 and can\'t be edited: copy it to a new file, make the change there, and switch to it by setting the active layout' : ` (${l.dir}/${l.active}.json)`}. If the change needs something a layout can't do yet, say exactly what is missing instead of editing app code.`
+    try {
+      const r = await sendChat<{ id: string }>({ prompt, cwd: l.dir, noRoute: true })
+      setChange(''); setMsg('Asked. The window redraws when the agent saves the layout.')
+      if (r?.id) window.dispatchEvent(new CustomEvent('perch-open', { detail: r.id }))
+    } catch (e: any) { setMsg(String(e?.message ?? e)) }
+  }
   return <>
+    <div className="field">Ask for a change
+      <input value={change} placeholder="e.g. put Needs me above the chat list, make the accent green" style={{ flex: 1, minWidth: 260 }} onChange={e => setChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && change.trim()) ask() }} />
+      <button className="small" disabled={!change.trim()} onClick={ask}>Ask</button>
+    </div>
     <div className="field">Layout
       <div className="seg">{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => pick(x.name)} title={x.shipped ? 'Shipped with auto-m8: copy it to change it' : `${l.dir}/${x.name}.json`}>{x.name}</button>)}</div>
       <span className="muted small">⌘⌥⇧Esc always goes back to default.</span>
