@@ -80,6 +80,15 @@ const onLinkClick = (e: React.MouseEvent) => {
   const href = a?.getAttribute('href') ?? ''
   if (isConvLink(href)) { e.preventDefault(); window.dispatchEvent(new CustomEvent('perch-open', { detail: convIdOf(href) })) }
   else if (/^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/)?#doc\/[\w-]+$/.test(href)) { e.preventDefault(); location.hash = href.slice(href.indexOf('#')) } // a doc in the editor
+  else if (/^(file:\/\/)?(~\/|\/(Users|private|tmp|var\/folders|Volumes)\/)/.test(href)) {
+    // A file on this Mac (a board's "Read draft" link, a path in a reply): markdown and text open in
+    // the writing editor, anything else in the file viewer. Left alone, the link would load the app's start page.
+    e.preventDefault()
+    let path = href.replace(/^file:\/\//, '').replace(/[?#].*$/, '')
+    try { path = decodeURI(path) } catch {}
+    if (/\.(md|markdown|mdx|txt)$/i.test(path)) post<{ id?: string }>('/api/docs', { path }).then(d => { if (d?.id) location.hash = `#doc/${d.id}` })
+    else window.dispatchEvent(new CustomEvent('perch-file', { detail: path }))
+  }
   else if (a && /^https?:/.test(href)) { e.preventDefault(); window.open(href, '_blank') }
 }
 // PR links become PR pills: state, repo#n, title and the robots on it.

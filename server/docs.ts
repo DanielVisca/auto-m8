@@ -43,7 +43,8 @@ const changed = (id?: string) => { writeGuard(); onDocs.forEach(f => f(id)) }
 export type Author = { kind: 'person' | 'agent'; name?: string; conversation_id?: string }
 export const DOCS_DIR = join(HOME, 'Documents', 'auto-m8')
 const TEXT = /\.(md|markdown|mdx|txt)$/i
-const PRIVATE = /\/\.(ssh|gnupg|aws|kube|config\/gh)\/|\/\.env|credentials|secret|token|\.pem$|\.key$/i
+// Credential folders and files, not words in a title: a draft about tokens or secrets is fine to open.
+const PRIVATE = /\/\.(ssh|gnupg|aws|kube|docker|config\/gh)\/|\/\.env(\.|$)|\/\.netrc$|\/credentials(\.\w+)?$/i
 const hash = (t: string) => createHash('sha1').update(t).digest('base64url').slice(0, 16)
 const now = () => Date.now()
 
