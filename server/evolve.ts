@@ -5,7 +5,8 @@
 //    volume, how often it goes wrong, and what already covers it (skills, routines, scouts).
 // 3. Forge: a use case you keep coming back to, with no skill behind it, gets one: a SKILL.md
 //    written from your own conversations (how you want it done, what you corrected), installed
-//    as perch-<name> in your Claude skills folder so every agent can load it.
+//    as autom8-<name> (perch-<name> on installs that already have perch-* skills) in your Claude
+//    skills folder so every agent can load it.
 // 4. Tune: each skill perch made is watched. If its use case keeps coming up and agents never
 //    load it, the description is rewritten so they do. If sessions using it keep getting
 //    corrected, the instructions are revised from those corrections. If nobody needs it for a
@@ -194,13 +195,22 @@ export function useCases(days = 30) {
 }
 
 // ---------- 3. forging skills ----------
+// Skills we write are named <prefix><name>. New installs use autom8-; installs from before the
+// rename already have perch-* skills, so they keep that prefix rather than mixing two. Both count
+// as ours.
+const OUR_PREFIXES = ['autom8-', 'perch-']
+export const isOurSkill = (name: string) => OUR_PREFIXES.some(p => name.startsWith(p))
+export function skillPrefix() {
+  return localSkills().some(s => s.name.startsWith('perch-')) ? 'perch-' : 'autom8-'
+}
+
 // What already covers a use case: a skill whose name and description share its words.
 function coveredBy(uc: { name: string; description: string }) {
   const words = (s: string) => new Set(String(s).toLowerCase().match(/[a-z]{4,}/g) ?? [])
   const want = words(`${uc.name} ${uc.description}`)
   let best: { name: string; score: number } | null = null
   for (const s of localSkills()) {
-    if (s.name.startsWith('perch-')) continue
+    if (isOurSkill(s.name)) continue
     const have = words(`${s.name} ${s.description}`)
     const score = [...want].filter(w => have.has(w)).length / Math.max(1, want.size)
     if (score > (best?.score ?? 0.5)) best = { name: s.name, score }
@@ -244,7 +254,7 @@ export async function forge(ucId: string) {
   const prompt = `${FORGE}\n\n## The job: ${uc.name}\n${uc.description ?? ''}\n\n## How the user asks for it\n${asks.map(a => `- ${a.text.replace(/\s+/g, ' ').slice(0, 300)}`).join('\n')}\n${wishes.length ? `\n## What agents said they were missing\n${wishes.map(w => `- ${w.need}: ${w.would_help}`).join('\n')}\n` : ''}\n## Conversations doing it\n${convs.map(c => excerpt(c.id)).filter(Boolean).join('\n\n')}`
   const r = await modelJson(prompt)
   if (r.skip) { run(`update use_cases set status = 'ignored', covered_by = ? where id = ?`, `not repeatable: ${String(r.skip).slice(0, 200)}`, ucId); log('skip', `“${uc.name}” has no repeatable procedure: ${r.skip}`, ucId); return null }
-  const name = `perch-${slug(r.name || uc.name)}`
+  const name = `${skillPrefix()}${slug(r.name || uc.name)}`
   const dir = join(SKILLS_DIR(), name)
   mkdirSync(dir, { recursive: true })
   for (const s of r.scripts ?? []) {
@@ -394,7 +404,7 @@ export function overview() {
   const cases = useCases()
   const asks = get<any>('select count(*) n, sum(corrected) c, count(distinct conversation_id) convs from asks where ts > ?', Date.now() - 30 * DAY)
   return {
-    status, settings: settings.evolve,
+    status, settings: settings.evolve, skillPrefix: skillPrefix(),
     totals: { asks: asks?.n ?? 0, corrected: asks?.c ?? 0, conversations: asks?.convs ?? 0, useCases: cases.length, skills: get<any>(`select count(*) n from forged where status = 'live'`)?.n ?? 0 },
     byIntent: all<any>(`select intent, count(*) n, sum(corrected) c from asks where ts > ? group by intent order by n desc`, Date.now() - 30 * DAY),
     useCases: cases,

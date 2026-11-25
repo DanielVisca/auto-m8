@@ -10,6 +10,7 @@ type Dropped = { id: string; title: string; updated_at: number; stall: string | 
 type Overview = {
   status: { running: boolean; step: string; lastRun: number; error: string }
   settings: { enabled: boolean; forge: boolean; tune: boolean; resume: boolean }
+  skillPrefix: string
   totals: { asks: number; corrected: number; conversations: number; useCases: number; skills: number }
   byIntent: { intent: string; n: number; c: number }[]
   useCases: UseCase[]; skills: Skill[]; dropped: Dropped[]
@@ -35,7 +36,7 @@ export function Evolve({ onOpen }: { onOpen: (id: string) => void }) {
         <span className="muted small">{s.running ? `${s.step || 'working'}…` : s.lastRun ? `last looked ${ago(s.lastRun)} ago` : 'looks every 4 hours'}</span>
         <button disabled={s.running} onClick={() => act('run', '/api/evolve/run')}>{s.running ? 'Working…' : 'Look now'}</button>
       </div>
-      <div className="muted small">auto-m8 reads every ask you make to agents, groups them into the jobs you keep handing over, and writes a skill (perch-*) for each job you come back to. It watches each skill afterwards: it rewrites the ones agents don't load or get corrected on, and retires the ones nobody needs. Autopilot turns the same use cases into scheduled jobs.</div>
+      <div className="muted small">auto-m8 reads every ask you make to agents, groups them into the jobs you keep handing over, and writes a skill ({data.skillPrefix}*) for each job you come back to. It watches each skill afterwards: it rewrites the ones agents don't load or get corrected on, and retires the ones nobody needs. Autopilot turns the same use cases into scheduled jobs.</div>
       <div className="row-flex small">
         {(['enabled', 'forge', 'tune', 'resume'] as const).map(k => (
           <label key={k}><input type="checkbox" checked={data.settings[k]} onChange={() => toggle(k)} /> {{ enabled: 'Always on', forge: 'Write new skills', tune: 'Tune and retire skills', resume: 'Resume dropped work' }[k]}</label>

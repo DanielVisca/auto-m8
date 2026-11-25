@@ -403,7 +403,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
   }
   if (name === 'use_skill') {
     // search_skills lists installed skills too, so load those from disk: the store doesn't have
-    // perch's own (perch-*) skills and answered 404 for them.
+    // the skills auto-m8 writes (autom8-*, perch-*) and answered 404 for them.
     const mine = localSkills().find(s => s.name === String(args.name))
     if (mine) return `# Skill: ${mine.name} (installed, ${mine.path})\n${mine.description}\n\n${readFileSync(mine.path, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '')}\n\n(Bundled files are next to ${mine.path}.)`
     const sk: any = await skills.get(String(args.name))
