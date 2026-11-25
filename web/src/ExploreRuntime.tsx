@@ -135,9 +135,11 @@ export function WhereItRuns({ concept, repos, org, onLoaded }: { concept: string
   const mine = r.deployments.filter(d => d.origin !== 'third-party'), infra = r.deployments.filter(d => d.origin === 'third-party')
   return (
     <div className="ex-sec">
-      <h5>Where it runs <span className="muted" title={r.matchedBy}>· matched by name “{r.tokens.join('”, “')}”</span></h5>
+      <h5>Where it runs</h5>
+      <div className="tiny muted">Argo CD apps with “{r.tokens.join('”, “')}” in their name. Only ones marked <b>runs your code</b> are proven to run this repo (their image is tagged with one of its commits); the rest just share the name. Code that's part of a bigger app (like a Django product inside the main web app) has no app of its own, so it won't show here.</div>
       {r.argoError && <div className="small bad">Argo CD: {r.argoError}. Open Sources to connect it.</div>}
       {!r.argoError && !r.deployments.length && <div className="small muted">No Argo CD app is named like this concept. It may run inside another service (look at what's built on it), or as a scheduled job.</div>}
+      {mine.length > 0 && !mine.some(d => d.origin === 'yours') && <div className="small warn">None of these run code from your repos, so they're probably unrelated namesakes. This concept likely runs inside a larger app.</div>}
       {mine.map(d => <DepCard key={d.base} d={d} />)}
       {infra.length > 0 && (
         <div className="small muted">
@@ -214,7 +216,7 @@ function DepCard({ d }: { d: Dep }) {
   const labels = [...new Set(d.facts.map(f => f.label))]
   const sources = [...new Set(d.facts.map(f => f.source))]
   const cell = (label: string, source: string) => d.facts.find(f => f.label === label && f.source === source)
-  const badge = d.origin === 'yours' ? 'runs your code' : d.origin === 'org' ? 'built by your org' : d.origin === 'third-party' ? 'third-party' : 'unknown image'
+  const badge = d.origin === 'yours' ? 'runs your code' : d.origin === 'org' ? 'name match only · built by your org' : d.origin === 'third-party' ? 'name match only · third-party' : 'name match only'
   return (
     <div className="ex-dep small">
       <div><b>{d.base}</b> <span className={`ex-badge ${d.origin}`}>{badge}</span>{d.chartPath && <span className="muted"> · chart {shortPath(d.chartPath)}</span>}</div>
