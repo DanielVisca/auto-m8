@@ -32,6 +32,7 @@ function Preview({ text, image }: { text: string; image: string | null }) {
 
 export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: string) => void; onStart: (prompt?: string) => void; onBack?: () => void }) {
   const data = useWriting()
+  const pub = usePublished()
   const [q, setQ] = useState('')
   const [showAll, setShowAll] = useState(false)
   const [allIdeas, setAllIdeas] = useState(false)
@@ -64,8 +65,11 @@ export function WritingHome({ onOpenDoc, onStart, onBack }: { onOpenDoc: (id: st
         <Stat n={docs.length} label="docs" />
         <Stat n={shelf?.posts.length ?? 0} label="drafted posts" sub={`${shelf?.posts.filter(p => ready(p.status)).length ?? 0} ready to edit`} />
         <Stat n={shelf?.ideas.length ?? 0} label="ideas captured" />
+        <Stat n={pub?.pages?.length ?? 0} label="published pages" sub={pub?.pages ? `${fmt(pub.pages.reduce((n, p) => n + p.views30, 0))} views in 30 days` : undefined} />
         <Stat n={reviewing.reduce((n, d) => n + (d.open_comments ?? 0), 0)} label="open review comments" sub={`on ${reviewing.length} docs`} />
       </div>
+
+      <Published pub={pub} />
 
       {reviewing.length > 0 && <section className="wh-sec">
         <h3>Waiting on you <span className="muted small">comments from reviewers and agents</span></h3>
@@ -208,4 +212,78 @@ export function WritingArt({ data }: { data?: WritingData }) {
     .sort((a, b) => b.at - a.at).filter(x => !seen.has(x.k) && !!seen.add(x.k)).slice(0, 4)
   if (!titles.length) return <span className="muted">No writing yet</span>
   return <div className="wh-art">{titles.map((x, i) => <div key={i} className="wh-page"><b>{x.t}</b><i /><i /><i /></div>)}</div>
+}
+
+// ── Published: pages on the site repo you created or have a byline on, with their views ──
+type PubPage = { file: string; path: string; url: string; title: string; kind: 'article' | 'docs' | 'page'; byline: boolean; pr: number | null; published_at: number | null; weekly: number[]; views30: number; visitors30: number; total: number }
+type Pub = { login: string; handle: string | null; repo: string; host: string; weeks: number[]; pages: PubPage[]; insight: string; pending_views?: boolean; views_error?: string; pending?: boolean; error?: string }
+export function usePublished() {
+  const [d, setD] = useState<Pub | null>(null)
+  useEffect(() => {
+    let live = true, t: ReturnType<typeof setTimeout>
+    const ask = () => api.get<Pub>('/api/explore/writing/published').then(r => { if (!live) return; if (r && !r.pending) setD(r); t = setTimeout(ask, r?.pending || r?.pending_views ? 2500 : 15 * 60_000) }).catch(() => { if (live) t = setTimeout(ask, 30_000) })
+    ask()
+    return () => { live = false; clearTimeout(t) }
+  }, [])
+  return d
+}
+const fmt = (n: number) => n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+function Spark({ v }: { v: number[] }) {
+  const max = Math.max(1, ...v), W = 100, H = 24
+  const pts = v.map((y, i) => `${(i / Math.max(1, v.length - 1)) * W},${H - (y / max) * (H - 2) - 1}`).join(' ')
+  return <svg className="wh-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden><polyline points={pts} /></svg>
+}
+// Weekly views, all your pages stacked by the top few and the rest.
+function ViewsChart({ weeks, pages }: { weeks: number[]; pages: PubPage[] }) {
+  const [hover, setHover] = useState<number | null>(null)
+  const top = pages.filter(p => p.total > 0).slice(0, 4)
+  const rest = weeks.map((_, i) => pages.filter(p => !top.includes(p)).reduce((n, p) => n + (p.weekly[i] ?? 0), 0))
+  const layers = [...top.map(p => ({ name: p.title, v: p.weekly })), { name: 'Other pages', v: rest }]
+  const totals = weeks.map((_, i) => layers.reduce((n, l) => n + (l.v[i] ?? 0), 0))
+  const max = Math.max(1, ...totals), W = 600, H = 150, x = (i: number) => (i / Math.max(1, weeks.length - 1)) * W, y = (n: number) => H - (n / max) * (H - 8)
+  let base = weeks.map(() => 0)
+  const paths = layers.map((l, k) => {
+    const lo = base, hi = base.map((b, i) => b + (l.v[i] ?? 0)); base = hi
+    const d = `M${hi.map((n, i) => `${x(i)},${y(n)}`).join(' L')} L${lo.map((n, i) => `${x(i)},${y(n)}`).reverse().join(' L')} Z`
+    return <path key={k} d={d} className={`wh-layer l${k === layers.length - 1 ? 'x' : k}`} />
+  })
+  const h = hover ?? weeks.length - 1
+  return (
+    <div className="wh-chart">
+      <div className="wh-chart-head small"><b>{fmt(totals[h] ?? 0)}</b> views the week of {weeks[h] ? new Date(weeks[h]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}{h === weeks.length - 1 ? ' (so far)' : ''}
+        <span className="muted"> · peak {fmt(max)}/week</span></div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" onMouseLeave={() => setHover(null)}
+        onMouseMove={e => { const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect(); setHover(Math.max(0, Math.min(weeks.length - 1, Math.round(((e.clientX - r.left) / r.width) * (weeks.length - 1))))) }}>
+        {paths}
+        <line x1={x(h)} x2={x(h)} y1={0} y2={H} className="wh-cursor" />
+      </svg>
+      <div className="wh-legend small">{layers.map((l, k) => <span key={k}><i className={`l${k === layers.length - 1 ? 'x' : k}`} />{l.name.length > 38 ? l.name.slice(0, 36) + '…' : l.name} <span className="muted">{fmt(l.v[h] ?? 0)}</span></span>)}</div>
+    </div>
+  )
+}
+function Published({ pub }: { pub: Pub | null }) {
+  const [all, setAll] = useState(false)
+  if (!pub) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Finding what you published…</div></section>
+  if (pub.error) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Couldn't list published pages: {pub.error}</div></section>
+  const pages = pub.pages, v30 = pages.reduce((n, p) => n + p.views30, 0), tot = pages.reduce((n, p) => n + p.total, 0)
+  return (
+    <section className="wh-sec">
+      <h3>Published <span className="muted small">{pages.length} pages on {pub.host} you created or have a byline on · {fmt(v30)} views in 30 days · {fmt(tot)} in 26 weeks</span>
+        <a className="link small" href={pub.insight} target="_blank" rel="noreferrer">See more in PostHog ↗</a></h3>
+      {pub.views_error && <div className="muted small">Views unavailable: {pub.views_error}</div>}
+      {pub.pending_views && <div className="muted small">Loading views…</div>}
+      {pub.weeks.length > 0 && <ViewsChart weeks={pub.weeks} pages={pages} />}
+      <div className="wh-pub">
+        <div className="wh-pub-row wh-pub-head muted small"><span>Page</span><span>26 weeks</span><span>30d views</span><span>30d visitors</span><span>Published</span></div>
+        {pages.slice(0, all ? 200 : 6).map(p => (
+          <a key={p.file} className="wh-pub-row" href={p.url} target="_blank" rel="noreferrer" title={p.url}>
+            <span className="ellipsis"><b>{p.title}</b> <span className={`chip small ${p.kind === 'article' ? 'final' : ''}`}>{p.byline ? 'byline' : p.kind}</span> <span className="muted small">{p.path}</span></span>
+            <Spark v={p.weekly} />
+            <span>{fmt(p.views30)}</span><span>{fmt(p.visitors30)}</span>
+            <span className="muted small">{p.published_at ? new Date(p.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</span>
+          </a>))}
+      </div>
+      {pages.length > 6 && <button className="link small" onClick={() => setAll(a => !a)}>{all ? 'Show top 6' : `Show all ${pages.length}`}</button>}
+    </section>
+  )
 }

@@ -59,6 +59,7 @@ import { indexStatus, onChange, onTick, posthogStatus, scanAll, startIndexer, sy
 import { clearAnthropicKey, clearPangramKey, clearPosthogKey, pangramKey, posthogKey, setAnthropicKey, setPangramKey, setPosthogKey } from './keychain.ts'
 import { addComment, addResearch, agentEdit, deleteComment, deleteResearch, DOCS_DIR, getDoc, listDocs, newDoc, onDocs, openDoc, dictionaryWords, editDictionary, pangramBalance, pangramCheck, resolveComment, watchDoc, restoreVersion, saveDoc, snapshot, toSlack, updateDoc, version as docVersion, type Author as DocAuthor } from './docs.ts'
 import { findWriting, imageFile, imageType, writingHome } from './writinghome.ts'
+import { published } from './published.ts'
 import { runStoreCommand, scouts, skills, tasks } from './posthog.ts'
 import { onError, recentErrors, recordError, resolveErrors } from './errors.ts'
 import { taskOutput } from './taskOutput.ts'
@@ -767,6 +768,7 @@ route('GET', '/api/boards/:id/thumb', (m, _req, res) => {
 })
 route('GET', '/api/explore/competitors', () => ({ products: exploreCompetitors() }))
 route('GET', '/api/explore/writing', () => writingHome())
+route('GET', '/api/explore/writing/published', () => published())
 route('GET', '/api/explore/writing/find', async (_m, _r, _s, q) => findWriting(String(q.get('q') ?? '')))
 route('GET', '/api/explore/writing/image/:key', (m, _req, res) => {
   const file = imageFile(m[1])
