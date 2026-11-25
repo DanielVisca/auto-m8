@@ -1,6 +1,6 @@
 // The floating window. All the work happens in the perch server; this only owns the window:
 // always-on-top, a global show/hide shortcut, size presets, and remembering where you left it.
-const { app, BrowserWindow, Menu, globalShortcut, ipcMain, nativeTheme, screen, shell } = require('electron')
+const { app, BrowserWindow, Menu, globalShortcut, ipcMain, nativeTheme, screen, shell, systemPreferences } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
 const { existsSync, readFileSync, openSync } = require('node:fs')
 const { join } = require('node:path')
@@ -400,6 +400,29 @@ ipcMain.handle('is-pinned', () => win.isAlwaysOnTop())
 // Big decisions waiting on you show on the dock icon, so you see them without opening perch.
 ipcMain.handle('badge', (_e, text) => { try { app.dock?.setBadge(String(text ?? '')) } catch {} })
 ipcMain.handle('preset', (_e, name) => { win.setBounds(presetBounds(name), true); saveBounds() })
+// Double-click on the window's header does what macOS's "Double-click a window's title bar" setting says.
+// Fill/Zoom toggle between filling the screen and the last size you picked; when the window got big some
+// other way (dragged, preset, restored bounds) there's no smaller size saved, so fall back to a centred 80%.
+let beforeFill = null
+ipcMain.handle('titlebar-dblclick', () => {
+  if (!win || win.isDestroyed() || beforeMini || beforeTuck) return 'none'
+  const act = systemPreferences.getUserDefault('AppleActionOnDoubleClick', 'string') || 'Fill'
+  if (act === 'Minimize') { win.minimize(); return 'minimized' }
+  if (act === 'None') return 'none'
+  const b = win.getBounds(), { workArea: a } = screen.getDisplayMatching(b), near = (p, q) => Math.abs(p - q) <= 24
+  const filled = near(b.x, a.x) && near(b.y, a.y) && near(b.x + b.width, a.x + a.width) && near(b.y + b.height, a.y + a.height)
+  if (filled) {
+    const back = beforeFill && beforeFill.width < a.width - 48 ? beforeFill
+      : { width: Math.round(a.width * 0.8), height: Math.round(a.height * 0.8), x: Math.round(a.x + a.width * 0.1), y: Math.round(a.y + a.height * 0.1) }
+    beforeFill = null
+    win.setBounds(back, true)
+  } else {
+    beforeFill = b
+    win.setBounds(a, true)
+  }
+  saveBounds()
+  return filled ? 'restored' : 'filled'
+})
 // Picture in picture: shrink into the corner the window is nearest, always on top, and come back
 // to exactly where it was. The page switches to its mini view from the window size.
 // It starts as a slim pill (counts and an ask box); opening or starting a chat grows it into the

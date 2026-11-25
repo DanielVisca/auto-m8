@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('perch', {
   miniSize: size => ipcRenderer.invoke('mini-size', size),
   onMiniSize: cb => { const f = (_e, s) => cb(s); ipcRenderer.on('mini-size', f); return () => ipcRenderer.removeListener('mini-size', f) },
   tuck: on => ipcRenderer.invoke('tuck', on),
+  titlebarDoubleClick: () => ipcRenderer.invoke('titlebar-dblclick'),
   switchProfile: id => ipcRenderer.invoke('profile-switch', id),
   theme: t => ipcRenderer.invoke('theme', t),
   boardThumb: url => ipcRenderer.invoke('board-thumb', url),

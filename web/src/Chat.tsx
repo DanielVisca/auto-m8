@@ -2,7 +2,7 @@ import { BoardButton } from './Boards'
 import { marked } from 'marked'
 import { createContext, memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
-import { ago, api, cachedThread, loadThread, baseName, post, sendChat, toast, shortPath, useOutbox, titleOf, useLive, type Conversation, type Item, type Term } from './api'
+import { ago, api, cachedThread, loadThread, baseName, post, sendChat, toast, shortPath, useOutbox, titleOf, useLive, shell, type Conversation, type Item, type Term } from './api'
 import { adopt, apply, dropReplayedPrompt, emptyLive, toolLabel, toolSummary, type Live } from './stream'
 import { StateMenu } from './List'
 import { OpenIn } from './OpenIn'
@@ -773,7 +773,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
   return (
     <div className="chat" ref={root}>
       {id && !panel && (
-        <div className="view-head">
+        <div className="view-head" onDoubleClick={headDoubleClick}>
           <Title conv={conv} />
           <Family id={id} onOpen={onOpen} />
           {conv && <StateMenu c={conv} />}
@@ -1498,7 +1498,14 @@ function Title({ conv }: { conv?: Conversation }) {
   const save = () => { if (edit != null && edit.trim() !== titleOf(conv)) post(`/api/conversations/${encodeURIComponent(conv.id)}/title`, { title: edit.trim() }); setEdit(null) }
   return edit != null
     ? <input className="grow title-edit" autoFocus value={edit} onChange={e => setEdit(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEdit(null) }} />
-    : <div className="grow title" title={`${titleOf(conv)}\n(double-click to rename)`} onDoubleClick={() => setEdit(titleOf(conv))}>{titleOf(conv)}</div>
+    : <div className="grow title"><span title={`${titleOf(conv)}\n(double-click to rename)`} onDoubleClick={e => { e.stopPropagation(); setEdit(titleOf(conv)) }}>{titleOf(conv)}</span></div>
+}
+
+// Double-clicking the empty part of a chat's header acts like a Mac title bar: fill the screen, or shrink
+// back from it (the shell follows the macOS "double-click a window's title bar" setting).
+function headDoubleClick(e: React.MouseEvent) {
+  const t = e.target as HTMLElement
+  if (t === e.currentTarget || t.classList.contains('title')) shell.titlebarDoubleClick?.()
 }
 
 const isLocalEngine = (e: string) => !!e && e !== 'auto' && !e.startsWith('claude:') && !e.startsWith('codex')
