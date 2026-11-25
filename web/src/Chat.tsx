@@ -297,19 +297,8 @@ function AgentBubble({ text }: { text: string }) {
   return <div className="bubble agent"><div>{from}</div>{body}</div>
 }
 
-// "[Image 1]" in a sent message: a tiny preview where it was attached, instead of the label.
-function inlineAttachments(t: string, labels: Record<string, string>) {
-  const byLabel = Object.fromEntries(Object.entries(labels).map(([p, l]) => [l, p]))
-  if (!Object.keys(byLabel).length) return t
-  return t.split(/(\[(?:Image|File) \d+\])/).map((part, i) => {
-    const p = byLabel[part.slice(1, -1)]
-    if (!p) return part
-    const open = () => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))
-    return part.startsWith('[Image')
-      ? <img key={i} className="inline-attach" src={rawUrl(p)} alt="" title={`${baseName(p)}\nClick to view`} onClick={open} />
-      : <span key={i} className="inline-attach file" title={baseName(p).replace(/^[0-9a-f]{8}-/, '')} onClick={open}>📄</span>
-  })
-}
+// "[Image 1]" / "[File 2]" tell the agent where an attachment was added; you never see them.
+export const hideAttachMarks = (t: string) => t.replace(/ ?\[(?:Image|File) \d{1,2}\]/g, '')
 function UserBubble({ text }: { text: string }) {
   if (agentSender(text)) return <AgentBubble text={text} />
   const body = userBody(text)
@@ -326,6 +315,7 @@ function UserBubble({ text }: { text: string }) {
   rest = rest.replace(/<attached-files>([\s\S]*?)<\/attached-files>\s*/g, (_m, inner: string) => { for (const x of attachedItems(inner)) { files.push(x.path); if (x.label) labels[x.path] = x.label } return '' })
   if (imgs.length) rest = rest.replace(/\n*🖼 \d+ images? attached\s*$/, '')
   if (imgs.length || files.length) rest = rest.replace(/^\(see the attached (?:image|file|\d+ attachments)\)$/, '')
+  rest = hideAttachMarks(rest)
   const prs: string[] = []
   rest = rest.replace(/^(?:🔗 )?(https?:\/\/\S+)\s*$/gm, (m, u: string) => { if (isSlackLink(u)) { urls.push(u); return '' } if (PR_URL.test(u)) { prs.push(u); return '' } return m }).trim()
   return <>
@@ -336,7 +326,7 @@ function UserBubble({ text }: { text: string }) {
 <img src={`/api/files/raw?path=${encodeURIComponent(p)}`} alt={baseName(p)} loading="lazy" /></button>)}
       {files.map(p => <button key={p} className="chip attach-file" onClick={() => window.dispatchEvent(new CustomEvent('perch-file', { detail: p }))} title={p}>📄 {baseName(p).replace(/^[0-9a-f]{8}-/, '')}</button>)}
     </div>}
-    {rest && <div className="bubble">{inlineAttachments(rest, labels)}</div>}
+    {rest && <div className="bubble">{rest}</div>}
   </>
 }
 
@@ -1067,7 +1057,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
       )}
       {queued.length > 0 && (
         <div className="chips">
-          {queued.map(q => <span key={q.key} className="chip" title={q.body.prompt}>⏳ Queued, sends when auto-m8 reconnects: “{String(q.body.prompt ?? '').slice(0, 60)}”</span>)}
+          {queued.map(q => <span key={q.key} className="chip" title={q.body.prompt}>⏳ Queued, sends when auto-m8 reconnects: “{hideAttachMarks(String(q.body.prompt ?? '')).slice(0, 60)}”</span>)}
         </div>
       )}
       {preBlock && !shownInThread && <BlockerCard blocker={preBlock} convId={id} compact={compact} />}
