@@ -85,8 +85,21 @@ const gh = (args: string[], timeout = 20_000) => new Promise<string>((res, rej) 
   execFile('gh', args, { maxBuffer: 32 << 20, timeout }, (e, out) => e ? rej(e) : res(out)))
 
 // Only real repos the user owns, by their top level: the explorer runs git and reads every file in it.
-export async function checkRepo(path: string, home = homedir()): Promise<string> {
-  if (!path || !existsSync(path)) throw new Error('No such folder')
+// Every explore request checks its repo and reads its remote: two git processes each, slow when the server is
+// busy. Both rarely change, so they're kept a minute (HEAD is always read fresh).
+const short = new Map<string, { at: number; v: Promise<any> }>()
+function minute<T>(key: string, f: () => Promise<T>): Promise<T> {
+  const m = short.get(key)
+  if (m && Date.now() - m.at < 60_000) return m.v
+  const v = f(); short.set(key, { at: Date.now(), v }); v.catch(() => short.delete(key))
+  if (short.size > 200) short.delete(short.keys().next().value!)
+  return v
+}
+export function checkRepo(path: string, home = homedir()): Promise<string> {
+  if (!path || !existsSync(path)) return Promise.reject(new Error('No such folder'))
+  return minute(`repo:${path}:${home}`, () => checkRepoNow(path, home))
+}
+async function checkRepoNow(path: string, home: string): Promise<string> {
   const real = realpathSync(path), h = realpathSync(home)
   if (real !== h && !real.startsWith(h + sep)) throw new Error('Repo must be inside your home folder')
   let top: string
@@ -402,7 +415,8 @@ export type TimelineEvent = { date: string; kind: 'concept' | 'edge'; id: string
 export type Timeline = { status: 'running' | 'done'; done: number; total: number; source: string; shallow: boolean; since: string | null; events: TimelineEvent[]; milestones: Record<string, Commit[]>; error?: string }
 
 export const prOf = (subject: string) => { const m = /\(#(\d+)\)\s*$/.exec(subject) ?? /Merge pull request #(\d+)/.exec(subject); return m ? Number(m[1]) : null }
-export async function remoteOf(repo: string): Promise<{ owner: string; name: string } | null> {
+export function remoteOf(repo: string): Promise<{ owner: string; name: string } | null> { return minute(`remote:${repo}`, () => remoteOfNow(repo)) }
+async function remoteOfNow(repo: string): Promise<{ owner: string; name: string } | null> {
   try { const u = (await git(repo, ['remote', 'get-url', 'origin'], 5000)).trim(); const m = /github\.com[:/]([^/]+)\/([^/]+?)(\.git)?$/.exec(u); return m ? { owner: m[1], name: m[2] } : null } catch { return null }
 }
 export const ghUrl = (r: { owner: string; name: string } | null, kind: 'blob' | 'commit' | 'pr' | 'tree', a: string | number, path?: string, line?: number) =>
