@@ -1199,15 +1199,15 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
         />
         <button className={`turbo-btn${turbo ? ' on' : ''}`} onClick={toggleTurbo} aria-pressed={turbo} disabled={isLocalEngine(engine)}
           title={turbo ? 'Turbo is on for this chat: top model, high effort, parallel subagents, then a verify pass. Click to turn off.' : 'Turbo: finish faster with the top model working in parallel'}>⚡</button>
-        <button className={`turbo-btn${driving ? ' on' : ''}`} onClick={toggleDrive} aria-pressed={driving}
-          title={driving ? `Self drive is on: when this chat stops on a question or blocker, an agent answers for you and keeps it going. Only what only you can do comes back to you.${drive?.note ? ` Now: ${drive.note}` : ''} Click to turn off.` : 'Self drive: an agent answers this chat\'s questions and blockers for you until the work is done'}>🚗</button>
         {running && id
           ? <button className="stop" onClick={() => post(`/api/chat/${id}/interrupt`)} title="Stop">■</button>
           : <button className="primary" onClick={submit} disabled={!text.trim()}>↵</button>}
+        <button className={`turbo-btn${driving ? ' on' : ''}`} onClick={toggleDrive} aria-pressed={driving}
+          title={driving ? `Self drive is on: when this chat stops on a question or blocker, an agent answers for you and keeps it going. Only what only you can do comes back to you.${drive?.note ? ` Now: ${drive.note}` : ''} Click to turn off.` : 'Self drive: an agent answers this chat\'s questions and blockers for you until the work is done'}>🚗</button>
       </div>
       <div className="composer-opts">
         {!id && folder && <span className="chip">📁 {folder.name}</span>}
-        {driving && <span className="chip" title={drive?.note ?? ''}>🚗 Self drive{id && drive ? ` · ${drive.status === 'thinking' ? 'deciding…' : drive.status === 'needs_you' ? 'needs you' : drive.status === 'paused' ? 'paused' : `${drive.replies} ${drive.replies === 1 ? 'reply' : 'replies'}`}` : ' on start'}</span>}
+        {driving && <span className="chip" title={drive?.note ?? ''}>🚗 Self drive{id && drive ? ` · ${drive.status === 'thinking' ? 'deciding…' : drive.status === 'needs_you' ? 'needs you' : drive.status === 'paused' ? 'paused' : drive.status === 'backoff' ? 'cooling off' : drive.status === 'resumed' ? 'picked up a stall' : `${drive.replies} ${drive.replies === 1 ? 'reply' : 'replies'}`}` : ' on start'}</span>}
         {!id && <input className="cwd" value={cwd} onChange={e => setCwd(e.target.value)} title="Working directory" list="cwds" />}
         {id && conv?.cwd && <span className="muted small" title={`${conv.cwd}\nRight-click to show in Finder`} data-path={conv.cwd} data-dir="1">{baseName(conv.cwd)}{conv.branch ? ` · ${conv.branch}` : ''}</span>}
         {/* Which model: Auto picks per message from what you already pay for; or pin one. */}

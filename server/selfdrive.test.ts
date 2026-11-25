@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { deps, drive, driveLog, driveState, parseVerdict, PER_HOUR, prompt, setSelfDrive, type Verdict } from './selfdrive.ts'
+import { BACKOFF_MS, deps, drive, driveLog, driveState, MAX_BACKOFFS, MAX_RESUMES, parseVerdict, PER_HOUR, prompt, QUIET_MS, setSelfDrive, stallIn, sweep, WAIT_RECHECK_MS, type Verdict } from './selfdrive.ts'
 import { get, run } from './db.ts'
 import type { Item } from './transcript.ts'
 
@@ -14,11 +14,16 @@ const notices: string[] = []
 deps.judge = async () => verdict
 deps.send = (id, p) => { sent.push([id, p]) }
 deps.notice = (_id, t) => { notices.push(t) }
-deps.transcript = () => asked
+let transcript: Item[] = asked
+deps.transcript = () => transcript
+let clock = Date.now()
+deps.now = () => clock
+let updated = 0
+deps.updatedAt = () => updated
 deps.running = () => true // keep setSelfDrive from scheduling a background drive; flipped per test
 deps.paused = () => false
 
-const fresh = (id: string) => { setSelfDrive(id, true); deps.running = () => false; sent.length = 0; notices.length = 0 }
+const fresh = (id: string) => { deps.running = () => true; setSelfDrive(id, true); deps.running = () => false; sent.length = 0; notices.length = 0; transcript = asked; clock += 86400_000 }
 
 test('off: never drives', async () => {
   verdict = { action: 'reply', message: 'go' }
@@ -27,7 +32,6 @@ test('off: never drives', async () => {
 })
 
 test('a stop-short turn gets the owner\'s reply, logged and counted', async () => {
-  deps.running = () => true
   fresh('c1')
   verdict = { action: 'reply', message: 'Go. Build it in a worktree.', reason: 'agent offered to build' }
   await drive('c1')
@@ -36,18 +40,16 @@ test('a stop-short turn gets the owner\'s reply, logged and counted', async () =
   assert.equal(driveLog('c1')[0].action, 'reply')
 })
 
-test('the same reply twice hands the chat back instead of looping', async () => {
-  deps.running = () => true
+test('the same reply is sent twice, the third time hands the chat back', async () => {
   fresh('c2')
   verdict = { action: 'reply', message: 'Carry on.' }
-  await drive('c2'); await drive('c2')
-  assert.equal(sent.length, 1)
+  await drive('c2'); clock += 1000; await drive('c2'); clock += 1000; await drive('c2')
+  assert.equal(sent.length, 2)
   assert.equal(driveState('c2').status, 'needs_you')
   assert.ok(get<any>(`select 1 from needs where source_key = 'selfdrive:c2'`))
 })
 
 test('needs_you goes to Needs me and sends nothing', async () => {
-  deps.running = () => true
   fresh('c3')
   verdict = { action: 'needs_you', reason: 'Approve the production table drop' }
   await drive('c3')
@@ -57,7 +59,6 @@ test('needs_you goes to Needs me and sends nothing', async () => {
 })
 
 test('done turns self drive off', async () => {
-  deps.running = () => true
   fresh('c4')
   verdict = { action: 'done', reason: 'PR opened and handed to the shepherd' }
   await drive('c4')
@@ -65,20 +66,88 @@ test('done turns self drive off', async () => {
   assert.equal(sent.length, 0)
 })
 
-test('hourly cap hands back without asking the driver', async () => {
-  deps.running = () => true
+test('a burst backs off and carries on; only repeated bursts hand back', async () => {
   fresh('c5')
-  for (let i = 0; i < PER_HOUR; i++) run(`insert into self_drive_log (conversation_id, at, action) values ('c5', ?, 'reply')`, Date.now())
-  let judged = false
-  deps.judge = async () => { judged = true; return { action: 'reply', message: 'x' } }
+  let judged = 0
+  deps.judge = async () => { judged++; return { action: 'reply', message: `step ${judged}` } }
+  const burst = () => { for (let i = 0; i < PER_HOUR; i++) run(`insert into self_drive_log (conversation_id, at, action) values ('c5', ?, 'reply')`, clock) }
+  burst()
+  await drive('c5')
+  assert.equal(judged, 0)
+  assert.equal(driveState('c5').status, 'backoff')
+  assert.equal(await drive('c5'), null, 'still cooling off')
+  clock += BACKOFF_MS + 3600_000
+  await drive('c5')
+  assert.equal(judged, 1, 'carries on after the backoff')
+  for (let k = 1; k < MAX_BACKOFFS; k++) { burst(); await drive('c5'); clock += BACKOFF_MS + 1000 }
+  burst()
   await drive('c5')
   deps.judge = async () => verdict
-  assert.equal(judged, false)
   assert.equal(driveState('c5').status, 'needs_you')
 })
 
+test('a stall is resumed without asking the driver, until it keeps stalling', async () => {
+  fresh('c7')
+  let judged = false
+  deps.judge = async () => { judged = true; return null }
+  transcript = [...asked, { kind: 'assistant', blocks: [{ type: 'tool', id: 't', name: 'Bash', input: {} }] }]
+  await drive('c7')
+  assert.equal(judged, false)
+  assert.equal(sent.length, 1)
+  assert.match(sent[0][1], /stalled \(it stopped mid tool call\)/)
+  for (let i = 1; i < MAX_RESUMES; i++) { clock += 1000; await drive('c7') }
+  assert.equal(sent.length, MAX_RESUMES)
+  clock += 1000; await drive('c7')
+  assert.equal(sent.length, MAX_RESUMES)
+  assert.equal(driveState('c7').status, 'needs_you')
+  deps.judge = async () => verdict
+})
+
+test('an error event counts as a stall', async () => {
+  fresh('c8')
+  await drive('c8', 'it stopped with an error: overloaded')
+  assert.match(sent[0][1], /overloaded/)
+})
+
+test('a clean turn end is judged, never mistaken for a stall', async () => {
+  fresh('c10')
+  transcript = [...asked, { kind: 'user', text: 'go' }] // the transcript hasn't caught up with the result yet
+  let judged = false
+  deps.judge = async () => { judged = true; return { action: 'wait', reason: 'x' } }
+  await drive('c10', null, true)
+  deps.judge = async () => verdict
+  assert.equal(judged, true)
+  assert.equal(sent.length, 0)
+})
+
+test('stallIn', () => {
+  assert.equal(stallIn(asked), null)
+  assert.match(stallIn([{ kind: 'user', text: 'go' }])!, /never answered/)
+  assert.match(stallIn([{ kind: 'assistant', blocks: [{ type: 'text', text: 'API Error: 529 overloaded' }] }])!, /API error/)
+  assert.match(stallIn([{ kind: 'assistant', blocks: [{ type: 'tool', id: 't', name: 'Bash', input: {}, result: 'ok' }] }])!, /after a tool result/)
+})
+
+test('sweep picks up missed turns, stale waits and failed answers', async () => {
+  fresh('c9')
+  verdict = { action: 'wait', reason: 'CI running' }
+  updated = clock - QUIET_MS - 1 // the chat moved and nobody looked
+  assert.ok(sweep().includes('c9'))
+  await new Promise(r => setImmediate(r))
+  assert.equal(driveLog('c9')[0].action, 'wait')
+  assert.ok(!sweep().includes('c9'), 'just decided to wait')
+  clock += WAIT_RECHECK_MS
+  assert.ok(sweep().includes('c9'), 'waited long enough: look again')
+  await new Promise(r => setImmediate(r))
+  verdict = null
+  clock += WAIT_RECHECK_MS
+  sweep(); await new Promise(r => setImmediate(r))
+  assert.equal(driveLog('c9')[0].action, 'error')
+  clock += 5 * 60_000
+  assert.ok(sweep().includes('c9'), 'retries a failed answer')
+  await new Promise(r => setImmediate(r))
+})
+
 test('a running chat or a pause is left alone', async () => {
-  deps.running = () => true
   fresh('c6')
   deps.running = () => true
   verdict = { action: 'reply', message: 'go' }

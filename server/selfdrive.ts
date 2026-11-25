@@ -18,13 +18,27 @@ run(`create table if not exists self_drive (
   status text, note text, updated_at integer)`)
 run(`create table if not exists self_drive_log (
   id integer primary key autoincrement, conversation_id text not null, at integer not null, action text not null, message text, reason text)`)
+try { run('alter table self_drive add column backoff_until integer') } catch {}
 run('create index if not exists self_drive_log_conv on self_drive_log(conversation_id, at)')
 
-export const PER_HOUR = 12 // driver replies per chat per hour: a runaway loop costs at most this
+// Self drive is meant to run unwatched, so it keeps going and only stops for a real loop:
+// - a burst: PER_HOUR messages in an hour backs off for BACKOFF_MS, then carries on. MAX_BACKOFFS of
+//   those in a day is a big loop, and that hands the chat back.
+// - the same reply MAX_SAME times in a row, or MAX_RESUMES stall nudges in a row with nothing between.
+// Stalls (API errors, died mid tool call, never answered) and quiet waits get picked back up by the sweep.
+export const PER_HOUR = 20
+export const BACKOFF_MS = 30 * 60_000
+export const MAX_BACKOFFS = 3
+export const MAX_SAME = 3
+export const MAX_RESUMES = 5
+export const QUIET_MS = 2 * 60_000 // a turn end the follower missed (restart, terminal) is picked up after this
+export const WAIT_RECHECK_MS = 20 * 60_000 // "waiting on CI/deploy": look again after this much quiet
+export const RETRY_MS = 5 * 60_000 // the driver's own answer failed (unreadable, capped): try again
 const SETTLE_MS = 4000 // let the turn's last events land (and a queued user message start) first
+const DECISIONS = ['reply', 'resume', 'wait', 'done', 'needs_you', 'error', 'backoff']
 
 export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null }
-type Row = { id: string; enabled: number; replies: number; last_reply: string | null; last_reply_at: number | null; status: string | null; note: string | null }
+type Row = { id: string; enabled: number; replies: number; last_reply: string | null; last_reply_at: number | null; status: string | null; note: string | null; backoff_until: number | null }
 
 const row = (id: string) => get<Row>('select * from self_drive where id = ?', id)
 export const isSelfDriving = (id: string) => !!row(id)?.enabled
@@ -36,9 +50,17 @@ export const driveLog = (id: string, limit = 30) =>
   all<{ at: number; action: string; message: string | null; reason: string | null }>('select at, action, message, reason from self_drive_log where conversation_id = ? order by at desc limit ?', id, limit)
 
 const log = (id: string, action: string, message?: string | null, reason?: string | null) =>
-  run('insert into self_drive_log (conversation_id, at, action, message, reason) values (?, ?, ?, ?, ?)', id, Date.now(), action, message ?? null, reason ?? null)
+  run('insert into self_drive_log (conversation_id, at, action, message, reason) values (?, ?, ?, ?, ?)', id, deps.now(), action, message ?? null, reason ?? null)
 const setStatus = (id: string, status: string | null, note: string | null = null) =>
-  run('update self_drive set status = ?, note = ?, updated_at = ? where id = ?', status, note, Date.now(), id)
+  run('update self_drive set status = ?, note = ?, updated_at = ? where id = ?', status, note, deps.now(), id)
+const lastDecision = (id: string) => get<{ at: number; action: string; message: string | null }>(
+  `select at, action, message from self_drive_log where conversation_id = ? and action in (${DECISIONS.map(() => '?').join(',')}) order by at desc, id desc limit 1`, id, ...DECISIONS)
+// How many of the most recent decisions in a row match: "the same reply again", "another stall nudge".
+function streak(id: string, match: (r: { action: string; message: string | null }) => boolean) {
+  let n = 0
+  for (const r of all<{ action: string; message: string | null }>(`select action, message from self_drive_log where conversation_id = ? and action in ('reply', 'resume', 'done', 'needs_you') order by at desc, id desc limit 20`, id)) { if (!match(r)) break; n++ }
+  return n
+}
 
 export const onSelfDrive = new Set<(id: string) => void>()
 const changed = (id: string) => onSelfDrive.forEach(f => f(id))
@@ -50,6 +72,7 @@ export const deps = {
   notice: (id: string, text: string) => { try { noticeLive(id, text) } catch {} },
   transcript: (id: string): Item[] => { const p = get<{ path: string }>('select path from conversations where id = ?', id)?.path; return p ? itemsOf(p) : [] },
   running: (_id: string) => false,
+  updatedAt: (id: string) => get<{ updated_at: number }>('select updated_at from conversations where id = ?', id)?.updated_at ?? 0,
   paused: () => isPaused(),
   now: () => Date.now(),
 }
@@ -76,52 +99,115 @@ export function follow(id: string) {
   followed.add(id)
   subscribe(id, ev => {
     if (ev.parent_tool_use_id) return
-    if (ev.type === 'result' || ev.type === 'perch_error') schedule(id)
+    if (ev.type === 'result') schedule(id, ev.is_error ? `it ended on an error: ${String(ev.result ?? ev.subtype ?? '').slice(0, 200)}` : null, !ev.is_error)
+    if (ev.type === 'perch_error') schedule(id, `it stopped with an error: ${String(ev.message ?? '').slice(0, 200)}`)
   }, { background: true })
 }
 
 export function startSelfDrive(running: (id: string) => boolean) {
   deps.running = running
   for (const r of all<{ id: string }>('select id from self_drive where enabled = 1')) follow(r.id)
+  setInterval(() => { try { sweep() } catch (e) { console.error('[self-drive] sweep', e) } }, 60_000).unref()
+}
+
+// The safety net for everything the turn-end follower can't see: a chat that stalled without a
+// result event, a turn that ended while auto-m8 was restarting, a "waiting on CI" that never came
+// back, a driver answer that failed. Returns the chats it picked up.
+export function sweep(now = deps.now()): string[] {
+  if (deps.paused()) return []
+  const picked: string[] = []
+  for (const r of all<Row>('select * from self_drive where enabled = 1')) {
+    if (deps.running(r.id) || inflight.has(r.id) || timers.has(r.id)) continue
+    if (r.backoff_until && r.backoff_until > now) continue
+    const updated = deps.updatedAt(r.id), last = lastDecision(r.id)
+    const since = now - (last?.at ?? 0)
+    const moved = !last || updated > last.at // the chat did something the driver hasn't looked at
+    const due =
+      (moved && now - updated >= QUIET_MS) ||
+      (!moved && last?.action === 'wait' && since >= WAIT_RECHECK_MS) ||
+      (!moved && (last?.action === 'error' || last?.action === 'backoff') && since >= RETRY_MS) ||
+      (!moved && (last?.action === 'reply' || last?.action === 'resume') && since >= WAIT_RECHECK_MS) // sent, and nothing happened
+    if (!due || (last?.action === 'needs_you' && !moved)) continue
+    picked.push(r.id)
+    drive(r.id).catch(e => console.error('[self-drive]', r.id, e))
+  }
+  return picked
+}
+
+// The transcript ends without the agent finishing its turn.
+export function stallIn(items: Item[]): string | null {
+  const last = items[items.length - 1]
+  if (!last) return null
+  if (last.kind === 'user') return 'it never answered the last message'
+  const b = last.blocks[last.blocks.length - 1]
+  if (!b) return null
+  if (b.type === 'text' && /^\s*API Error\b|^\s*(Request timed out|Overloaded)/i.test(b.text)) return 'it ended on an API error'
+  if (b.type === 'tool' && b.result === undefined) return 'it stopped mid tool call'
+  if (b.type === 'tool') return 'it stopped after a tool result, before replying'
+  return null
 }
 
 const timers = new Map<string, NodeJS.Timeout>()
 const inflight = new Set<string>()
-function schedule(id: string) {
+function schedule(id: string, stalled: string | null = null, finished = false) {
   clearTimeout(timers.get(id))
-  const t = setTimeout(() => { timers.delete(id); drive(id).catch(e => console.error('[self-drive]', id, e)) }, SETTLE_MS)
+  const t = setTimeout(() => { timers.delete(id); drive(id, stalled, finished).catch(e => console.error('[self-drive]', id, e)) }, SETTLE_MS)
   t.unref?.()
   timers.set(id, t)
 }
 
 export type Verdict = { action: 'reply' | 'done' | 'needs_you' | 'wait'; message?: string; reason?: string }
 
-export async function drive(id: string): Promise<Verdict | null> {
+// finished: the turn just ended cleanly (a result event), so the transcript can't be read as a stall;
+// it may simply not be flushed yet. Stall detection is for errors and the sweep.
+export async function drive(id: string, stalled: string | null = null, finished = false): Promise<Verdict | null> {
   const r = row(id)
   if (!r?.enabled || inflight.has(id) || deps.running(id)) return null
   if (deps.paused()) { setStatus(id, 'paused', 'auto-m8 is paused, or agents acting on their own is off in Settings'); changed(id); return null }
   const now = deps.now()
-  const lastHour = get<{ n: number }>(`select count(*) n from self_drive_log where conversation_id = ? and action = 'reply' and at > ?`, id, now - 3600_000)?.n ?? 0
-  if (lastHour >= PER_HOUR) return handBack(id, `Self drive replied ${lastHour} times in the last hour without finishing. Have a look at where it's going.`, '')
+  if (r.backoff_until && r.backoff_until > now) return null
+  const lastHour = get<{ n: number }>(`select count(*) n from self_drive_log where conversation_id = ? and action in ('reply', 'resume') and at > ?`, id, now - 3600_000)?.n ?? 0
+  if (lastHour >= PER_HOUR) {
+    const backoffs = (get<{ n: number }>(`select count(*) n from self_drive_log where conversation_id = ? and action = 'backoff' and at > ?`, id, now - 86400_000)?.n ?? 0) + 1
+    if (backoffs > MAX_BACKOFFS) return handBack(id, `Self drive has sent ${PER_HOUR}+ messages an hour, ${MAX_BACKOFFS} times today, without finishing: that's a loop.`, '')
+    run('update self_drive set backoff_until = ? where id = ?', now + BACKOFF_MS, id)
+    setStatus(id, 'backoff', `${lastHour} messages in the last hour: pausing ${BACKOFF_MS / 60_000} min, then carrying on`)
+    log(id, 'backoff', null, `${lastHour} in an hour (${backoffs}/${MAX_BACKOFFS} today)`)
+    changed(id)
+    return null
+  }
   const items = deps.transcript(id)
-  const last = [...items].reverse().find(i => i.kind === 'assistant')
-  if (!last) return null
+  // Stalled: nothing to judge, the agent just has to carry on. No model call needed.
+  const stall = stalled ?? (finished ? null : stallIn(items))
+  if (stall) return resume(id, stall)
+  if (!items.some(i => i.kind === 'assistant')) return null
   inflight.add(id)
   setStatus(id, 'thinking'); changed(id)
   try {
-    const v = await deps.judge(prompt(id, items))
+    const v = await deps.judge(prompt(id, items, r.last_reply))
     if (!row(id)?.enabled) return null // switched off while it was thinking
-    if (!v) { setStatus(id, 'error', "The driver's answer was unreadable; it tries again on the next turn."); log(id, 'error'); return null }
+    if (!v) { setStatus(id, 'error', `The driver's answer was unreadable; trying again in ${RETRY_MS / 60_000} min.`); log(id, 'error'); return null }
     if (deps.running(id)) { setStatus(id, null); return null } // the user (or something else) already picked it up
-    return act(id, v, r)
+    return act(id, v)
   } finally { inflight.delete(id); changed(id) }
+}
+
+function resume(id: string, stall: string): Verdict | null {
+  const n = streak(id, d => d.action === 'resume')
+  if (n >= MAX_RESUMES) return handBack(id, `The chat stalled ${n + 1} times in a row (${stall}) and resuming didn't help.`, '')
+  const message = `You stalled (${stall}). Self drive is on, so nobody else will pick this up: carry on with the task from where you stopped, finish it including its checks, and report the result. If one approach keeps failing, try another.`
+  run('update self_drive set status = ?, note = ?, updated_at = ? where id = ?', 'resumed', `stalled: ${stall}`, deps.now(), id)
+  log(id, 'resume', message, stall)
+  deps.send(id, message)
+  changed(id)
+  return { action: 'reply', message, reason: stall }
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
-function act(id: string, v: Verdict, r: Row): Verdict {
+function act(id: string, v: Verdict): Verdict {
   const message = (v.message ?? '').trim(), reason = (v.reason ?? '').trim()
-  if (v.action === 'wait') { setStatus(id, null, reason || null); log(id, 'wait', null, reason); return v }
+  if (v.action === 'wait') { setStatus(id, 'waiting', reason || null); log(id, 'wait', null, reason); return v }
   if (v.action === 'done') {
     run('update self_drive set enabled = 0, status = ?, note = ?, updated_at = ? where id = ?', 'done', reason || 'Finished.', deps.now(), id)
     log(id, 'done', null, reason)
@@ -129,8 +215,9 @@ function act(id: string, v: Verdict, r: Row): Verdict {
     return v
   }
   if (v.action === 'needs_you' || !message) return handBack(id, reason || 'The driver needs you here.', message)
-  // Saying the same thing again means the chat is going round in circles: that's for the user.
-  if (r.last_reply && norm(r.last_reply) === norm(message)) return handBack(id, 'Self drive was about to send the same reply twice; the chat looks stuck.', message)
+  // The same reply over and over means the chat is going round in circles.
+  const same = streak(id, d => d.action === 'reply' && !!d.message && norm(d.message) === norm(message))
+  if (same >= MAX_SAME - 1) return handBack(id, `Self drive was about to send the same reply ${MAX_SAME} times in a row; the chat is going in circles.`, message)
   run('update self_drive set replies = replies + 1, last_reply = ?, last_reply_at = ?, status = ?, note = ?, updated_at = ? where id = ?', message, deps.now(), 'replied', reason || null, deps.now(), id)
   log(id, 'reply', message, reason)
   deps.send(id, message)
@@ -163,7 +250,7 @@ export function transcriptFor(items: Item[], max = 14000) {
   return s.length > max ? '…' + s.slice(-max) : s
 }
 
-export function prompt(id: string, items: Item[]) {
+export function prompt(id: string, items: Item[], lastReply?: string | null) {
   const name = ownerName()
   let goal: { goal: string; done_when: string | null } | undefined
   try { goal = get<any>(`select goal, done_when from projects where conversation_id = ? and status = 'active'`, id) } catch {} // projects.ts may not be loaded
@@ -175,10 +262,10 @@ Choose one action:
 - "reply": the agent asked something, offered options, stopped short ("say go and I'll…"), hit a fixable blocker, or stopped before finishing. Write ${name}'s next message: answer the question, pick the option (usually the agent's recommendation unless it's wrong), or tell it exactly what to do next. If the agent raised a real doubt that the task is wrong or harmful, it's fine to answer "stop" or to change direction: don't rubber-stamp.
 - "done": the work is finished and checked (PR opened and handed to its shepherd, question answered, result verified). Nothing left for the agent to do.
 - "wait": the agent is waiting on something that will come back by itself (CI, a deploy, a helper, a scheduled follow-up) and said so. Nothing to send now.
-- "needs_you": only ${name} can do the next step: something irreversible or destructive in production, spending money, sending a message or posting publicly as them, a merge the PR's plan doesn't already allow, a credential or hardware approval, or a decision that belongs to someone outside the team. Also when the chat is going in circles.
+- "needs_you": rare. ${name} turned this on to not be needed: before choosing it, look for any way forward (another approach, a different tool, a reversible version, doing the independent parts first) and reply with that instead. Only when the next step truly can't happen without them: something irreversible or destructive in production, spending money, sending a message or posting publicly as them, a merge the PR's plan doesn't already allow, a credential or hardware approval, or a decision that belongs to someone outside the team. Also when the chat is going in circles.
 
 Never approve destructive production actions, spending, or messages to people on ${name}'s behalf: that is "needs_you". Don't invent facts the transcript doesn't support.
-${goal ? `\nThe goal of this chat: ${goal.goal}${goal.done_when ? `\nDone when: ${goal.done_when}` : ''}\n` : ''}
+${lastReply ? `\nYour last message to the agent was: "${lastReply.slice(0, 600)}". If that didn't move the work forward, try something different, don't repeat it.\n` : ''}${goal ? `\nThe goal of this chat: ${goal.goal}${goal.done_when ? `\nDone when: ${goal.done_when}` : ''}\n` : ''}
 Reply with ONLY JSON: {"action": "reply" | "done" | "wait" | "needs_you", "message": "the message to send (reply only), in ${name}'s voice", "reason": "one short line: why"}
 
 The conversation so far (most recent last):
