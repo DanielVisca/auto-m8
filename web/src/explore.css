@@ -135,3 +135,16 @@ a.ex-chip { cursor: pointer; }
 .ex-what-md code { font-size: 11px; padding: 0 4px; border-radius: 4px; background: var(--bg3); }
 .ex-usage { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; cursor: help; }
 .ex-usage svg { flex: none; }
+
+.ex-cluster-head { display: flex; gap: 8px; align-items: baseline; }
+.ex-full { font-weight: 600; text-decoration: none; }
+.ex-full.bad, .ex-disk-pct.bad { color: var(--bad); }
+.ex-full.warn, .ex-disk-pct.warn { color: var(--warn); }
+.ex-disks { margin: 6px 0 4px; display: flex; flex-direction: column; gap: 3px; }
+.ex-disk { display: grid; grid-template-columns: minmax(90px, 1fr) 2fr 44px; gap: 8px; align-items: center; font-size: 11px; }
+.ex-disk-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ex-bar { height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+.ex-bar i { display: block; height: 100%; background: var(--ok); }
+.ex-bar i.warn { background: var(--warn); } .ex-bar i.bad { background: var(--bad); }
+.ex-disk-pct { text-align: right; font-variant-numeric: tabular-nums; }
+.ex-hw { margin-top: 4px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }

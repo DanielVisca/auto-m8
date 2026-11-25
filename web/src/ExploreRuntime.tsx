@@ -188,17 +188,7 @@ export function DataSection({ concept, repos, bare, onSummary }: { concept: stri
   return (
     <div className="ex-sec small">
       {!bare && <h5>Data <span className="muted" title={r.matchedBy}>· ClickHouse tables named in its code or like “{r.tokens.join('”, “')}”</span></h5>}
-      {r.clusters.map(c => (
-        <div key={c.name} className="ex-dep">
-          <div><b>{c.name}</b> <span className="muted">cluster{c.shards != null ? ` · ${c.shards} shards, ${c.replicas} nodes` : ''}{c.ds ? ` · seen via ${c.ds}` : ''}</span></div>
-          {c.disk.nodes ? <div>Disk: fullest <a href={c.disk.link} target="_blank" rel="noreferrer" title={`${c.disk.source}\n${c.disk.query}`}><span className={c.disk.max! > 0.9 ? 'bad' : c.disk.max! > 0.8 ? 'warn' : ''}>{pct(c.disk.max)}</span></a>, median {pct(c.disk.median)} across {c.disk.nodes} nodes
-            <span className="muted"> ({c.disk.fullest?.slice(0, 3).map(f => `${f.instance} ${f.disk} ${pct(f.used)}`).join(', ')})</span></div>
-            : <div className="muted">Disk: {c.disk.note}</div>}
-          <div>Tier: {c.aws.length ? <><b>{c.aws.join(', ')}</b> <span className="muted">(AWS describe-instances, now)</span></> : !c.terraform.length && <span className="muted">no terraform block names this cluster or its nodes</span>}
-            {c.terraform.map((t, i) => <div key={i} className="ex-code"><b>{t.value}</b> <span className="muted">{t.key} · {t.matchedBy} · </span>{t.link ? <a href={t.link} target="_blank" rel="noreferrer">{t.file}:{t.line}</a> : `${t.file}:${t.line}`}</div>)}
-          </div>
-        </div>
-      ))}
+      {r.clusters.map(c => <ClusterCard key={c.name} c={c} />)}
       {!r.tables.length && <div className="muted" title={r.datasources?.length ? `Searched ${r.datasources.map(d => `${d.name}: ${d.tables} tables`).join(', ')}` : undefined}>None of its code names a ClickHouse table, and no table is named like it. Its data may live in Postgres (see its models under Code).</div>}
       {r.tables.length > 0 && (
         <table className="ex-facts ex-tables">
@@ -258,6 +248,52 @@ function DepCard({ d }: { d: Dep }) {
         </table>
       )}
       {labels.length > 0 && <div className="tiny muted">Live, last 5 minutes. Click a number for its query in Grafana. Rows in amber: the two metric pipelines disagree by over 10%.</div>}
+    </div>
+  )
+}
+
+// prod-us-iad-ch-1b-logs:9363 → 1b-logs: the part that tells nodes apart.
+const shortNode = (s: string) => s.replace(/:\d+$/, '').replace(/^[a-z]+-[a-z]+-[a-z]+\d?-ch-/, '')
+// What a terraform file provisions, from its folder: zookeeper-logs → ZooKeeper, clickhouse → ClickHouse nodes.
+const roleOf = (file: string) => { const d = file.split('/').slice(-2, -1)[0] ?? ''; return /zookeeper/i.test(d) ? 'ZooKeeper' : /keeper/i.test(d) ? 'Keeper' : /clickhouse/i.test(d) ? 'ClickHouse nodes' : d }
+const level = (v: number | null | undefined) => v == null ? '' : v > 0.9 ? 'bad' : v > 0.8 ? 'warn' : ''
+
+// One cluster: how full it is at a glance, each node's fullest disk as a bar, and the hardware by role.
+function ClusterCard({ c }: { c: any }) {
+  const [all, setAll] = useState(false)
+  // One row per node: its fullest disk.
+  const byNode = new Map<string, { node: string; disk: string; used: number }>()
+  for (const f of c.disk.fullest ?? []) { const k = shortNode(f.instance), x = byNode.get(k); if (!x || f.used > x.used) byNode.set(k, { node: k, disk: f.disk, used: f.used }) }
+  const nodes = [...byNode.values()].sort((a, b) => b.used - a.used), shown = all ? nodes : nodes.slice(0, 6)
+  const hw = c.aws.length ? [{ role: 'ClickHouse nodes', value: c.aws.join(', '), tip: 'AWS describe-instances, now', link: null }]
+    : c.terraform.map((t: any) => ({ role: roleOf(t.file), value: t.value, tip: `${t.key} · ${t.matchedBy}\n${t.file}:${t.line}`, link: t.link }))
+  return (
+    <div className="ex-dep ex-cluster">
+      <div className="ex-cluster-head">
+        <b title={c.ds ? `Seen via ${c.ds}` : undefined}>{c.name}</b>
+        <span className="muted">{c.shards != null ? `${c.shards} shard${c.shards === 1 ? '' : 's'} · ${c.replicas} node${c.replicas === 1 ? '' : 's'}` : ''}</span>
+        <span className="grow" />
+        {c.disk.nodes ? <a className={`ex-full ${level(c.disk.max)}`} href={c.disk.link} target="_blank" rel="noreferrer" title={`Fullest disk in the cluster\n${c.disk.source}\n${c.disk.query}`}>{pct(c.disk.max)} full</a> : null}
+      </div>
+      {c.disk.nodes ? (
+        <div className="ex-disks">
+          {shown.map(n => (
+            <div key={n.node} className="ex-disk" title={`${n.node} · ${n.disk} disk · ${pct(n.used)} used`}>
+              <span className="ex-disk-name">{n.node} <span className="muted">{n.disk}</span></span>
+              <span className="ex-bar"><i className={level(n.used)} style={{ width: `${Math.min(100, n.used * 100)}%` }} /></span>
+              <span className={`ex-disk-pct ${level(n.used)}`}>{pct(n.used)}</span>
+            </div>
+          ))}
+          {nodes.length > 6 && <button className="link tiny" onClick={() => setAll(!all)}>{all ? 'fewer' : `+${nodes.length - 6} more nodes`}</button>}
+          <div className="tiny muted">median {pct(c.disk.median)} across {c.disk.nodes} disk{c.disk.nodes === 1 ? "" : "s"}</div>
+        </div>
+      ) : <div className="muted tiny">Disk: {c.disk.note}</div>}
+      <div className="ex-hw">
+        {!hw.length && <span className="muted tiny">Hardware: no terraform block names this cluster or its nodes</span>}
+        {hw.map((h: any, i: number) => (
+          <div key={i}>{h.role} <b>{h.value}</b> {h.link ? <a className="tiny muted" href={h.link} target="_blank" rel="noreferrer" title={h.tip}>terraform ↗</a> : <span className="tiny muted" title={h.tip}>ⓘ</span>}</div>
+        ))}
+      </div>
     </div>
   )
 }
