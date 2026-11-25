@@ -111,6 +111,19 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
   const [chatId, setChatId] = useState<string | null>(() => repo ? localStorage.getItem(`perch.explore.chat.${repo}`) : null)
   const [lastCtx, setLastCtx] = useState('')
   const [ask, setAsk] = useState('')
+  // The Ask box can fold its reply away so the panel above gets the room; the side panel's width is draggable. Both persist.
+  const [replyHidden, setReplyHidden] = useState(() => localStorage.getItem('perch.explore.replyHidden') === '1')
+  const toggleReply = (v = !replyHidden) => { setReplyHidden(v); localStorage.setItem('perch.explore.replyHidden', v ? '1' : '0') }
+  const [sideW, setSideW] = useState(() => Number(localStorage.getItem('perch.explore.sideW')) || 380)
+  const resizeSide = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const main = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect()
+    let w = sideW
+    const move = (ev: PointerEvent) => { w = Math.round(Math.max(260, Math.min(main.width - 320, main.right - ev.clientX))); setSideW(w) }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); document.body.style.cursor = ''; localStorage.setItem('perch.explore.sideW', String(w)) }
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
   const drag = useRef<{ x: number; y: number; x2: number; y2: number } | null>(null)
   const [box, setBox] = useState<{ x: number; y: number; x2: number; y2: number } | null>(null)
   const svg = useRef<SVGSVGElement>(null)
@@ -235,6 +248,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
   }
   const send = async (q: string) => {
     if (!g || !q.trim()) return
+    toggleReply(false)
     const ctx = context()
     const prompt = ctx === lastCtx ? q.trim() : `${ctx}\n\n${q.trim()}`
     try {
@@ -291,7 +305,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
       {!repo && <div className="card muted">Pick a git repo to map. Everything on the map comes from its files and history: each concept, link, date and author can be traced to a file or commit.</div>}
       {err && <div className="card bad">{err}</div>}
       {g && (
-        <div className="explore-main">
+        <div className="explore-main" style={{ '--ex-side': `${sideW}px` } as React.CSSProperties}>
           <div className="explore-stage">
             <div className="explore-legend small muted">
               {g.focus ? <>Left: what {focusNames.join(', ') || g.focus} is built on · Right: what's built on it · Middle: links both ways</> : <>The {g.nodes.length} most connected of {g.total} modules. Focus on one to see what it's built on.</>}
@@ -397,6 +411,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
             )}
             <TimelineBar tl={tl} steps={steps} step={step} setStep={s => { setPlaying(false); setStep(s) }} playing={playing} setPlaying={setPlaying} at={at} links={storyLinks} onPick={id => pick(id, false)} />
           </div>
+          <div className="explore-resize" title="Drag to resize the panel · double-click to reset" onPointerDown={resizeSide} onDoubleClick={() => { setSideW(380); localStorage.removeItem('perch.explore.sideW') }} />
           <aside className="explore-side">
             <div className="explore-side-top">
             {sources && <SourcesPanel onClose={() => setSources(false)} onOpenTerm={id => { location.hash = `#term/${encodeURIComponent(id)}` }} />}
@@ -407,14 +422,15 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
               onRemove={() => { setDreaming(true); setOps(o => [...o, { op: 'remove', id: active }]) }} />
               : !dreaming && <div className="card muted small">Click a concept to see what it is, what it's built on, what's built on it, and where that's written. Shift-click or drag a box to select several, then ask about them below. Press play on the timeline to watch the system grow.</div>}
             </div>
-            <div className="explore-chat card">
+            <div className={`explore-chat card ${chatId && replyHidden ? 'folded' : ''}`}>
               <div className="explore-chat-head small">
+                {chatId && <button className="link small ex-reply-fold" title={replyHidden ? 'Show the reply' : 'Hide the reply, keep the ask box'} onClick={() => toggleReply()}>{replyHidden ? '▸' : '▾'}</button>}
                 <b>Ask</b>
                 <span className="muted ellipsis">{(selected.length ? selected : active ? [active] : []).map(label).join(', ') || (g.focus ? `focus: ${g.focus}` : 'whole map')}{T ? ` · at ${T.slice(0, 10)}` : ''}</span>
                 {chatId && <><button className="link small" onClick={() => onOpenChat(chatId)}>open chat</button><button className="link small" onClick={newChat}>new</button></>}
               </div>
               <textarea value={ask} placeholder="Ask about what you've selected. The map's evidence is sent with it, and the agent is told to check the code and cite files." onChange={e => setAsk(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(ask) } }} />
-              {chatId && <div className="explore-reply"><MiniChat id={chatId} bare readOnly="Reply from the box above, so it carries what you're looking at." /></div>}
+              {chatId && !replyHidden && <div className="explore-reply"><MiniChat id={chatId} bare readOnly="Reply from the box above, so it carries what you're looking at." /></div>}
             </div>
           </aside>
         </div>
