@@ -1,0 +1,74 @@
+name: Release
+# Push a tag like v0.2.0: builds auto-m8.app (arm64 and x64) as DMG + zip and publishes a GitHub
+# Release. Installed apps update themselves from it (electron-updater reads latest-mac.yml).
+# Signed and notarized when the Apple secrets are set; otherwise unsigned, and the notes say so.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Version from the tag
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+      - name: Signing available?
+        id: sign
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+        run: |
+          echo "signed=$([ -n "$CSC_LINK" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "notarized=$([ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - run: npm run build
+      - run: node scripts/fetch-node.mjs arm64 x64
+      - name: Build and publish (signed)
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --mac --publish always
+      - name: Build and publish (unsigned)
+        if: steps.sign.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        # Ad-hoc signed: a bundle with no valid signature at all shows as "damaged" on Apple silicon.
+        run: npx electron-builder --mac --publish always -c.mac.identity=-
+      - name: Release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGNED: ${{ steps.sign.outputs.signed }}
+          NOTARIZED: ${{ steps.sign.outputs.notarized }}
+        run: |
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          {
+            echo "## Install"
+            echo "- Apple silicon: [auto-m8-arm64.dmg](${base}/auto-m8-arm64.dmg)"
+            echo "- Intel: [auto-m8-x64.dmg](${base}/auto-m8-x64.dmg)"
+            echo
+            echo "Open the DMG and drag auto-m8 to Applications. You also need [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) and the [GitHub CLI](https://cli.github.com) (\`gh auth login\`); auto-m8 brings its own Node."
+            echo
+            if [ "$NOTARIZED" = true ]; then
+              echo "Signed and notarized. auto-m8 updates itself: when an update has downloaded, it installs the next time you quit (or pick **Restart to update** in the auto-m8 menu)."
+            elif [ "$SIGNED" = true ]; then
+              echo "Signed but **not notarized** (the APPLE_* secrets are missing): macOS may still warn on first open."
+            else
+              echo "> [!WARNING]"
+              echo "> **This build is unsigned.** macOS blocks it the first time: open it once, then go to System Settings → Privacy & Security and click **Open Anyway**. Or run \`xattr -dr com.apple.quarantine /Applications/auto-m8.app\`. Unsigned builds can't install updates on their own; download the next release by hand."
+            fi
+            echo
+            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="${GITHUB_REF_NAME}" --jq .body
+          } > notes.md
+          gh release edit "${GITHUB_REF_NAME}" --notes-file notes.md --draft=false

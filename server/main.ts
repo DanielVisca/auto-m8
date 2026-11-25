@@ -1450,6 +1450,6 @@ setInterval(() => { cloud.tick().then(() => broadcast('conversations')).catch(e 
 setInterval(stayAwakeTick, 15_000).unref()
 // Codex and Cursor get the same instructions, memory, skills and MCP servers as Claude Code
 // (agentsync.ts), so either can pick up a chat when Claude is at its cap.
-const agentSync = () => { const r = syncAgents({ command: existsSync('/opt/homebrew/bin/node') ? '/opt/homebrew/bin/node' : process.execPath, args: [join(import.meta.dirname, 'mcp.ts')] }); if (Object.values(r).some(v => Array.isArray(v) ? v.length : v === 'updated' || typeof v === 'number' && v > 0 || 'error' in r)) console.log('[agentsync]', JSON.stringify(r)) }
+const agentSync = () => { const r = syncAgents({ command: !process.env.PERCH_PACKAGED && existsSync('/opt/homebrew/bin/node') ? '/opt/homebrew/bin/node' : process.execPath, /* the packaged app's own Node 26: a Homebrew node may be older */ args: [join(import.meta.dirname, 'mcp.ts')] }); if (Object.values(r).some(v => Array.isArray(v) ? v.length : v === 'updated' || typeof v === 'number' && v > 0 || 'error' in r)) console.log('[agentsync]', JSON.stringify(r)) }
 // A second instance (a dev or test server on another port) must not rewrite the live app's Codex/Cursor config.
 if (!process.env.PERCH_NO_AGENT_SYNC) { agentSync(); setInterval(agentSync, 60 * 60_000).unref() }
