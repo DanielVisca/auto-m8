@@ -26,10 +26,14 @@ export function Search({ initial, onOpen }: { initial: { q: string; mode?: strin
   const [agentId, setAgentId] = useState<string | null>(initial.agent ?? null)
   const [picked, setPicked] = useState<{ mode: string; why: string } | null>(null)
   const input = useRef<HTMLInputElement>(null)
+  // Conversations are your own chats; agent runs (shepherds, helpers, scouts) only when ticked.
+  const [agents, setAgents] = useState(() => localStorage.getItem('perch.searchAgents') === '1')
+  const agentsRef = useRef(agents)
+  agentsRef.current = agents
 
   const runQuick = async (text: string, only?: string) => {
     setSearching(true)
-    const r = await api.get<{ results: Group[] }>(`/api/search/quick?q=${encodeURIComponent(text)}${only ? `&sources=${only}` : ''}`)
+    const r = await api.get<{ results: Group[] }>(`/api/search/quick?q=${encodeURIComponent(text)}${only ? `&sources=${only}` : ''}${agentsRef.current ? '&agents=1' : ''}`)
     setGroups(g => only && g ? [...r.results, ...g.filter(x => !r.results.some(y => y.source === x.source))] : r.results)
     setSearching(false)
   }
@@ -64,6 +68,14 @@ export function Search({ initial, onOpen }: { initial: { q: string; mode?: strin
         <div className="seg">{MODES.map(([k, l]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}
           title={{ auto: 'auto-m8 picks from the question', fast: 'one or two sources, under a minute', balanced: 'the likely sources, widens once', deep: 'parallel agents, upstream source, cross-checked' }[k]}>{l}</button>)}</div>
         {picked && <span className="muted small">{mode === 'auto' ? `auto → ${picked.mode} (${picked.why})` : picked.mode}</span>}
+        <label className="small muted" title="Shepherds, helpers, routines and scouts. Off: only chats you started and talk in.">
+          <input type="checkbox" checked={agents} onChange={e => {
+            const v = e.target.checked
+            setAgents(v); agentsRef.current = v
+            try { localStorage.setItem('perch.searchAgents', v ? '1' : '0') } catch {}
+            if (q.trim()) runQuick(q.trim(), 'conversations')
+          }} /> agent runs
+        </label>
         {searching && <span className="muted small">searching…</span>}
       </div>
 

@@ -68,10 +68,12 @@ export function localRepos() {
 const words = (q: string) => q.toLowerCase().split(/\s+/).filter(w => w.length > 1 && !/^(the|and|for|how|does|what|where|why|did|with|from|this|that|my|in|of|to|a|is)$/.test(w))
 
 // ---------- sources ----------
-const sources: Record<string, { label: string; budget: number; run: (q: string) => Promise<Hit[]> }> = {
+type Opts = { agents?: boolean }
+const sources: Record<string, { label: string; budget: number; run: (q: string, o: Opts) => Promise<Hit[]> }> = {
   conversations: {
     label: 'Conversations', budget: 1500,
-    run: async q => list({ q: `${q} is:any`, sort: 'relevance', limit: 12, focus: false }).conversations.map(c => ({
+    // Your own chats; agent runs (shepherds, helpers, scouts) only when you ask for them.
+    run: async (q, o) => list({ q: o.agents ? `${q} is:any` : q, sort: 'relevance', limit: 12, focus: false }).conversations.map(c => ({
       title: c.title ?? c.first_prompt, sub: `${c.source}${c.cwd ? ' · ' + c.cwd.split('/').pop() : ''} · ${c.effective}`, snippet: c.snippet,
       open: { kind: 'conversation', id: c.id }, score: c.score,
     })),
@@ -207,13 +209,13 @@ export function localSkills() {
 export const SOURCES = Object.entries(sources).map(([id, s]) => ({ id, label: s.label }))
 
 // Runs the chosen sources in parallel; each one is cut off at its own budget.
-export async function quick(q: string, only?: string[]): Promise<SourceResult[]> {
+export async function quick(q: string, only?: string[], o: Opts = {}): Promise<SourceResult[]> {
   const ids = Object.keys(sources).filter(id => !only?.length || only.includes(id))
   return Promise.all(ids.map(async id => {
     const s = sources[id]
     const t0 = Date.now()
     try {
-      const hits = await Promise.race([s.run(q), new Promise<Hit[]>((_, rej) => setTimeout(() => rej(new Error('timed out')), s.budget + 300))])
+      const hits = await Promise.race([s.run(q, o), new Promise<Hit[]>((_, rej) => setTimeout(() => rej(new Error('timed out')), s.budget + 300))])
       return { source: id, label: s.label, hits, ms: Date.now() - t0 }
     } catch (e: any) {
       return { source: id, label: s.label, hits: [], ms: Date.now() - t0, error: String(e.message ?? e).slice(0, 160) }

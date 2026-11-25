@@ -365,9 +365,11 @@ export function list(input: { q?: string; states?: string[]; source?: string; so
   } else rows = everyRow(live)
   const shared = !where.length
 
-  // Automated runs: only with is:auto, or when a search reaches them.
+  // Automated runs (shepherds, helpers, routines, scouts, search agents) stay out of your list and
+  // your searches: only is:auto, is:any, or an explicit where:/origin:/in:task filter reaches them.
+  // counts.auto still says how many matched, so the search can offer to add them.
   const automated = rows.filter(r => r.automated)
-  let pool = q.auto ? automated : q.any || q.origin || scores || q.where.length || sources.includes('posthog-task') ? rows : rows.filter(r => !r.automated)
+  let pool = q.auto ? automated : q.any || q.origin || q.where.length || sources.includes('posthog-task') ? rows : rows.filter(r => !r.automated)
   const focus = input.focus === false ? null : focusIds()
   let hiddenByFocus = 0
   if (focus) {

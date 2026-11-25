@@ -152,7 +152,10 @@ export function List({ selectedId, onOpen, terms, selectedTerm, onOpenTerm, sear
   const searching = debounced.trim().length > 0
   const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0]
   const params = new URLSearchParams({ sort: searching && sort === 'updated' ? 'relevance' : sort })
-  const autoQ = filter === 'auto' ? ' is:auto' : ''
+  // Agent runs (shepherds, helpers, scouts) stay out of a search unless you add them.
+  const [withAgents, setWithAgents] = useState(() => localStorage.getItem('perch.searchAgents') === '1')
+  useEffect(() => { try { localStorage.setItem('perch.searchAgents', withAgents ? '1' : '0') } catch {} }, [withAgents])
+  const autoQ = filter === 'auto' ? ' is:auto' : searching && withAgents && !/\bis:(any|auto)\b/.test(debounced) ? ' is:any' : ''
   if (searching || autoQ) params.set('q', debounced + autoQ)
   // A search looks everywhere unless you pick a filter other than Now.
   if (f.states.length && !(searching && filter === 'now')) params.set('states', f.states.join(','))
@@ -225,6 +228,11 @@ export function List({ selectedId, onOpen, terms, selectedTerm, onOpenTerm, sear
           <option value="messages">Longest</option>
           <option value="title">Title</option>
         </select>}
+        {searching && (withAgents || (counts.auto ?? 0) > 0) && (
+          <label className="small muted" title="Shepherds, helpers, routines and scouts. Off: only chats you started and talk in.">
+            <input type="checkbox" checked={withAgents} onChange={e => setWithAgents(e.target.checked)} /> agent runs{!withAgents && counts.auto ? ` (${counts.auto})` : ''}
+          </label>
+        )}
         {selected.size > 0 && (
           <span className="selection">
             {selected.size} selected

@@ -16,3 +16,18 @@ test('shepherd conversations stay out of the lists unless asked for', () => {
   assert.ok(!ids().includes('thread-shepherd'))
   assert.ok(ids('is:auto').includes('thread-shepherd'))
 })
+
+test('a word search finds your chats, and agent runs only with is:any', () => {
+  const now = Date.now()
+  for (const [id, title] of [['search-mine', 'Flamingo rollout plan'], ['search-shepherd', 'Shepherd: flamingo rollout']]) {
+    run(`insert into conversations (id, source, title, first_prompt, started_at, updated_at, messages, status) values (?, 'claude-code', ?, ?, ?, ?, 2, 'completed')`, id, title, title, now, now)
+    run(`insert into search (id, title, body) values (?, ?, ?)`, id, title, title)
+  }
+  editLabels(['search-shepherd'], ['shepherd'])
+  const r = list({ q: 'flamingo', limit: 500, focus: false })
+  const ids = r.conversations.map(c => c.id)
+  assert.ok(ids.includes('search-mine'))
+  assert.ok(!ids.includes('search-shepherd'))
+  assert.equal(r.counts.auto, 1)
+  assert.ok(list({ q: 'flamingo is:any', limit: 500, focus: false }).conversations.some(c => c.id === 'search-shepherd'))
+})

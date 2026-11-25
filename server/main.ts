@@ -985,7 +985,7 @@ route('GET', '/api/commands', async () => {
   return { commands: [...builtin, ...local, ...store] }
 })
 route('GET', '/api/search/sources', () => ({ sources: SOURCES }))
-route('GET', '/api/search/quick', async (_m, _r, _s, q) => ({ results: await quick(q.get('q') ?? '', q.get('sources')?.split(',').filter(Boolean)) }))
+route('GET', '/api/search/quick', async (_m, _r, _s, q) => ({ results: await quick(q.get('q') ?? '', q.get('sources')?.split(',').filter(Boolean), { agents: q.get('agents') === '1' }) }))
 route('POST', '/api/insights/prs/summarize', async (_m, req) => { const r = await summarizePrs((await body(req)) as any); broadcast('conversations'); return r })
 route('POST', '/api/search', async (_m, req) => { const b = await body(req); const r = startSearch({ q: String(b.q ?? ''), mode: b.mode, cwd: b.cwd }); broadcast('conversations'); return r })
 route('POST', '/api/search/:id/steer', async (m, req) => { steerSearch(m[1], String((await body(req)).text ?? '')); return { ok: true } })
