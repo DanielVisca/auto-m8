@@ -215,7 +215,7 @@ export async function remove(path: string, opts: { force?: boolean; onlyIfIdle?:
   return { ok: true, note: notes.join('; ') || 'removed' }
 }
 
-export type SweepResult = { at: number; removed: { path: string; note: string }[]; kept: number; failed: { path: string; error: string }[]; freeGb: number | null }
+export type SweepResult = { at: number; removed: { path: string; note: string }[]; kept: number; failed: { path: string; error: string }[]; freeGb: number | null; inProgress?: boolean }
 export let lastSweep: SweepResult | null = null
 let sweeping = false
 
@@ -225,7 +225,8 @@ export async function sweep(opts: { dryRun?: boolean } = {}): Promise<SweepResul
   const go = list.filter(w => !w.keep)
   const freeNow = await freeGb(roots()[0] ?? '/')
   if (opts.dryRun) return { at: Date.now(), removed: [], kept: list.length - go.length, failed: [], freeGb: freeNow, wouldRemove: go }
-  if (sweeping) return lastSweep ?? { at: Date.now(), removed: [], kept: list.length, failed: [], freeGb: freeNow }
+  // Another sweep is mid-way (removing a PostHog checkout takes a while); say so rather than hand back an old result as if it were this one.
+  if (sweeping) return { ...(lastSweep ?? { at: Date.now(), removed: [], kept: list.length, failed: [], freeGb: freeNow }), inProgress: true }
   sweeping = true
   const removed: SweepResult['removed'] = [], failed: SweepResult['failed'] = []
   try {

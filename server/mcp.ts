@@ -533,6 +533,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     if (action === 'sweep') {
       const r: any = await (await fetch(`${base}/sweep`, { method: 'POST', headers, body: JSON.stringify({ dry_run: !!args.dry_run }) })).json()
       if (r.error) return `Sweep failed: ${r.error}`
+      if (r.inProgress) return `A sweep is already running (removing big checkouts takes minutes); check back with action=list. Last finished sweep: removed ${r.removed.length}, ${r.freeGb ?? '?'} GB free.`
       if (args.dry_run) return `Would remove ${r.wouldRemove.length} (keeping ${r.kept}); ${r.freeGb ?? '?'} GB free.\n` + r.wouldRemove.map((w: any) => `- ${w.path} (${w.kind}${w.pr ? ` ${w.prState}` : ''}, ${w.branch ?? 'detached'})`).join('\n')
       return `Removed ${r.removed.length}, kept ${r.kept}, failed ${r.failed.length}; ${r.freeGb ?? '?'} GB free.\n` + [...r.removed.map((x: any) => `- removed ${x.path}: ${x.note}`), ...r.failed.map((x: any) => `- FAILED ${x.path}: ${x.error}`)].join('\n')
     }
