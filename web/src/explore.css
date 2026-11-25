@@ -109,3 +109,4 @@
 .ex-edgecard-head { display: flex; gap: 6px; align-items: baseline; margin-bottom: 4px; }
 .ex-edgecard-head button { margin-left: auto; }
 .ex-edgecard .ex-evidence { margin: 6px 0 2px; }
+.ex-empty { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); max-width: 420px; text-align: center; }

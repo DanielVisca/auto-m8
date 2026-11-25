@@ -76,6 +76,8 @@ test('focusGraph centres the focus, splits dependencies and dependents, caps and
   assert.equal(role('alerts'), 'dependent')
   assert.equal(role('core'), 'dependency')
   assert.ok(f.edges.every(e => f.nodes.some(n => n.id === e.from) && f.nodes.some(n => n.id === e.to)))
+  // "Focus here" sends the module path: it must focus exactly that module (it used to match nothing).
+  assert.deepEqual(focusGraph(g, 'products/dashboards').nodes.filter(n => n.role === 'focus').map(n => n.id), ['products/dashboards'])
   // The model name finds the module too.
   assert.equal(focusGraph(g, 'DashboardTile').nodes.find(n => n.role === 'focus')?.id, 'products/dashboards')
   const tiny = focusGraph(g, 'insight', 2)

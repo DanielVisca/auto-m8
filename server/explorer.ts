@@ -231,7 +231,9 @@ export function focusGraph(g: Graph, focus?: string | null, cap = 25, showHubs =
   }
   const q = stem(focus)
   const match = (c: Concept) => { const n = stem(c.name); return n === q ? 3 : c.models.some(m => stem(m) === q) ? 2.5 : n.includes(q) ? 2 : c.models.some(m => stem(m).startsWith(q)) ? 1 : 0 }
-  const scored = g.concepts.map(c => [c, match(c)] as const).filter(([, s]) => s > 0)
+  // An exact module path or model name (what "Focus here" sends) means that one concept, not a search.
+  const exact = byId.get(focus.trim()) ?? byId.get(g.models[focus.trim()]?.concept ?? '')
+  const scored = exact ? [[exact, 9] as const] : g.concepts.map(c => [c, match(c)] as const).filter(([, s]) => s > 0)
   // A weak match (a model that merely starts with the word) only counts when nothing matches by name.
   const strong = scored.some(([, s]) => s >= 2)
   const focused = scored.filter(([, s]) => !strong || s >= 2).sort((a, b) => b[1] - a[1] || b[0].files - a[0].files).slice(0, 5).map(([c]) => c)

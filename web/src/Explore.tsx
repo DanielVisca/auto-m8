@@ -59,7 +59,12 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   const saveWs = (next: string[]) => { setWs(next); localStorage.setItem(wsKey(repo), JSON.stringify(next)) }
   const [sources, setSources] = useState(false)
   const [runtime, setRuntime] = useState<Runtime | null>(null)
-  const [focus, setFocus] = useState(() => localStorage.getItem('perch.explore.focus') ?? '')
+  const [focus, setFocusState] = useState(() => localStorage.getItem('perch.explore.focus') ?? '')
+  // Focus history, so "Focus here" can always be undone with Back.
+  const [trail, setTrail] = useState<string[]>([])
+  const setFocus = (f: string) => { if (f === focus) return; setTrail(t => [...t, focus].slice(-20)); setFocusState(f) }
+  const goBack = () => { const prev = trail[trail.length - 1]; if (prev == null) return; setTrail(t => t.slice(0, -1)); setFocusState(prev); setFocusInput(prev); setActive(null); setSelected([]) }
+  const clearFocus = () => { setFocus(''); setFocusInput(''); setActive(null); setSelected([]) }
   const [focusInput, setFocusInput] = useState(focus)
   const [hubs, setHubs] = useState(false)
   const [allLinks, setAllLinks] = useState(false)
@@ -223,6 +228,8 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
         <input className="explore-focus" list="explore-names" value={focusInput} placeholder="Focus on a concept: dashboard, insight, alert…" onChange={e => setFocusInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setRepo(repoInput.trim()); setFocus(focusInput.trim()); setActive(null); setSelected([]) } }} />
         <datalist id="explore-names">{g?.names.slice(0, 2000).map(n => <option key={n} value={n} />)}</datalist>
         <button onClick={() => { setRepo(repoInput.trim()); setFocus(focusInput.trim()); setActive(null); setSelected([]) }}>Map</button>
+        {trail.length > 0 && <button onClick={goBack} title={`Back to ${trail[trail.length - 1] || 'the whole map'}`}>← Back</button>}
+        {focus && <button onClick={clearFocus} title="Clear the focus and show the whole map">✕ Whole map</button>}
         <label className="small"><input type="checkbox" checked={hubs} onChange={e => setHubs(e.target.checked)} /> show shared foundations</label>
         <label className="small"><input type="checkbox" checked={allLinks} onChange={e => setAllLinks(e.target.checked)} /> all links</label>
         <button className={sources ? 'primary' : ''} onClick={() => setSources(!sources)} title="What the explorer can read beyond code: Argo CD, Grafana, AWS…">Sources</button>
@@ -320,6 +327,12 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
               {ops.filter((o): o is Extract<Op, { op: 'add' }> => o.op === 'add').map(o => { const p = pos.get(o.id)!; return <g key={o.id} className="ex-node dreamed" transform={`translate(${p.x},${p.y})`}><circle r={12} /><text y={26} textAnchor="middle">{o.name ?? o.id}</text></g> })}
               {box && <rect className="ex-box" x={Math.min(box.x, box.x2)} y={Math.min(box.y, box.y2)} width={Math.abs(box.x2 - box.x)} height={Math.abs(box.y2 - box.y)} />}
             </svg>
+            {g.nodes.length === 0 && (
+              <div className="ex-empty card small">
+                Nothing matches “{g.focus}”. Try a shorter name (dashboard, insight, alert) or a module path from the list.
+                <div className="ex-actions">{trail.length > 0 && <button className="small" onClick={goBack}>← Back</button>}<button className="small primary" onClick={clearFocus}>Show the whole map</button></div>
+              </div>
+            )}
             {edgeCard && <EdgeCard c={edgeCard} repo={g.repo} onClose={() => setEdgeCard(null)} />}
             </div>
             {(selected.length > 0 || active) && (
