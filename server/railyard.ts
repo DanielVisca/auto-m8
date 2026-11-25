@@ -40,9 +40,19 @@ function stationOf(p: any, w: any, proof?: { state: string } | null): { station:
 }
 
 let snapCache: { at: number; v: any } | null = null
+let building: Promise<any> | null = null
 const scoutRuns: { at: number; v: any[] } = { at: 0, v: [] }
-export async function railyard() {
-  if (snapCache && Date.now() - snapCache.at < 8_000) return snapCache.v
+// One build at a time, and never make a caller wait for GitHub when there is a snapshot: the build
+// can take 20-75s (gh graphql under rate pressure), and each waiting request holds one of the
+// browser's 6 connections to auto-m8, so a few polling Railyard views starved chat transcripts
+// into "Loading…" (2026-11-25). Stale data comes back at once and a refresh runs behind it.
+export function railyard(): Promise<any> {
+  const fresh = snapCache && Date.now() - snapCache.at < 8_000
+  if (!fresh && !building) building = build().finally(() => { building = null })
+  if (snapCache) { building?.catch(() => {}); return Promise.resolve(snapCache.v) }
+  return building!
+}
+async function build() {
   const now = Date.now()
   const [sidebarR, scoutsR] = await Promise.allSettled([prSidebar(false), scouts.list({ mine: true })])
   const sidebar: any = sidebarR.status === 'fulfilled' ? sidebarR.value : null
