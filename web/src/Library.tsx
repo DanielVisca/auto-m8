@@ -2,13 +2,23 @@ import { useState } from 'react'
 import { ago, api, humanCron, post, useLive } from './api'
 import { useProfiles } from './Profile'
 import { ScoutTable } from './ScoutTimetable'
+import { Evolve } from './Evolve'
 
-export function Library() {
-  const [tab, setTab] = useState<'skills' | 'scouts'>('skills')
+export function Library({ initial, onOpen }: { initial?: 'skills' | 'scouts' | 'learned'; onOpen: (id: string) => void }) {
+  const [tab, setTab] = useState<'skills' | 'scouts' | 'learned'>(initial ?? 'skills')
   const st = useLive<any>('/api/status', ['status']).data
+  const tabs = (
+    <div className="tabs">
+      <button className={tab === 'skills' ? 'on' : ''} onClick={() => setTab('skills')}>Skill store</button>
+      <button className={tab === 'scouts' ? 'on' : ''} onClick={() => setTab('scouts')}>Scouts</button>
+      <button className={tab === 'learned' ? 'on' : ''} title="Evolve: the jobs you keep handing agents, and the skills written for them" onClick={() => setTab('learned')}>✦ Learned</button>
+    </div>
+  )
+  if (tab === 'learned') return <><div className="page">{tabs}</div><Evolve onOpen={onOpen} /></>
   // The skill store and scouts live in PostHog. Without a key, say so once instead of showing errors.
   if (st && !st.posthog?.hasKey) return (
     <div className="page">
+      {tabs}
       <section className="card">
         <h3>Skill store and scouts</h3>
         <div className="muted small">These come from PostHog: a shared store of agent skills, and scouts that run on a schedule in PostHog's cloud. Add a PostHog personal API key in Settings → Connections to use them. Your own skills in ~/.claude/skills work in every chat either way.</div>
@@ -17,10 +27,7 @@ export function Library() {
   )
   return (
     <div className="page">
-      <div className="tabs">
-        <button className={tab === 'skills' ? 'on' : ''} onClick={() => setTab('skills')}>Skill store</button>
-        <button className={tab === 'scouts' ? 'on' : ''} onClick={() => setTab('scouts')}>Scouts</button>
-      </div>
+      {tabs}
       {tab === 'skills' ? <Skills /> : <Scouts />}
     </div>
   )

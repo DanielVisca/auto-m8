@@ -82,6 +82,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .nav button { flex: 1; min-width: 0; overflow: hidden; background: none; border: none; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 4px; font-size: 12px; }
 .nav button span { overflow: hidden; text-overflow: ellipsis; }
 .nav button.on, .nav button:hover { color: var(--fg); background: var(--bg3); }
+.nav button.nav-icon { flex: 0 0 auto; padding: 5px 8px; }
 .app.medium .nav button span { display: none; }
 
 /* ---------- list ---------- */

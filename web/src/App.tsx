@@ -26,7 +26,6 @@ import { ProdAlert } from './ProdAlert'
 import { BrowserFlag } from './BrowserView'
 import { Resources } from './Resources'
 import { Insights } from './Insights'
-import { Evolve } from './Evolve'
 import { Explore } from './Explore'
 import { Library } from './Library'
 import { List } from './List'
@@ -227,10 +226,9 @@ export function App() {
       {view.kind === 'settings' && <div className="scroll"><Settings settings={settings} onTerminal={(cmd, title) => newTerm({ cmd, title })} /></div>}
       {view.kind === 'insights' && <div className="scroll"><Insights onOpen={openById} /></div>}
       {view.kind === 'paused' && <div className="scroll"><Paused onOpen={openById} /></div>}
-      {view.kind === 'evolve' && <div className="scroll"><Evolve onOpen={openById} /></div>}
       {view.kind === 'explore' && <div className="scroll"><Explore key={view.id ?? ''} initialRepo={view.id ?? undefined} onOpenChat={openById} /></div>}
       {view.kind === 'pr' && <div className="scroll"><PrPage key={view.id} url={view.id} onOpen={openById} sideConversations={mode === 'wide' && detailsOpen && !zen} /></div>}
-      {view.kind === 'library' && <div className="scroll"><Library /></div>}
+      {(view.kind === 'library' || view.kind === 'evolve') && <div className="scroll"><Library key={view.kind} initial={view.kind === 'evolve' ? 'learned' : undefined} onOpen={openById} /></div>}
       {view.kind === 'automations' && <div className="scroll"><Automations draft={routineDraft} onOpen={openById} settings={settings} /></div>}
     </Boundary>
   )
@@ -395,13 +393,19 @@ function Toasts({ zen }: { zen?: boolean }) {
 }
 
 function Nav({ view, setView }: { view: View; setView: (v: View) => void }) {
-  const paused = !!usePause().data?.paused
-  const items: [View['kind'], string, string][] = [['insights', '▤', 'Insights'], ['evolve', '✦', 'Evolve'], ['explore', '⌬', 'Explore'], ['library', '◇', 'Skills & scouts'], ['automations', '↻', 'Automations'], ['paused', paused ? '▶' : '⏸', paused ? 'Paused: resume' : 'Pause all'], ['settings', '⚙', 'Settings  ⌘,']]
+  const { data, reload } = usePause()
+  const paused = !!data?.paused
+  // Evolve lives under Skills & scouts (it writes the skills); Explore is linked from Home.
+  const items: [View['kind'], string, string][] = [['insights', '▤', 'Insights'], ['library', '◇', 'Skills & scouts'], ['automations', '↻', 'Automations'], ['settings', '⚙', 'Settings  ⌘,']]
+  const on = (k: View['kind']) => view.kind === k || (k === 'library' && view.kind === 'evolve')
   return (
     <nav className="nav">
       {items.map(([k, icon, label]) => (
-        <button key={k} className={view.kind === k ? 'on' : ''} title={label} onClick={() => setView({ kind: k } as View)}>{icon}<span>{label.split('  ')[0]}</span></button>
+        <button key={k} className={on(k) ? 'on' : ''} title={label} onClick={() => setView({ kind: k } as View)}>{icon}<span>{label.split('  ')[0]}</span></button>
       ))}
+      {/* One click pauses or resumes everything; the bar across the top shows what's held. */}
+      <button className={`nav-icon${paused ? ' on' : ''}`} title={paused ? 'Paused: click to resume all agents and scouts' : 'Pause all agents and scouts'}
+        onClick={async () => { await post(paused ? '/api/resume' : '/api/pause'); reload() }}>{paused ? '▶' : '⏸'}</button>
     </nav>
   )
 }
