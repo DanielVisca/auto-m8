@@ -185,6 +185,17 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
     return { on: pick(live.filter(e => e.from === id), e => e.to), by: pick(live.filter(e => e.to === id), e => e.from) }
   }, [g, at, T]) // eslint-disable-line
   const colorOf = useMemo(() => new Map(selected.length > 1 ? selected.map((id, i) => [id, PALETTE[i % PALETTE.length]] as const) : []), [selected])
+  // Find on the map: typing filters to matching concepts; selecting one brings its links back as usual.
+  const [findOpen, setFindOpen] = useState(false)
+  const [find, setFind] = useState('')
+  const found = useMemo(() => {
+    const q = find.trim().toLowerCase().replace(/[-_\s]/g, '')
+    if (!g || !q) return null
+    const norm = (x: string) => x.toLowerCase().replace(/[-_\s]/g, '')
+    // Best first: exact name, name starting with it, name containing it, then a model named like it.
+    const rank = (n: Node) => { const nm = norm(label(n.id)); return nm === q || nm === q + 's' ? 0 : nm.startsWith(q) ? 1 : norm(n.id).includes(q) ? 2 : n.models.some(m => norm(m).includes(q)) ? 3 : 9 }
+    return new Set(g.nodes.map(n => [n, rank(n)] as const).filter(([, r]) => r < 9).sort((a, b) => a[1] - b[1]).map(([n]) => n.id))
+  }, [g, find])
   const near = useMemo(() => new Set(g ? g.edges.filter(e => spot.has(e.from) || spot.has(e.to)).flatMap(e => [e.from, e.to]) : []), [g, spot])
   const clearSel = () => { setSelected([]); setActive(null) }
   useEffect(() => { const f = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea')) clearSel() }; addEventListener('keydown', f); return () => removeEventListener('keydown', f) }, [])
@@ -319,6 +330,18 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
               {(() => { const me = repos.find(r => r.path === g.repo); return me?.behindOrigin && me.behindOrigin > 50 ? <div className="warn">⚠ This checkout is on branch {me.branch} and {me.behindOrigin.toLocaleString()} commits behind main, so the map shows an older system. Pull or switch to main for today's.</div> : null })()}
             </div>
             <div className="ex-svgwrap" ref={stageRef}>
+            <div className={`ex-find ${findOpen ? 'open' : ''}`} onPointerDown={e => e.stopPropagation()}>
+              {findOpen ? <>
+                <input autoFocus value={find} placeholder="Find on this map…" onChange={e => { setFind(e.target.value); setSelected([]); setActive(null) }}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { e.stopPropagation(); setFind(''); setFindOpen(false) }
+                    else if (e.key === 'Enter' && found?.size) { const id = [...found][0]; setActive(id); setSelected([id]) }
+                  }} />
+                {found && <span className="tiny muted">{found.size} match{found.size === 1 ? '' : 'es'}</span>}
+                {found && !found.size && find.trim() && <button className="link tiny" onClick={() => { setFocus(find.trim()); setFocusInput(find.trim()); setFind(''); setFindOpen(false) }} title="Not on this map: focus the whole repo on it">search the repo →</button>}
+                <button className="link small" title="Close (Esc)" onClick={() => { setFind(''); setFindOpen(false) }}>×</button>
+              </> : <button className="ex-find-btn" title="Find a concept on this map" onClick={() => setFindOpen(true)}>⌕</button>}
+            </div>
             <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="explore-svg"
               onPointerDown={e => { if (e.target === svg.current) { const p = svgPoint(e); drag.current = { x: p.x, y: p.y, x2: p.x, y2: p.y } } }}
               onPointerMove={e => { if (drag.current) { const p = svgPoint(e); drag.current = { ...drag.current, x2: p.x, y2: p.y }; setBox({ ...drag.current }) } }}
@@ -346,6 +369,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 // where the rest stay as faint context.
                 const lit = spot.size > 0 && (spot.has(e.from) || spot.has(e.to))
                 if (spot.size && !lit && !allLinks && !story) return null
+                if (found && !spot.size && !(found.has(e.from) && found.has(e.to))) return null
                 if (!spot.size && drawn && e.evidence.length && !drawn.has(e)) return null
                 const rb = radius(nodeById(e.to)?.files ?? 1) + 3
                 const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
@@ -379,6 +403,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 const p = pos.get(n.id)!
                 const show = visible(n.id)
                 if (!show && T) return null
+                if (found && !found.has(n.id) && !spot.has(n.id) && !(spot.size && near.has(n.id))) return null
                 const r = radius(n.files)
                 const cls = ['ex-node', n.role, n.hub ? 'hub' : '', active === n.id ? 'active' : '', selected.includes(n.id) ? 'sel' : '', removed.has(n.id) ? 'gone' : '', broken.has(n.id) ? 'broken' : '', affected.has(n.id) ? 'affected' : '', fresh(n.id) ? 'fresh' : '', T && !intro.has(n.id) ? 'undated' : '', spot.size && !spot.has(n.id) && !near.has(n.id) ? 'faded' : ''].join(' ')
                 return (
