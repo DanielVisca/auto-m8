@@ -50,3 +50,16 @@ test('a background task keeps its command and where its output goes', async () =
   ].join('\n'))
   assert.deepEqual(steps.map(s => s.kind), ['prompt', 'text', 'tool'])
 })
+
+test('a background agent gets the working card\'s marks and mood: one per tool call, failures and repeats count', async () => {
+  const { progressOf } = await import('./taskOutput.ts')
+  const use = (id: string, cmd: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command: cmd } }] }, timestamp: '2026-11-24T10:00:00Z' })
+  const res = (id: string, err = false) => JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'x', is_error: err }] }, timestamp: '2026-11-24T10:00:05Z' })
+  const smooth = progressOf([use('1', 'ls'), res('1'), use('2', 'cat a'), res('2'), use('3', 'cat b')].join('\n'))
+  assert.deepEqual([smooth.marks, smooth.mood, smooth.steps], [['ok', 'ok', 'pending'], 'smooth', 3])
+  assert.equal(smooth.lastAt, Date.parse('2026-11-24T10:00:05Z'))
+  const rough = progressOf([use('1', 'ls'), res('1', true), use('2', 'ls'), res('2')].join('\n'))
+  assert.deepEqual([rough.marks, rough.mood, rough.errors], [['err', 'repeat'], 'friction', 1])
+  const bad = progressOf(['1', '2', '3'].flatMap(i => [use(i, `x${i}`), res(i, true)]).join('\n'))
+  assert.equal(bad.mood, 'struggling')
+})

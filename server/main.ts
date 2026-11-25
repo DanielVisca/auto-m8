@@ -576,7 +576,7 @@ route('GET', '/api/sidebar', () => sidebar())
 route('GET', '/api/sidebar/recent', (_m, _r, _s, q) => recentPage(Number(q.get('offset') ?? 0), Number(q.get('limit') ?? 15)))
 route('GET', '/api/conversations/:id/evidence', m => ({ evidence: evidence(decodeURIComponent(m[1])) }))
 route('GET', '/api/conversations/:id/files', m => ({ files: conversationFiles(decodeURIComponent(m[1])) }))
-route('GET', '/api/task-output', (_m, _r, _s, q) => taskOutput(String(q.get('path') ?? '')))
+route('GET', '/api/task-output', (_m, _r, _s, q) => taskOutput(String(q.get('path') ?? ''), q.get('summary') === '1'))
 route('GET', '/api/files/check', (_m, _r, _s, q) => ({ file: checkFile(String(q.get('path') ?? '')) }))
 route('POST', '/api/files/action', async (_m, req) => { const b = await body(req); return fileAction(String(b.path ?? ''), b.action) })
 // The file itself: shown in perch's viewer, or downloaded (download=1), e.g. from your phone.

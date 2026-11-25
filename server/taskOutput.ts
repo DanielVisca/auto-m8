@@ -9,9 +9,13 @@ const MAX = 96 * 1024
 const PROJECTS = join(homedir(), '.claude', 'projects')
 
 export type Step = { kind: 'text' | 'tool' | 'result' | 'prompt'; text: string; at?: string }
+// How a background agent's run is going, step by step, with the same marks and mood rule as the
+// chat's working card (web/src/chatActivity.ts workPulse): one mark per tool call.
+export type StepMark = 'ok' | 'err' | 'repeat' | 'pending'
+export type Progress = { marks: StepMark[]; steps: number; errors: number; mood: 'smooth' | 'friction' | 'struggling'; why?: string; lastAt?: number }
 export type TaskOutput =
   | { kind: 'log'; path: string; text: string; truncated: boolean; size: number; updatedAt: number; exitCode?: number }
-  | { kind: 'transcript'; path: string; steps: Step[]; truncated: boolean; updatedAt: number; finished?: boolean }
+  | { kind: 'transcript'; path: string; steps: Step[]; truncated: boolean; updatedAt: number; finished?: boolean; progress?: Progress }
   | { kind: 'workflow'; path: string; agents: { id: string; description: string; finished: boolean; last: string; updatedAt: number }[] }
   | { kind: 'missing'; path: string; reason: string }
 
@@ -24,10 +28,13 @@ function allowed(p: string): string | null {
   return inClaudeTmp || real.startsWith(projects + '/') ? real : null
 }
 
-function tailBytes(p: string, size: number): { text: string; truncated: boolean } {
-  if (size <= MAX) return { text: readFileSync(p, 'utf8'), truncated: false }
-  const fd = openSync(p, 'r'), buf = Buffer.alloc(MAX)
-  try { readSync(fd, buf, 0, MAX, size - MAX) } finally { closeSync(fd) }
+// Progress counts every step, so it reads much more of the transcript than the readable tail does.
+const PROGRESS_MAX = 4 * 1024 * 1024
+
+function tailBytes(p: string, size: number, max = MAX): { text: string; truncated: boolean } {
+  if (size <= max) return { text: readFileSync(p, 'utf8'), truncated: false }
+  const fd = openSync(p, 'r'), buf = Buffer.alloc(max)
+  try { readSync(fd, buf, 0, max, size - max) } finally { closeSync(fd) }
   const s = buf.toString('utf8')
   return { text: s.slice(s.indexOf('\n') + 1), truncated: true }
 }
@@ -65,6 +72,39 @@ export function stepsOf(jsonl: string): Step[] {
   return out
 }
 
+export function progressOf(jsonl: string): Progress {
+  const calls: { id: string; key: string; err?: boolean; done: boolean }[] = []
+  const byId = new Map<string, (typeof calls)[number]>()
+  let lastAt: number | undefined
+  for (const line of jsonl.split('\n')) {
+    if (!line.trim()) continue
+    let o: any
+    try { o = JSON.parse(line) } catch { continue }
+    const t = o.timestamp ? Date.parse(o.timestamp) : NaN
+    if (Number.isFinite(t)) lastAt = Math.max(lastAt ?? 0, t)
+    const content = Array.isArray(o.message?.content) ? o.message.content : []
+    for (const b of content) {
+      if (o.type === 'assistant' && b.type === 'tool_use') {
+        const c = { id: String(b.id), key: `${b.name}:${JSON.stringify(b.input ?? '')}`, done: false }
+        calls.push(c); byId.set(c.id, c)
+      } else if (o.type === 'user' && b.type === 'tool_result') {
+        const c = byId.get(String(b.tool_use_id))
+        if (c) { c.done = true; c.err = !!b.is_error }
+      }
+    }
+  }
+  const seen = new Set<string>()
+  const marks: StepMark[] = calls.map(c => {
+    const again = seen.has(c.key); seen.add(c.key)
+    return !c.done ? 'pending' : c.err ? 'err' : again && !/TodoWrite|update_plan/i.test(c.key) ? 'repeat' : 'ok'
+  })
+  const recent = marks.slice(-10)
+  const errs = recent.filter(m => m === 'err').length, reps = recent.filter(m => m === 'repeat').length
+  const mood: Progress['mood'] = errs >= 3 || errs + reps >= 5 ? 'struggling' : errs || reps >= 2 ? 'friction' : 'smooth'
+  const why = mood === 'smooth' ? undefined : [errs && `${errs} of the last ${recent.length} steps failed`, reps && `${reps} repeated`].filter(Boolean).join(', ')
+  return { marks: marks.slice(-24), steps: calls.length, errors: marks.filter(m => m === 'err').length, mood, why, lastAt }
+}
+
 const looksJsonl = (s: string) => /^\s*\{"/.test(s)
 
 // An agent's output_file can be gone (tmp cleaned); its transcript also lives in the session's subagents dir.
@@ -75,7 +115,8 @@ function agentFallback(p: string): string | null {
   return existsSync(alt) ? alt : null
 }
 
-export function taskOutput(path: string): TaskOutput {
+// summary: just the progress, no steps (the wait card polls every live agent row with it).
+export function taskOutput(path: string, summary = false): TaskOutput {
   if (!path) return { kind: 'missing', path, reason: 'This task didn’t say where its output goes.' }
   const real = allowed(path) ?? (() => { const alt = agentFallback(path); return alt && allowed(alt) })()
   if (!real) return { kind: 'missing', path, reason: existsSync(path) ? 'Not a Claude Code task file.' : 'The output file is gone (temp files are cleared once the session that ran it ends).' }
@@ -96,7 +137,7 @@ export function taskOutput(path: string): TaskOutput {
   if (real.endsWith('.jsonl') || looksJsonl(text)) {
     let meta: any = {}
     try { meta = JSON.parse(readFileSync(real.replace(/\.(jsonl|output)$/, '.meta.json'), 'utf8')) } catch {}
-    return { kind: 'transcript', path: real, steps: stepsOf(text).slice(-200), truncated, updatedAt: st.mtimeMs, finished: meta.finished }
+    return { kind: 'transcript', path: real, steps: summary ? [] : stepsOf(text).slice(-200), truncated, updatedAt: st.mtimeMs, finished: meta.finished, progress: progressOf(st.size <= MAX ? text : tailBytes(real, st.size, PROGRESS_MAX).text) }
   }
   // Claude Code ends a finished command's log with this line, even when its notification never reached the chat.
   const exit = text.match(/\[exited with code (-?\d+)\]\s*$/)

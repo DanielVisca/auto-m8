@@ -49,10 +49,27 @@ export function turnWaits(entries: Entry[]): Wait[] {
   return waitsOf(entries.flatMap(({ item }) => item.kind === 'assistant' ? item.blocks.flatMap(b => b.type === 'tool' ? [{ block: b, ts: item.ts }] : []) : []))
 }
 
+type Progress = { marks: ('ok' | 'err' | 'repeat' | 'pending')[]; steps: number; errors: number; mood: 'smooth' | 'friction' | 'struggling'; why?: string; lastAt?: number }
+const MOOD_LABEL = { smooth: 'Smooth', friction: 'Friction', struggling: 'Struggling' } as const
+
+// The same bar and mood as the working card, for a background agent: one mark per tool call,
+// the running one pulsing, and a dashed "more, unknown" mark while it's still going.
+function AgentHealth({ p, live }: { p: Progress; live: boolean }) {
+  if (!p.steps) return null
+  const shown = p.marks.slice(-16)
+  return <span className="work-health" title={`${p.steps} step${p.steps === 1 ? '' : 's'}${p.errors ? ` · ${p.errors} failed` : ''}${p.why ? ` · ${p.why}` : ''}`}>
+    <span className="work-marks">
+      {shown.map((m, i) => <i key={i} className={`mark-${m === 'pending' && !live ? 'ok' : m}`} />)}
+      {live && <i className="mark-unknown" title="More may follow" />}
+    </span>
+    <span className={`work-mood mood-${p.mood}`} title={p.why}>{MOOD_LABEL[p.mood]}</span>
+  </span>
+}
+
 type Step = { kind: 'text' | 'tool' | 'result' | 'prompt'; text: string; at?: string }
 type Output =
   | { kind: 'log'; path: string; text: string; truncated: boolean; updatedAt: number; exitCode?: number }
-  | { kind: 'transcript'; path: string; steps: Step[]; truncated: boolean; updatedAt: number; finished?: boolean }
+  | { kind: 'transcript'; path: string; steps: Step[]; truncated: boolean; updatedAt: number; finished?: boolean; progress?: Progress }
   | { kind: 'workflow'; path: string; agents: { id: string; description: string; finished: boolean; last: string; updatedAt: number }[] }
   | { kind: 'missing'; path: string; reason: string }
   | { kind: 'error'; reason: string }
@@ -110,6 +127,21 @@ export function WaitCard({ waits, promises }: { waits: Wait[]; promises: Promise
     const t = setInterval(check, 20_000)
     return () => { stop = true; clearInterval(t) }
   }, [pendingKey])
+  // Each background agent's progress (marks + mood), polled while it runs, read once when it's over.
+  const [progress, setProgress] = useState<Record<string, Progress>>({})
+  const agents = waits.filter(w => w.kind === 'task' && w.what === 'agent' && w.outputPath)
+  const agentKey = agents.map(w => `${w.id}:${w.kind === 'task' && w.state}`).join(',')
+  useEffect(() => {
+    if (!agents.length) return
+    let stop = false
+    const load = (list: Wait[]) => list.forEach(w => w.kind === 'task' && api.get<Output>(`/api/task-output?summary=1&path=${encodeURIComponent(w.outputPath!)}`).then(o => {
+      if (!stop && o.kind === 'transcript' && o.progress) setProgress(p => ({ ...p, [w.id]: o.progress! }))
+    }).catch(() => {}))
+    load(agents)
+    const running = agents.filter(w => w.kind === 'task' && w.state === 'live')
+    const t = running.length ? setInterval(() => load(running), 5000) : undefined
+    return () => { stop = true; if (t) clearInterval(t) }
+  }, [agentKey]) // eslint-disable-line
   const live = rows.filter(r => r.live)
   // Tick while anything is live so countdowns and "running 4m" stay true.
   useEffect(() => { if (!live.length) return; const t = setInterval(() => setNow(Date.now()), 15_000); return () => clearInterval(t) }, [live.length])
@@ -138,6 +170,7 @@ export function WaitCard({ waits, promises }: { waits: Wait[]; promises: Promise
             <div className="wait-status"><span className={`dot ${r.live ? 'wait-live' : r.bad ? 'bad' : 'ok'}`} />{WHAT[r.wait.what]} · {r.status}</div>
             {r.detail && drill !== r.wait.id && <div className="wait-detail">{r.detail}</div>}
           </div>
+          {progress[r.wait.id] && <AgentHealth p={progress[r.wait.id]} live={r.live} />}
           <span className={`work-chevron${drill === r.wait.id ? ' open' : ''}`} aria-hidden="true">›</span>
         </button>
         {drill === r.wait.id && <WaitDrill row={r} />}
