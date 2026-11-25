@@ -262,6 +262,19 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   win.loadURL(URL)
   win.once('ready-to-show', () => win.show())
+  // A load that fails (the page reloaded while the server was restarting) leaves Electron with an
+  // empty page, which in this vibrancy window is just a see-through pane over the desktop. Retry
+  // until the server answers. Same for a crashed or killed renderer.
+  let retryTimer = null
+  const retryLoad = why => {
+    if (retryTimer || !win || win.isDestroyed()) return
+    shellLog(`window: ${why}; loading again`)
+    retryTimer = setTimeout(() => { retryTimer = null; if (win && !win.isDestroyed()) win.loadURL(URL) }, 1000)
+  }
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) retryLoad(`load failed (${desc} ${code}) for ${url}`) // -3 = aborted by a newer navigation
+  })
+  win.webContents.on('render-process-gone', (_e, d) => retryLoad(`renderer gone (${d.reason})`))
   // ✕ hides the window instead of destroying it, so the Dock icon, the perch launcher and the
   // shortcut always have a window to bring back (and drafts and scroll survive). Quit still quits.
   win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide() } })
