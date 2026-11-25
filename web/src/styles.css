@@ -1180,6 +1180,9 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .pr-inline.st-merged .pr-inline-dot { background: #8250df; }
 .pr-inline.st-closed .pr-inline-dot { background: var(--bad); }
 .pr-inline.st-merged.dp-deployed .pr-inline-dot { background: #388bfd; }
+.pr-inline.st-merged.dp-deploying .pr-inline-dot { animation: pr-dot-deploying 1.6s ease-in-out infinite; }
+@keyframes pr-dot-deploying { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, #8250df 70%, transparent); } 50% { box-shadow: 0 0 0 3px color-mix(in srgb, #8250df 0%, transparent); opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .pr-inline.st-merged.dp-deploying .pr-inline-dot { animation: none; } }
 .pr-inline.st-merged.dp-stuck .pr-inline-dot, .pr-inline.st-merged.dp-failed .pr-inline-dot { box-shadow: 0 0 0 1.5px var(--bad); }
 .pr-inline-ref { color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
 .pr-inline-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
