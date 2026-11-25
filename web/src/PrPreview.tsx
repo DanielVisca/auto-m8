@@ -38,6 +38,7 @@ export function PrPreviewCard({ url, inPage, brief, reason }: { url: string; inP
         <span className={`pr-pill st-${p.state}`}>{p.state}</span>
         {p.review && <span className={`pr-pill rv-${p.review}`}>{p.review === 'APPROVED' ? '✓ approved' : p.review === 'CHANGES_REQUESTED' ? '! changes' : '⧗ review'}</span>}
         <span className={`pr-pill ck-${chk}`} title={p.checks.failing.join('\n')}>{chk === 'bad' ? `✗ ${p.checks.failing.length}` : chk === 'ok' ? '✓ checks' : '• checks'}</span>
+        {p.deploy && <DeployPill d={p.deploy} />}
         <Diff add={p.additions} del={p.deletions} />
         <span className="muted grow right">{ago(Date.parse(p.updatedAt))} ago</span>
       </div>
@@ -84,6 +85,21 @@ export function PrPreviewCard({ url, inPage, brief, reason }: { url: string; inP
       </details>
     </div>
   )
+}
+
+// Merged PRs: deploying → deployed, with each environment's time on hover.
+const DEPLOY: Record<string, [string, string]> = {
+  deployed: ['dp-ok', '✓ deployed'], deploying: ['dp-wait', '⧗ deploying'], stuck: ['dp-bad', '⚠ not deployed'],
+  failed: ['dp-bad', '✗ deploy failed'], unknown: ['dp-none', '? deploy'],
+}
+function DeployPill({ d }: { d: { state: string; envs: { env: string; status: string; at: number | null }[]; source: string | null } }) {
+  const [cls, label] = DEPLOY[d.state] ?? DEPLOY.unknown
+  const title = d.envs.length
+    ? d.envs.map(e => `${e.env}: ${e.status}${e.at ? ` · ${new Date(e.at).toLocaleString()}` : ''}`).join('\n')
+    : d.source === 'shepherd' ? 'From the shepherd’s production checks' : 'Nothing reports where this runs (no deploy bot comment, no shepherd)'
+  const prod = d.envs.filter(e => /^prod/i.test(e.env))
+  const partial = d.state === 'deploying' && prod.some(e => e.status === 'deployed') ? ` ${prod.filter(e => e.status === 'deployed').length}/${prod.length}` : ''
+  return <span className={`pr-pill ${cls}`} title={title}>{label}{partial}</span>
 }
 
 // +/− in green and red, with GitHub's five-block bar for the balance.

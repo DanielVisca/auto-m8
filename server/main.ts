@@ -78,6 +78,7 @@ import { beat, getDraft as getComposeDraft, handoff, macIdleMs, mobileStatus, no
 import { backfillStartedBy, focusSuggestions, onListChange } from './conversations.ts'
 import { openFile, openIn, targets, type Target } from './open.ts'
 import { enrich } from './enrich.ts'
+import { listDeploys } from './deploys.ts'
 import { addAgent, fixCi, orchestrate, prWorkers, deepAudit, preview as prPreview, pushThrough, snooze } from './pr.ts'
 import { compare, judge, linkGroup } from './compare.ts'
 import { fork, restoreFiles, rewind, snapshotsFor } from './branch.ts'
@@ -1079,6 +1080,8 @@ route('GET', '/api/origins', async (_m, _r, _s, q) => ({ status: originSyncStatu
 route('GET', '/api/pr/brief', async (_m, _r, _s, q) => { const { prBrief } = await import('./ghpr.ts'); return prBrief(String(q.get('url') ?? ''), u => get<any>('select title, state, draft from prs where url = ?', u)) })
 // A bare "#135188" in a reply: the one PR perch knows with that number (none or several: no link).
 route('GET', '/api/pr/resolve', (_m, _r, _s, q) => { const n = Number(q.get('n')); if (!Number.isInteger(n) || n < 1) return { url: null }; const r = all<{ url: string }>('select url from prs where number = ? limit 2', n); return { url: r.length === 1 ? r[0].url : null } })
+// Merged vs deployed for your PostHog PRs (the deploys board reads this).
+route('GET', '/api/deploys', (_m, _r, _s, q) => listDeploys(Number(q.get('days') ?? 14)))
 route('GET', '/api/pr/preview', (_m, _r, _s, q) => prPreview(String(q.get('url') ?? ''), PR_VIEW_MAX_AGE))
 route('POST', '/api/pr/audit', async (_m, req) => { const r = await deepAudit(String((await body(req)).pr)); broadcast('conversations'); return r })
 route('POST', '/api/enrich', async (_m, req) => enrich(String((await body(req)).url ?? '')))

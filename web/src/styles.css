@@ -710,9 +710,10 @@ button.icon.flow-refresh { font-size: 14px; line-height: 1; padding: 0; width: 2
 .pr-pill.st-open { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .pr-pill.st-draft { color: var(--muted); }
 .pr-pill.st-merged { color: #8250df; border-color: color-mix(in srgb, #8250df 45%, transparent); }
-.pr-pill.st-closed, .pr-pill.ck-bad, .pr-pill.rv-CHANGES_REQUESTED { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-.pr-pill.rv-APPROVED, .pr-pill.ck-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
-.pr-pill.ck-pending, .pr-pill.rv-REVIEW_REQUIRED { color: var(--warn); }
+.pr-pill.st-closed, .pr-pill.ck-bad, .pr-pill.dp-bad, .pr-pill.rv-CHANGES_REQUESTED { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.pr-pill.rv-APPROVED, .pr-pill.ck-ok, .pr-pill.dp-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.pr-pill.ck-pending, .pr-pill.dp-wait, .pr-pill.rv-REVIEW_REQUIRED { color: var(--warn); }
+.pr-pill.dp-none { color: var(--muted); border-style: dashed; }
 .pr-pills .right { text-align: right; }
 .pr-diff { white-space: nowrap; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 3px; }
 .pr-blocks { display: inline-flex; gap: 1px; margin-left: 2px; }

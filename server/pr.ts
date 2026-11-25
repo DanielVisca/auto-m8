@@ -21,6 +21,7 @@ import { localRepos } from './search.ts'
 import { codeRoots, settings } from './settings.ts'
 import { randomUUID } from 'node:crypto'
 import { checkContextFields, checkContexts, summarizeChecks, ghExec } from './gh.ts'
+import { deployFor } from './deploys.ts'
 
 const exec = promisify(execFile)
 db.exec(`create table if not exists snoozes (key text primary key, until integer, reason text)`)
@@ -178,11 +179,12 @@ export async function preview(url: string, maxAge = 300_000) {
 async function readPreview(url: string) {
   const pr = parse(url)
   const query = `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
-    title body state isDraft reviewDecision additions deletions changedFiles headRefName baseRefName updatedAt author{login}
+    title body state isDraft mergedAt reviewDecision additions deletions changedFiles headRefName baseRefName updatedAt author{login}
     files(first:40){nodes{path additions deletions}}
     commits(last:1){nodes{commit{statusCheckRollup{id state contexts(first:100){${checkContextFields(pr.number)}}}}}}
     reviewThreads(first:60){nodes{isResolved isOutdated path line comments(first:2){nodes{author{login} body createdAt url}}}}
-    reviews(last:20){nodes{author{login} state body submittedAt}}}}}`
+    reviews(last:20){nodes{author{login} state body submittedAt}}
+    comments(last:30){nodes{author{login} body}}}}}`
   const { stdout } = await ghExec(['api', 'graphql', '-f', `query=${query}`, '-F', `o=${pr.owner}`, '-F', `r=${pr.repo}`, '-F', `n=${pr.number}`], { maxBuffer: 10e6, timeout: 20_000 })
   const p = JSON.parse(stdout).data.repository.pullRequest
   const rollup = p.commits.nodes[0]?.commit?.statusCheckRollup
@@ -196,6 +198,8 @@ async function readPreview(url: string) {
     url, title: p.title, state: p.state === 'OPEN' ? (p.isDraft ? 'draft' : 'open') : p.state.toLowerCase(), review: p.reviewDecision, author: p.author?.login,
     body: String(p.body ?? '').replace(/<!--[\s\S]*?-->/g, '').trim().slice(0, 4000), additions: p.additions, deletions: p.deletions, changedFiles: p.changedFiles,
     head: p.headRefName, base: p.baseRefName, updatedAt: p.updatedAt, files: p.files.nodes, checks: { state: p.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null, failing },
+    // Merged: where it runs now (deploy bot's table, else the shepherd's stage).
+    deploy: p.state === 'MERGED' ? deployFor(url, p.mergedAt ? Date.parse(p.mergedAt) : null, p.comments?.nodes ?? []) : null,
     open: threads.filter((t: any) => !t.outdated), outdated: threads.filter((t: any) => t.outdated).length,
     // Each reviewer's latest verdict; the pushback is often in a review summary, not a line comment.
     reviews: Object.values(Object.fromEntries((p.reviews.nodes as any[]).filter(r => r.state !== 'PENDING').map(r => [r.author?.login, r])))
