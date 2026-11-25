@@ -7,6 +7,7 @@ import { MiniChat } from './Mini'
 import { Markdown } from './Chat'
 import { DataSection, keep, RepoPicker, SourcesPanel, useRepos, WhereItRuns, type Runtime } from './ExploreRuntime'
 import './explore.css'
+import { GitExplorer } from './GitExplorer'
 
 type Evidence = { file: string; line: number; text: string; github?: string | null; local?: string }
 type Edge = { from: string; to: string; kind: 'fk' | 'import'; weight: number; evidence: Evidence[] }
@@ -106,6 +107,8 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
   const cardAt = (ev: React.MouseEvent, e: Edge, pinned: boolean) => { const r = stageRef.current!.getBoundingClientRect(); setEdgeCard(c => c?.pinned && !pinned ? c : { e, x: Math.min(ev.clientX - r.left, r.width - 450), y: Math.min(ev.clientY - r.top, r.height - 220), pinned }) }
   const [selected, setSelected] = useState<string[]>(saved0.selected ?? [])
   const [dreaming, setDreaming] = useState(!!saved0.dreaming)
+  const [gitView, setGitView] = useState(() => localStorage.getItem('perch.explore.git') === '1')
+  const toggleGit = () => { const v = !gitView; setGitView(v); localStorage.setItem('perch.explore.git', v ? '1' : '0') }
   const [ops, setOps] = useState<Op[]>(saved0.ops ?? [])
   const [dreamRes, setDreamRes] = useState<DreamRes | null>(null)
   const [chatId, setChatId] = useState<string | null>(() => repo ? localStorage.getItem(`perch.explore.chat.${repo}`) : null)
@@ -291,6 +294,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
         <label className="small"><input type="checkbox" checked={allLinks} onChange={e => setAllLinks(e.target.checked)} /> all links</label>
         <button className={sources ? 'primary' : ''} onClick={() => setSources(!sources)} title="What the explorer can read beyond code: Argo CD, Grafana, AWS…">Sources</button>
         <button className={dreaming ? 'primary' : ''} onClick={() => { setDreaming(!dreaming); if (dreaming) setOps([]) }} title="Sketch a change: remove or add concepts and see what breaks">{dreaming ? 'Leave dream mode' : 'Dream mode'}</button>
+        <button className={gitView ? 'primary' : ''} onClick={toggleGit} title="Git: worktrees, branches, what's committed and pushed, stranded local work, and whether branches get merged">⑂ Git</button>
         <button onClick={resetAll} title="Back to the whole map: clears the focus, selection, timeline position and dream. Keeps the repo, workspace and chat.">↺ Reset</button>
         {!popout && <button onClick={popOut} title="Open the explorer in its own window, to keep it on another screen">⧉ Pop out</button>}
       </div>
@@ -302,6 +306,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
           <div className="ex-ws-add"><RepoPicker compact value="" repos={repos} exclude={[repo, ...ws]} placeholder="+ add a related repo (charts, infra, a service…)" onPick={p => saveWs([...ws, p])} /></div>
         </div>
       )}
+      {gitView ? <GitExplorer repo={repo} onPickRepo={switchRepo} onOpenChat={onOpenChat} /> : <>
       {!repo && <div className="card muted">Pick a git repo to map. Everything on the map comes from its files and history: each concept, link, date and author can be traced to a file or commit.</div>}
       {err && <div className="card bad">{err}</div>}
       {g && (
@@ -435,6 +440,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
           </aside>
         </div>
       )}
+      </>}
     </div>
   )
 }

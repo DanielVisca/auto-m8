@@ -89,6 +89,7 @@ import { relay, relayGraph } from './relay.ts'
 import { harvest as harvestChat, harvestOf, lifecycleStatus, sweepLifecycle } from './lifecycle.ts'
 import { board, push as inboxPush, startOrchestra, stopTargets, unwatch as orchUnwatch, watch as orchWatch } from './orchestra.ts'
 import { forParent as helpersOf, onDelegate, resumeFollowers as resumeHelpers, sendTo as helperSend, start as startHelper, stop as stopHelper } from './delegate.ts'
+import { overview as gitOverview, repoGit, repos as gitRepos } from './gitexplorer.ts'
 import { snapshotAge as worktreeSnapshotAge, describe as describeWorktrees, helperWorktreesRunning, inventory as worktreeInventory, lastSweep, LIMITS as WT_LIMITS, remove as removeWorktree, startSweeping as sweepWorktreesHourly, sweep as sweepWorktrees } from './worktrees.ts'
 import { listRuns, onOptimize, pause as pauseOpt, resume as resumeOpt, resumeFollowers, runFor, start as startOpt, stop as stopOpt } from './optimize.ts'
 import { discoverMcp } from './posthog.ts'
@@ -955,6 +956,9 @@ route('GET', '/api/conversations/:id/snapshots', m => ({ snapshots: snapshotsFor
 route('POST', '/api/autoresearch', async (_m, req) => { const b = await body(req); if (!b.brief) return { error: 'Describe what to optimise and how to measure it.' }; const r = await startOpt({ ...b, brief: String(b.brief) }); broadcast('conversations'); return r })
 route('POST', '/api/delegate', async (_m, req) => { const b = await body(req); try { return await startHelper({ parent: String(b.parent ?? ''), brief: String(b.brief ?? ''), name: b.name, cwd: b.cwd, mode: b.mode, worktree: !!b.worktree, engine: b.engine }) } catch (e: any) { return { error: e.message } } })
 route('GET', '/api/worktrees', async (_m, _req, _res, q) => { const f = (q.get('filter') ?? '').toLowerCase(); const list = (await worktreeInventory({ fresh: q.get('fresh') === '1' })).filter(w => !f || [w.path, w.branch, w.pr].some(x => String(x ?? '').toLowerCase().includes(f))); return { worktrees: list, text: describeWorktrees(list), snapshotAgeMs: worktreeSnapshotAge(), lastSweep, limits: WT_LIMITS, helpersInWorktrees: helperWorktreesRunning() } })
+route('GET', '/api/git/repos', async () => ({ repos: await gitRepos() }))
+route('GET', '/api/git/overview', async (_m, _req, _res, q) => { try { return { repos: await gitOverview({ fresh: q.get('fresh') === '1' }) } } catch (e: any) { return { error: e.message } } })
+route('GET', '/api/git/repo', async (_m, _req, _res, q) => { try { return await repoGit(String(q.get('path') ?? ''), { fresh: q.get('fresh') === '1' }) } catch (e: any) { return { error: e.message } } })
 route('POST', '/api/worktrees/sweep', async (_m, req) => { const b = await body(req); try { return await sweepWorktrees({ dryRun: !!b.dry_run }) } catch (e: any) { return { error: e.message } } })
 route('POST', '/api/worktrees/remove', async (_m, req) => { const b = await body(req); try { return await removeWorktree(String(b.path ?? ''), { force: !!b.force }) } catch (e: any) { return { error: e.message } } })
 route('POST', '/api/delegate/:id/send', async (m, req) => { const b = await body(req); try { helperSend(m[1], String(b.message ?? '')); return { ok: true } } catch (e: any) { return { error: e.message } } })
