@@ -51,3 +51,11 @@ test('a user quoting recommendations is not mistaken for their agent', () => {
 test('quoting or discussing the queue preamble inside a message does not label it as automated', () => {
   assert.equal(agentSender('Why does it say this?\n' + QUEUED + relayed), null)
 })
+
+test('subagent hand-backs show as a subagent report, not as the user', () => {
+  const report = 'Another Claude session sent a message:\n<agent-message from="ac145c6a9c2f4da8e">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output. The report follows:\n  I confirmed the API.\n  \n  ## Pangram\n    - nested\n</agent-message>\n\nThat "other Claude session" is an agent working inside this same session.'
+  assert.deepEqual(agentSender(report), { label: 'subagent report', body: 'I confirmed the API.\n\n## Pangram\n  - nested' })
+  const saved = toItems(JSON.stringify({ type: 'user', uuid: 'u2', message: { role: 'user', content: report } }))[0]
+  assert.equal(saved.kind === 'user' && agentSender(saved.text)?.label, 'subagent report')
+  assert.equal(agentSender(report.replace('Another Claude session sent a message:\n', ''))?.label, 'subagent report')
+})

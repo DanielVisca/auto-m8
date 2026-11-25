@@ -25,12 +25,27 @@ export function agentSender(raw: string): AgentSender | null {
   if (/^⏰ (Follow-up from (?:auto-m8|perch)|(?:auto-m8|perch) check:)/.test(text)) return { label: 'auto-m8: follow-up', body: text }
   if (/^(You stopped here before the work was finished|\((?:auto-m8|perch): |(?:auto-m8|perch) restarted while you were working|\(a message sent before (?:auto-m8|perch) restarted\))/.test(text)) return { label: 'auto-m8: resume', body: text }
   if (/^(Decision on "|The user changed the decision on ")/.test(text)) return { label: 'auto-m8: decision relay', body: text }
+  const sub = subagentReport(text)
+  if (sub) return sub
   // Even before sender markers existed, this exact wrapper was only added to automation.
   if (text !== raw) return { label: 'auto-m8: queued message', body: text }
   return null
 }
 
-export const userBody = (text: string) => text.replace(USER_MARK_RE, '')
+// Claude Code hands a background subagent's final report back as a user-role message:
+// "Another Claude session sent a message:\n<agent-message from="<agentId>">\n[Subagent hand-back] …
+// The report follows:\n  <report, every line indented two spaces>\n</agent-message>\n\n<guidance>".
+// Show only the report. The agentId is Claude Code's, not a conversation, so it isn't a link.
+function subagentReport(text: string): AgentSender | null {
+  const m = text.match(/^(?:Another Claude session sent a message:\n)?<agent-message from="[^"]*">\n([\s\S]*?)(?:\n<\/agent-message>[\s\S]*)?$/)
+  if (!m) return null
+  let body = m[1]
+  const frame = body.match(/^\[Subagent hand-back\][^\n]*?The report follows:\n/)
+  if (frame) body = body.slice(frame[0].length).replace(/^ {2}/gm, '')
+  return { label: frame ? 'subagent report' : 'another agent', body: body.trim() }
+}
+
+export const userBody =(text: string) => text.replace(USER_MARK_RE, '')
   .replace(/\n\n<perch-auto-race>[\s\S]*?<\/perch-auto-race>/g, '')
   .replace(/\n\n<perch-attention>[\s\S]*?<\/perch-attention>/g, '')
 
