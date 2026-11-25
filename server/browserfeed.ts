@@ -14,6 +14,7 @@ export type FeedItem = {
   ms?: number // duration; absent while running or for instant events
   running?: boolean
   concern?: string
+  error?: string // one line, shown under the label when it failed
   detail?: Record<string, string>
   children?: FeedItem[]
 }

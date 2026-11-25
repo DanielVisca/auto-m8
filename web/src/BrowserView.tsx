@@ -250,7 +250,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
   )
 }
 
-export type FeedItem = { id: string; at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number; running?: boolean; concern?: string; detail?: Record<string, string>; children?: FeedItem[] }
+export type FeedItem = { id: string; at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number; running?: boolean; concern?: string; error?: string; detail?: Record<string, string>; children?: FeedItem[] }
 const FEED_ICON: Record<FeedItem['kind'], string> = { tool: '◆', step: '·', nav: '→', net: '⇅', note: '!' }
 const FEED_KIND: Record<FeedItem['kind'], string> = { tool: 'Agent action', step: 'Step', nav: 'Page changed', net: 'Page request', note: 'Event' }
 const fmtMs = (ms?: number) => ms == null ? '' : ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s` : `${Math.floor(ms / 60_000)}m${String(Math.round(ms / 1000) % 60).padStart(2, '0')}s`
@@ -258,6 +258,22 @@ const ago = (at: number, now: number) => { const s = Math.max(0, Math.round((now
 const BURST_GAP = 20_000 // a quiet gap longer than this starts a new burst with its own timeline
 const WINDOW_MAX = 5 * 60_000 // the timeline covers at most the last 5 minutes; older bars are clipped at its left edge
 const MONO = new Set(['url', 'script', 'result', 'error', 'request id', 'page after', 'from'])
+
+// Light JavaScript colouring for scripts the agent ran: strings, comments, keywords, numbers.
+const JS_TOKENS = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\b(await|async|const|let|var|function|return|new|if|else|for|of|in|while|true|false|null|undefined|typeof|this|=>)\b|\b(\d+(?:\.\d+)?)\b/g
+function JsCode({ src }: { src: string }) {
+  const out: React.ReactNode[] = []
+  let last = 0, m: RegExpExecArray | null, i = 0
+  JS_TOKENS.lastIndex = 0
+  while ((m = JS_TOKENS.exec(src))) {
+    if (m.index > last) out.push(src.slice(last, m.index))
+    const cls = m[1] ? 'c' : m[2] ? 's' : m[3] ? 'k' : 'n'
+    out.push(<span key={i++} className={`js-${cls}`}>{m[0]}</span>)
+    last = m.index + m[0].length
+  }
+  if (last < src.length) out.push(src.slice(last))
+  return <>{out}</>
+}
 
 // One span or event on the shared timeline [t0, t1]: a bar for spans (growing while running), a tick
 // for instant events. Concerns show in amber with their reason, always visible.
@@ -276,7 +292,8 @@ function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1:
       <span className="chev">{expandable ? (open ? '⌄' : '›') : ''}</span>
       <span className="ic">{it.concern ? '⚠' : FEED_ICON[it.kind]}</span>
       <span className="lbl">
-        <span className="tx">{it.text}</span>
+        <span className="tx">{it.text}{it.detail?.script && <code className="feed-code-inline">{it.detail.script.replace(/\s+/g, ' ')}</code>}</span>
+        {it.error && <span className="feed-error">{it.error}</span>}
         {it.concern && <span className="concern">{it.concern}</span>}
         {!open && (() => { const n = it.children?.filter(c => c.concern || c.level === 'bad').length ?? 0; return n ? <span className="concern">{n} step{n > 1 ? 's' : ''} inside to look at</span> : null })()}
       </span>
@@ -288,9 +305,10 @@ function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1:
       <span className="ago">{ago(it.at, now)}</span>
     </div>
     {open && <div className="feed-detail" style={{ marginLeft: 22 + depth * 14 }}>
-      {it.detail && Object.entries(it.detail).filter(([k, v]) => v && k !== 'host').map(([k, v]) => (
-        <div key={k} className="kv"><span className="k">{k}</span><span className={`v ${MONO.has(k) ? 'mono' : ''}`}>{v}</span></div>
-      ))}
+      {it.detail && Object.entries(it.detail).filter(([k, v]) => v && k !== 'host').map(([k, v]) => k === 'script'
+        ? <div key={k} className="kv"><span className="k">{k}</span><pre className="feed-code"><JsCode src={v} /></pre></div>
+        : <div key={k} className="kv"><span className="k">{k}</span><span className={`v ${MONO.has(k) ? 'mono' : ''}`}>{v}</span></div>
+      )}
     </div>}
     {open && it.children?.length ? (() => {
       // Children on their parent's own timeline, so the steps inside one call are readable.

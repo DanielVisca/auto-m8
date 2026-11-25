@@ -84,12 +84,12 @@ export async function browserTool(owner: string, a: any): Promise<ToolResult> {
       const stopped = /^\((stopped[^)]*)\)/m.exec(r.text)?.[1]
       if (stopped) children.push({ id: `${span.id}.stop`, kind: 'step', text: stopped, at: cursor, level: 'warn' })
     }
-    B.feed(owner, { ...span, running: false, ms, level: failed ? 'bad' : undefined, children,
+    B.feed(owner, { ...span, running: false, ms, level: failed ? 'bad' : undefined, children, ...(failed && action !== 'act' ? { error: r.text.split('\n')[0].replace(/^(Browser error|Error):\s*/, '').slice(0, 300) } : {}),
       text: action === 'act' && children ? `${what} (${children.filter(c => c.kind === 'step' && !c.id.endsWith('.stop')).length} step${children.length === 1 ? '' : 's'})` : what,
       detail: { ...detail, result: r.text.slice(0, 500) } })
     return r
   } catch (e: any) {
-    B.feed(owner, { ...span, running: false, level: 'bad', ms: Date.now() - t0, text: `${what}: ${String(e?.message ?? e).split('\n')[0]}`, detail: { ...detail, error: String(e?.message ?? e).slice(0, 500) } })
+    B.feed(owner, { ...span, running: false, level: 'bad', ms: Date.now() - t0, error: String(e?.message ?? e).split('\n')[0].slice(0, 300), detail: { ...detail, error: String(e?.message ?? e).slice(0, 500) } })
     throw e
   } finally { B.callEnded(owner) }
 }
@@ -102,7 +102,7 @@ function describeCall(a: any): string {
     case 'screenshot': return 'take a screenshot'
     case 'read': return a.what === 'network' ? `read network calls${a.filter ? ` (${a.filter})` : ''}` : a.what === 'response' ? `read response ${a.filter ?? ''}` : 'read the page text'
     case 'fetch': return `fetch ${host(String(a.url ?? ''))}`
-    case 'eval': return `run script: ${String(a.expression ?? '').replace(/\s+/g, ' ').slice(0, 80)}`
+    case 'eval': return 'run script' // the code itself is in detail.script, shown as code
     case 'wait': return a.for === 'approval' ? 'wait for your approval' : a.for === 'resume' ? 'wait for you to hand back' : `wait for "${a.text ?? ''}"`
     case 'overlay': return `PostHog overlay ${a.value ?? ''}`
     case 'act': return a.steps?.length ? `do: ${a.steps.slice(0, 3).map((x: any) => `${x.do}${x.name ? ` "${x.name}"` : x.ref ? ` ${x.ref}` : x.url ? ` ${host(String(x.url))}` : ''}`).join(', ')}${a.steps.length > 3 ? ', …' : ''}` : `${a.do ?? 'act'}${a.name ? ` "${a.name}"` : ''}`

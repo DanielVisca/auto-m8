@@ -127,3 +127,12 @@
 .feed-gap { display: flex; align-items: center; gap: 8px; margin: 5px 0 3px 22px; color: var(--muted); font-size: 10.5px; }
 .feed-gap::before, .feed-gap::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .feed-gap::before { flex: 0 0 10px; }
+/* Scripts the agent ran look like code: a one-line chip in the row, a code block when expanded. */
+.feed-code-inline { margin-left: 6px; padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--fg) 8%, transparent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--fg); }
+.feed-row:not(.open) .feed-code-inline { white-space: nowrap; }
+.feed-row.open .feed-code-inline { display: none; }
+.feed-row.bad .feed-code-inline { color: var(--fg); }
+.feed-error { color: #e5655b; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-row.open .feed-error { white-space: normal; overflow-wrap: anywhere; }
+.feed-code { grid-column: 2; margin: 2px 0; padding: 6px 8px; border-radius: 4px; background: color-mix(in srgb, var(--bg) 60%, black); border: 1px solid var(--line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16em; overflow: auto; color: var(--fg); }
+.js-k { color: #c792ea; } .js-s { color: #c3e88d; } .js-n { color: #f78c6c; } .js-c { color: var(--muted); font-style: italic; }
