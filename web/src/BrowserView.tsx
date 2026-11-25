@@ -349,7 +349,7 @@ function BrowserFeed({ items, boxRef, onHeight }: { items: FeedItem[]; boxRef: R
         <span className="dur-h" /><span className="ago-h" /></>}
       </div>
       {!collapsed && <div ref={list} className="browser-feed-list" onScroll={e => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24 }}>
-        {!items.length && <div className="muted small browser-feed-empty">What the agent does in this window shows up here as it happens: each action as a bar on the timeline, the steps inside it, page changes, and page requests that fail or crawl. Anything slower than expected is flagged.</div>}
+        {!items.length && <div className="muted small browser-feed-empty">No activity yet</div>}
         {items.map(it => <FeedRow key={it.id} it={it} t0={t0} t1={t1} now={now} />)}
       </div>}
     </div>
