@@ -192,9 +192,10 @@ function refresh(): Promise<Worktree[]> {
 }
 
 // ---------- removal ----------
-export async function remove(path: string, opts: { force?: boolean; onlyIfIdle?: boolean } = {}): Promise<{ ok: boolean; note: string }> {
+// checked: a fresh inspect() the caller just made (the sweep), so a big checkout isn't read twice.
+export async function remove(path: string, opts: { force?: boolean; onlyIfIdle?: boolean; checked?: Worktree } = {}): Promise<{ ok: boolean; note: string }> {
   if (!path.includes(`/${DIR_NAME}/`)) return { ok: false, note: `Only auto-m8 worktrees (under ${DIR_NAME}/) can be removed here.` }
-  const w = await inspect(path)
+  const w = opts.checked ?? await inspect(path)
   if (opts.onlyIfIdle && w.keep) return { ok: false, note: `kept: ${w.keep}` }
   if (!w.repo) return { ok: false, note: 'Not linked to a repo (orphan folder); not removing it automatically.' }
   if (w.running.length) return { ok: false, note: `An agent is working in it (${w.running.join(', ')}).` }
@@ -266,9 +267,9 @@ export async function sweep(opts: { dryRun?: boolean } = {}): Promise<SweepResul
     const paths = listPaths().map(p => { try { return { p, t: statSync(p).mtimeMs } } catch { return { p, t: 0 } } }).sort((a, b) => a.t - b.t).map(x => x.p)
     for (const path of paths) {
       try {
-        const w = await inspect(path, { reuse: true })
+        const w = await inspect(path)
         if (w.keep) { kept++; continue }
-        const r = await remove(path, { onlyIfIdle: true, force: w.kind === 'pr' && w.prState !== 'OPEN' })
+        const r = await remove(path, { onlyIfIdle: true, force: w.kind === 'pr' && w.prState !== 'OPEN', checked: w })
         if (r.ok) { removed.push({ path, note: r.note }); console.log(`worktrees: removed ${basename(path)} (${r.note})`) }
         else { kept++; if (!r.note.startsWith('kept:')) failed.push({ path, error: r.note }) }
       } catch (e: any) { failed.push({ path, error: String(e?.message ?? e).slice(0, 300) }) }
