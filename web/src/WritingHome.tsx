@@ -269,11 +269,28 @@ function ViewsChart({ weeks, pages }: { weeks: number[]; pages: PubPage[] }) {
     </div>
   )
 }
+// Click a column header to sort by it: first click biggest (or newest, or A→Z) first, second click the
+// other way, third click back to the order the pages came in.
+type PubSortKey = 'title' | 'total' | 'views30' | 'visitors30' | 'reads30' | 'published_at'
+const PUB_COLS: { key: PubSortKey; label: string; title?: string }[] = [
+  { key: 'title', label: 'Page' }, { key: 'total', label: '26 weeks', title: 'Sort by total views over 26 weeks' },
+  { key: 'views30', label: '30d views' }, { key: 'visitors30', label: '30d visitors' },
+  { key: 'reads30', label: '30d reads', title: 'Scrolled 60%+ and stayed 30s+' }, { key: 'published_at', label: 'Published' },
+]
 function Published({ pub, expanded }: { pub: Pub | null; expanded?: boolean }) {
   const [open, setAll] = useState(false), all = open || !!expanded
+  const [sort, setSort] = useState<{ key: PubSortKey; dir: 'desc' | 'asc' } | null>(null)
+  const cycle = (key: PubSortKey) => setSort(s => !s || s.key !== key ? { key, dir: key === 'title' ? 'asc' : 'desc' } : (s.dir === (key === 'title' ? 'asc' : 'desc')) ? { key, dir: key === 'title' ? 'desc' : 'asc' } : null)
   if (!pub) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Finding what you published…</div></section>
   if (pub.error) return <section className="wh-sec"><h3>Published</h3><div className="muted small">Couldn't list published pages: {pub.error}</div></section>
   const pages = pub.pages, v30 = pages.reduce((n, p) => n + p.views30, 0), tot = pages.reduce((n, p) => n + p.total, 0)
+  const sorted = !sort ? pages : [...pages].sort((a, b) => {
+    const k = sort.key, m = sort.dir === 'asc' ? 1 : -1
+    if (k === 'title') return m * a.title.localeCompare(b.title)
+    // pages with no date sort last either way
+    if (k === 'published_at' && (a.published_at == null || b.published_at == null)) return (a.published_at == null ? 1 : 0) - (b.published_at == null ? 1 : 0)
+    return m * (((a[k] as number) ?? 0) - ((b[k] as number) ?? 0))
+  })
   return (
     <section className="wh-sec">
       <h3>Published <span className="muted small">{pages.length} pages on {pub.host} you created or have a byline on · {fmt(v30)} views in 30 days · {fmt(tot)} in 26 weeks</span>
@@ -287,8 +304,11 @@ function Published({ pub, expanded }: { pub: Pub | null; expanded?: boolean }) {
       </div>}
       {pub.weeks.length > 0 && <ViewsChart weeks={pub.weeks} pages={pages} />}
       <div className="wh-pub">
-        <div className="wh-pub-row wh-pub-head muted small"><span>Page</span><span>26 weeks</span><span>30d views</span><span>30d visitors</span><span title="Scrolled 60%+ and stayed 30s+">30d reads</span><span>Published</span></div>
-        {pages.slice(0, all ? 200 : 6).map(p => (
+        <div className="wh-pub-row wh-pub-head muted small">{PUB_COLS.map(c => (
+          <button key={c.key} className={`wh-sort ${sort?.key === c.key ? 'on' : ''}`} title={c.title ?? `Sort by ${c.label.toLowerCase()}`} onClick={() => cycle(c.key)}>
+            {c.label}<span className="arrow">{sort?.key === c.key ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}</span>
+          </button>))}</div>
+        {sorted.slice(0, all ? 200 : 6).map(p => (
           <a key={p.file} className="wh-pub-row" href={p.url} target="_blank" rel="noreferrer" title={p.url}>
             <span className="ellipsis"><b>{p.title}</b> <span className={`chip small ${p.kind === 'article' ? 'final' : ''}`}>{p.byline ? 'your post' : p.kind}</span> <span className="muted small">{p.path}</span></span>
             <Spark v={p.weekly} />
