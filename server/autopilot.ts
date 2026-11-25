@@ -11,7 +11,7 @@ import { judgeSuggestion } from './compare.ts'
 import { all, db, get, once, run } from './db.ts'
 import { posthogStatus } from './indexer.ts'
 import { scouts } from './posthog.ts'
-import { listRoutines, saveRoutine } from './routines.ts'
+import { listRoutines, RUN_COST, saveRoutine } from './routines.ts'
 import { autonomyOn, HOME, settings } from './settings.ts'
 import { recordError, resolveErrors } from './errors.ts'
 import { useCaseDigest } from './evolve.ts'
@@ -117,11 +117,6 @@ export function watchdog() {
     finish(r.id, 'stalled', working.has(r.conversation_id) ? `still running after ${LIVE_CEILING_MS / 3_600_000} hours` : 'no result after 30 minutes and no live agent')
   }
 }
-
-// A run's cost at API prices. Stalled or killed runs never send a result, so they have no reported
-// cost: price them from the chat's transcript over the run's window (same pricing as Settings → AI spend).
-const RUN_COST = `coalesce(nullif(cost, 0), (select sum(m.cost) from usage_msgs m where m.session = routine_runs.conversation_id
-  and m.ts between routine_runs.started_at and coalesce(routine_runs.finished_at, routine_runs.started_at + ${LIVE_CEILING_MS})), cost)`
 
 export function health() {
   return listRoutines().map((r: any) => {

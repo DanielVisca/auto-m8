@@ -5,8 +5,8 @@ import { humanCron, useLive } from './api'
 // The Railyard's scout timetable, merged with the scout list (Library → Scouts).
 type Run = { at: number; done?: number | null; status: string; emitted: number; url: string | null; summary?: string | null; failure?: string | null; findings?: string[]; cost?: number | null; perch?: string | null }
 type Scout = { name: string; skill: string; enabled: boolean; cron: string | null; everyMin: number | null; lastRunAt: number | null; runs: Run[] }
-type RoutineRun = { at: number; done: number | null; status: string; conversation: string | null; detail: string | null }
-type Routine = { id?: string; name: string; cron: string; enabled: boolean; lastRunAt: number | null; lastStatus: string | null; runs?: RoutineRun[] }
+type RoutineRun = { at: number; done: number | null; status: string; conversation: string | null; detail: string | null; cost?: number | null }
+type Routine = { id?: string; name: string; cron: string; enabled: boolean; lastRunAt: number | null; lastStatus: string | null; runs?: RoutineRun[]; week?: { runs: number; usd: number | null; untracked: number } }
 
 const H = 3600e3
 function cronPeriod(c: string | null): number | null {
@@ -115,7 +115,7 @@ function RoutineCard({ x, name }: { x: RoutineRun; name: string }) {
     <>
       <div className="run-head">
         <b style={{ color: bad ? '#ef4444' : undefined }}>{head}</b>
-        <span className="muted small"> · {name} · {new Date(x.at).toLocaleString()}{x.done ? ` · took ${dur(x.at, x.done)}` : ''}</span>
+        <span className="muted small"> · {name} · {new Date(x.at).toLocaleString()}{x.done ? ` · took ${dur(x.at, x.done)}` : ''}{x.cost != null ? ` · $${x.cost.toFixed(2)}` : ''}</span>
       </div>
       {x.detail ? (bad ? <div className="run-fail">{x.detail}</div> : <Md text={x.detail} />) : <div className="muted small">No detail recorded.</div>}
       <div className="run-actions">
@@ -127,6 +127,8 @@ function RoutineCard({ x, name }: { x: RoutineRun; name: string }) {
 
 type Config = { id: string; skill_name: string; display_name?: string; description?: string; enabled?: boolean; status?: string; run_cron_schedule?: string | null; run_interval_minutes?: number | null; last_run_at?: string | null; consecutive_failure_count?: number; pause_reason?: string | null; owners?: { first_name: string }[]; mine?: boolean }
 type TeamRun = { run_id: string; skill_name: string; status: string; emitted_count?: number; created_at: string; posthog_url?: string | null; summary?: string | null; failure_reason?: string | null; perch_id?: string | null }
+
+const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n).toLocaleString()}`
 
 // One table for the Scouts tab: each scout's cadence, last runs (newest right), 7-day cost, health and Run now.
 // Runs come from the Railyard snapshot (your scouts, last 10 each), falling back to the team runs feed.
@@ -212,7 +214,9 @@ export function ScoutTable({ scouts, runs, showRoutines, sortByCadence, cost, ms
                   })}
                   {!rr.length && <span className={r.lastStatus === 'error' ? 'bad small' : 'muted small'}>{r.lastStatus ?? 'no runs'}</span>}
                 </td>
-                <td className="tt-wide" /><td />
+                <td className="tt-wide" title={r.week?.runs ? `${r.week.runs} runs in the last 7 days at API prices${r.week.untracked > 0 ? `, ${r.week.untracked} without spend data` : ''}` : undefined}>
+                  {r.week?.runs && r.week.usd != null ? usd(r.week.usd) : <span className="muted">—</span>}
+                </td><td />
               </tr>
             )
           })}

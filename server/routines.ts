@@ -69,6 +69,11 @@ export function saveRoutine(r: Partial<Routine>) {
   return get<Routine>('select * from routines where id = ?', id)!
 }
 
+// A run's cost at API prices. Stalled or killed runs never send a result, so they have no reported
+// cost: price them from the chat's transcript over the run's window (same pricing as Settings → AI spend).
+export const RUN_COST = `coalesce(nullif(cost, 0), (select sum(m.cost) from usage_msgs m where m.session = routine_runs.conversation_id
+  and m.ts between routine_runs.started_at and coalesce(routine_runs.finished_at, routine_runs.started_at + ${4 * 60 * 60_000})), cost)`
+
 export function deleteRoutine(id: string) { run('delete from routines where id = ?', id) }
 
 export function fire(r: Routine, payload?: unknown, manual = false) {

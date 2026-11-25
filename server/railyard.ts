@@ -9,7 +9,7 @@ import { openPromises } from './promises.ts'
 import { runningChats } from './chat.ts'
 import { prSidebar } from './prview.ts'
 import { scouts } from './posthog.ts'
-import { listRoutines } from './routines.ts'
+import { listRoutines, RUN_COST } from './routines.ts'
 import { posthogFetch } from './indexer.ts'
 import { settings } from './settings.ts'
 import { proofOf } from './proof.ts'
@@ -168,8 +168,10 @@ async function build() {
   }))
   const routines = listRoutines().map((r: any) => ({ id: r.id, name: r.name, cron: r.cron, enabled: !!r.enabled, lastRunAt: r.last_run_at, lastStatus: r.last_status,
     // Last 10 runs, newest first, so local routines get the same run marks as cloud scouts.
-    runs: all<any>('select outcome, started_at, finished_at, conversation_id, detail from routine_runs where routine_id = ? order by started_at desc limit 10', r.id)
-      .map(x => ({ at: x.started_at, done: x.finished_at, status: x.outcome ?? 'running', conversation: x.conversation_id, detail: x.detail ? String(x.detail).slice(0, 1000) : null })) }))
+    runs: all<any>(`select outcome, started_at, finished_at, conversation_id, detail, ${RUN_COST} cost from routine_runs where routine_id = ? order by started_at desc limit 10`, r.id)
+      .map(x => ({ at: x.started_at, done: x.finished_at, status: x.outcome ?? 'running', conversation: x.conversation_id, detail: x.detail ? String(x.detail).slice(0, 1000) : null, cost: x.cost ?? null })),
+    // 7-day spend at API prices, like the cloud scouts' 7d column.
+    week: all<any>(`select count(*) runs, sum(${RUN_COST}) usd, sum(${RUN_COST} is null) untracked from routine_runs where routine_id = ? and started_at > ?`, r.id, Date.now() - 7 * 86400_000)[0] }))
 
   // The crossing: what is waiting on the user, oldest first.
   const crossing = [
