@@ -11,7 +11,7 @@ import './explore.css'
 type Evidence = { file: string; line: number; text: string; github?: string | null; local?: string }
 type Edge = { from: string; to: string; kind: 'fk' | 'import'; weight: number; evidence: Evidence[] }
 type Node = { id: string; name: string; path: string; files: number; models: string[]; role: 'focus' | 'dependency' | 'dependent' | 'both' | 'second'; score: number; hub: boolean }
-type GraphRes = { repo: string; sha: string; focus: string | null; nodes: Node[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; names: string[]; remote: { owner: string; name: string } | null }
+type GraphRes = { repo: string; sha: string; focus: string | null; nodes: Node[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; names: string[]; remote: { owner: string; name: string } | null }
 type Commit = { sha: string; date: string; author: string; subject: string; pr: number | null; url: string | null }
 type Ev = { date: string; kind: 'concept' | 'edge'; id: string; from?: string; to?: string; approx: boolean; source: string; commit: Commit }
 type Timeline = { status: 'running' | 'done'; done: number; total: number; source: string; shallow: boolean; since: string | null; events: Ev[]; milestones: Record<string, Commit[]>; error?: string }
@@ -377,8 +377,8 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
             </svg>
             {g.nodes.length === 0 && (
               <div className="ex-empty card small">
-                Nothing matches “{g.focus}”. Try a shorter name (dashboard, insight, alert) or a module path from the list.
-                <div className="ex-actions">{trail.length > 0 && <button className="small" onClick={goBack}>← Back</button>}<button className="small primary" onClick={clearFocus}>Show the whole map</button></div>
+                {g.inside ? <>“{g.focus}” isn't a module of its own: it's the folder <code>{g.inside.folder}</code> inside <b>{g.inside.concept}</b>.</> : <>Nothing matches “{g.focus}”. Try a shorter name (dashboard, insight, alert) or a module path from the list.</>}
+                <div className="ex-actions">{g.inside && <button className="small primary" onClick={() => { setFocus(g.inside!.concept); setFocusInput(g.inside!.concept) }}>Focus {label(g.inside.concept)}</button>}{trail.length > 0 && <button className="small" onClick={goBack}>← Back</button>}<button className="small primary" onClick={clearFocus}>Show the whole map</button></div>
               </div>
             )}
             {edgeCard && <EdgeCard c={edgeCard} repo={g.repo} onClose={() => setEdgeCard(null)} />}

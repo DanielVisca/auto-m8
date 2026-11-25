@@ -14,9 +14,9 @@ export type Evidence = { file: string; line: number; text: string }
 export type Relation = { model: string; target: string; kind: 'fk' | 'o2o' | 'm2m'; file: string; line: number }
 export type Concept = { id: string; name: string; path: string; files: number; models: string[]; relations: Relation[] }
 export type Edge = { from: string; to: string; kind: 'fk' | 'import'; weight: number; evidence: Evidence[] }
-export type Graph = { repo: string; sha: string; concepts: Concept[]; edges: Edge[]; models: Record<string, { concept: string; file: string; line: number }> }
+export type Graph = { repo: string; sha: string; concepts: Concept[]; edges: Edge[]; models: Record<string, { concept: string; file: string; line: number }>; folders?: string[] }
 export type FocusNode = Concept & { role: 'focus' | 'dependency' | 'dependent' | 'both' | 'second'; score: number; hub: boolean }
-export type FocusGraph = { repo: string; sha: string; focus: string | null; nodes: FocusNode[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number }
+export type FocusGraph = { repo: string; sha: string; focus: string | null; nodes: FocusNode[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string } }
 
 // Folders whose children are the modules of a codebase. Deepest match wins, so posthog/models/x beats posthog/x.
 // A repo can override with .explorer.json { "containers": [...] }.
@@ -42,6 +42,41 @@ export function conceptOf(path: string, containers: string[]): string {
     if (cs.length > depth && segs.length >= cs.length + 2 && cs.every((s, i) => segs[i] === s)) { best = segs.slice(0, cs.length + 1).join('/'); depth = cs.length }
   }
   return best ?? (segs.length > 1 ? segs[0] : '(root)')
+}
+
+// Folders that aren't code to map (vendored deps, static assets, docs, tests): never split, kept off the default view.
+export const NOISE = /(^|\/)(vendor|third_party|static|public\/build|docs?|examples?|fixtures|tests?|__tests__|__snapshots__|\.github|\.agents|\.storybook|node_modules|dist|build|assets)$/i
+
+// The container list only knows layouts like PostHog's. Make the grouping fit any repo: a module too big to
+// reason about (a share of the repo, or a few hundred files) is split into its subfolders, again if needed.
+export function grouping(files: string[], containers: string[], max = Math.max(250, Math.round(files.length * 0.04))) {
+  const byConcept = new Map<string, string[]>()
+  for (const f of files) { const c = conceptOf(f, containers); (byConcept.get(c) ?? byConcept.set(c, []).get(c)!).push(f) }
+  const ids = new Set(byConcept.keys())
+  const queue = [...byConcept.keys()]
+  for (let guard = 0; queue.length && guard < 2000; guard++) {
+    const c = queue.shift()!, list = byConcept.get(c)!
+    if (list.length <= max || NOISE.test(c)) continue
+    const prefix = c === '(root)' ? '' : c + '/'
+    const kids = new Map<string, string[]>()
+    for (const f of list) { const rest = f.slice(prefix.length); if (rest.includes('/')) { const k = prefix + rest.split('/')[0]; (kids.get(k) ?? kids.set(k, []).get(k)!).push(f) } }
+    // A folder that only wraps one subfolder (src/ → src/app/) passes through to it.
+    const stay0 = list.filter(f => !f.slice(prefix.length).includes('/'))
+    if (kids.size === 1 && !stay0.length) { const [k, l] = [...kids][0]; ids.delete(c); byConcept.delete(c); ids.add(k); byConcept.set(k, l); queue.push(k); continue }
+    // Only worth it when the folder really has several parts.
+    if ([...kids.values()].filter(l => l.length >= 3).length < 2) continue
+    const stay = list.filter(f => !f.slice(prefix.length).includes('/'))
+    for (const [k, l] of kids) { ids.add(k); byConcept.set(k, l); queue.push(k) }
+    if (stay.length) byConcept.set(c, stay); else { byConcept.delete(c); ids.delete(c) }
+  }
+  // A path belongs to the deepest module that contains it.
+  const of = (path: string) => {
+    const segs = path.split('/')
+    for (let i = segs.length - 1; i >= 1; i--) { const p = segs.slice(0, i).join('/'); if (ids.has(p)) return p }
+    const base = conceptOf(path, containers)
+    return ids.has(base) ? base : (ids.has('(root)') ? '(root)' : base)
+  }
+  return { of, ids, counts: new Map([...byConcept].map(([k, l]) => [k, l.length])) }
 }
 
 const git = (repo: string, args: string[], timeout = 30_000) => new Promise<string>((res, rej) =>
@@ -99,7 +134,21 @@ export function importsOf(file: string, src: string): ImportRef[] {
 }
 
 type Resolver = (file: string, ref: ImportRef) => string | null
-function makeResolver(concepts: Set<string>, tops: Set<string>, containers: string[]): Resolver {
+// Where each language says its packages live, so imports resolve without knowing the repo's layout:
+// Python packages (dirs with __init__.py) under any root (src/ layouts), Go module paths from go.mod,
+// and JS workspace packages by their package.json name.
+export type Roots = { py: Set<string>; pyRoots: string[]; go: [string, string][]; js: [string, string][] }
+export function rootsOf(files: string[], read: (f: string) => string): Roots {
+  const py = new Set(files.filter(f => f.endsWith('/__init__.py')).map(f => f.slice(0, -'/__init__.py'.length)))
+  // A package root is the parent of a top-most package (its parent isn't a package): '' or 'src' and so on.
+  const pyRoots = [...new Set([...py].filter(d => !py.has(posix.dirname(d))).map(d => posix.dirname(d) === '.' ? '' : posix.dirname(d)))]
+  const go: [string, string][] = [], js: [string, string][] = []
+  for (const f of files.filter(f => /(^|\/)go\.mod$/.test(f)).slice(0, 50)) { const m = /^module\s+(\S+)/m.exec(read(f))?.[1]; if (m) go.push([m, posix.dirname(f) === '.' ? '' : posix.dirname(f)]) }
+  for (const f of files.filter(f => /(^|\/)package\.json$/.test(f) && !/node_modules/.test(f)).slice(0, 300)) { try { const n = JSON.parse(read(f)).name; if (typeof n === 'string' && n) js.push([n, posix.dirname(f) === '.' ? '' : posix.dirname(f)]) } catch {} }
+  go.sort((a, b) => b[0].length - a[0].length); js.sort((a, b) => b[0].length - a[0].length)
+  return { py, pyRoots, go, js }
+}
+function makeResolver(concepts: Set<string>, tops: Set<string>, containers: string[], of: (p: string) => string = p => conceptOf(p, containers), roots?: Roots): Resolver {
   // Workspace aliases (scenes/x, lib/x, ~/x, crate names) are matched against the tail of each module's path.
   const byTail2 = new Map<string, string>(), byTail1 = new Map<string, string | null>()
   const norm = (s: string) => s.toLowerCase().replace(/-/g, '_')
@@ -108,16 +157,23 @@ function makeResolver(concepts: Set<string>, tops: Set<string>, containers: stri
     if (s.length >= 2) byTail2.set(norm(s.slice(-2).join('/')), c)
     const k = norm(s[s.length - 1]); byTail1.set(k, byTail1.has(k) ? null : c) // ambiguous names never match
   }
-  const known = (p: string) => { const c = conceptOf(p + '/_', containers); return concepts.has(c) ? c : null }
+  const known = (p: string) => { const c = of(p + '/_'); return concepts.has(c) ? c : null }
   return (file, ref) => {
     const dir = posix.dirname(file)
     let spec = ref.spec
     if (ref.lang === 'py') {
       if (spec.startsWith('.')) { const dots = /^\.+/.exec(spec)![0].length; let d = dir; for (let k = 1; k < dots; k++) d = posix.dirname(d); return known(posix.join(d, spec.slice(dots).replace(/\./g, '/'))) }
       const p = spec.replace(/\./g, '/')
-      return tops.has(p.split('/')[0]) ? known(p) : null
+      if (tops.has(p.split('/')[0])) return known(p)
+      // src/ layouts and other roots: sentry.api → src/sentry/api, only if that package really exists.
+      for (const r of roots?.pyRoots ?? []) { const q = r ? `${r}/${p}` : p; if (roots!.py.has(r ? `${r}/${p.split('/')[0]}` : p.split('/')[0])) return known(q) }
+      return null
     }
     if (ref.lang === 'js' && spec.startsWith('.')) return known(posix.join(dir, spec))
+    // A workspace package by name (@posthog/core/x → packages/core/x) or a Go import under a module path.
+    for (const [name, d] of ref.lang === 'go' ? roots?.go ?? [] : ref.lang === 'js' ? roots?.js ?? [] : []) {
+      if (spec === name || spec.startsWith(name + '/')) { const rest = spec.slice(name.length).replace(/^\//, ''); return known([d, rest].filter(Boolean).join('/') || d || '(root)') }
+    }
     spec = spec.replace(/^~\//, '').replace(/^@[\w-]+\//, '').replace(/::/g, '/')
     if (ref.lang === 'go') { const s = spec.split('/'); for (let k = 0; k < s.length; k++) { const c = tops.has(s[k]) ? known(s.slice(k).join('/')) : null; if (c) return c } }
     if (tops.has(spec.split('/')[0])) { const c = known(spec); if (c) return c }
@@ -132,9 +188,10 @@ const MAX_EVIDENCE = 5
 export async function scan(repo: string, sha?: string): Promise<Graph> {
   const containers = containersFor(repo)
   const files = (await git(repo, ['ls-files', '-z'])).split('\0').filter(Boolean)
-  const conceptFiles = new Map<string, number>()
-  for (const f of files) { const c = conceptOf(f, containers); conceptFiles.set(c, (conceptFiles.get(c) ?? 0) + 1) }
-  const ids = new Set(conceptFiles.keys())
+  const grp = grouping(files, containers)
+  const cof = grp.of
+  const conceptFiles = grp.counts
+  const ids = grp.ids
   const tops = new Set(files.filter(f => f.includes('/')).map(f => f.split('/')[0]))
   const src = files.filter(f => SRC.test(f) && !SKIP.test(f))
   const read = async (f: string) => { try { const s = await stat(join(repo, f)); return s.size > 400_000 ? '' : await readFile(join(repo, f), 'utf8') } catch { return '' } }
@@ -152,7 +209,7 @@ export async function scan(repo: string, sha?: string): Promise<Graph> {
       const m = /^class (\w+)\(([^)]*)\)\s*:/.exec(l)
       if (!m || m[1].startsWith('_') || !m[2].trim() || /Choices|Enum|Exception|Error|Protocol|TypedDict|NamedTuple|Serializer|Admin|Test|Config\b|Mixin\)$/.test(m[2]) || /Mixin$|Manager$|QuerySet$|Choices$/.test(m[1])) return
       if (!/models\.|Model\b|Model\)|Model,/.test(m[2]) && !/models\.(\w*Field|ForeignKey)/.test(lines.slice(i + 1, i + 40).join('\n'))) return
-      if (models[m[1]]) dup.add(m[1]); else models[m[1]] = { concept: conceptOf(f, containers), file: f, line: i + 1 }
+      if (models[m[1]]) dup.add(m[1]); else models[m[1]] = { concept: cof(f), file: f, line: i + 1 }
     })
   }
   for (const d of dup) delete models[d] // a name defined twice can't be resolved by name
@@ -183,11 +240,12 @@ export async function scan(repo: string, sha?: string): Promise<Graph> {
   }
 
   // Pass 2: imports between modules (one count per importing file, so a chatty file doesn't outweigh many).
-  const resolve = makeResolver(ids, tops, containers)
+  const roots = rootsOf(files, f => { try { return readFileSync(join(repo, f), 'utf8').slice(0, 20_000) } catch { return '' } })
+  const resolve = makeResolver(ids, tops, containers, cof, roots)
   await pool(src, 64, async f => {
     const text = modelSrc.get(f) ?? await read(f)
     if (!text) return
-    const from = conceptOf(f, containers)
+    const from = cof(f)
     const seen = new Set<string>()
     for (const ref of importsOf(f, text)) {
       let targets = [resolve(f, ref)]
@@ -203,13 +261,14 @@ export async function scan(repo: string, sha?: string): Promise<Graph> {
   const modelsBy = new Map<string, string[]>()
   for (const [n, m] of Object.entries(models)) modelsBy.set(m.concept, [...(modelsBy.get(m.concept) ?? []), n])
   const concepts: Concept[] = [...conceptFiles].map(([id, n]) => ({ id, name: id.split('/').pop()!, path: id, files: n, models: (modelsBy.get(id) ?? []).sort(), relations: relations.get(id) ?? [] }))
-  return { repo, sha: sha ?? (await git(repo, ['rev-parse', 'HEAD'])).trim(), concepts, edges: [...edges.values()], models }
+  const folders = [...new Set(src.map(f => posix.dirname(f)))].filter(d => d !== '.')
+  return { repo, sha: sha ?? (await git(repo, ['rev-parse', 'HEAD'])).trim(), concepts, edges: [...edges.values()], models, folders }
 }
 
 // ---------- focus: a readable slice instead of the whole hairball ----------
 
 const stem = (s: string) => s.toLowerCase().replace(/[-_\s]/g, '').replace(/(ies)$/, 'y').replace(/s$/, '')
-export function focusGraph(g: Graph, focus?: string | null, cap = 25, showHubs = false): FocusGraph {
+export function focusGraph(g: Graph, focus?: string | null, cap = 25, showHubs = false, folders?: string[]): FocusGraph {
   const byId = new Map(g.concepts.map(c => [c.id, c]))
   // Modules almost everything depends on (the Team model, a shared api folder) are plumbing, not what this concept is
   // built on: rank neighbours by weight × rarity so they don't crowd out the relationships that are specific to it.
@@ -217,7 +276,7 @@ export function focusGraph(g: Graph, focus?: string | null, cap = 25, showHubs =
   for (const e of g.edges) (dependents.get(e.to) ?? dependents.set(e.to, new Set()).get(e.to)!).add(e.from)
   const N = Math.max(2, g.concepts.length)
   const rarity = (id: string) => Math.log(N / (1 + (dependents.get(id)?.size ?? 0))) / Math.log(N) + 0.05
-  const hub = (id: string) => (dependents.get(id)?.size ?? 0) > Math.max(8, N * 0.15)
+  const hub = (id: string) => (dependents.get(id)?.size ?? 0) > Math.max(8, Math.min(N * 0.15, 12 + N * 0.03))
   const ew = (e: Edge) => e.weight * (e.kind === 'fk' ? 5 : 1) // a foreign key is a data dependency: much harder to remove than an import
   const node = (c: Concept, role: FocusNode['role'], score: number): FocusNode => ({ ...c, role, score: Math.round(score * 100) / 100, hub: hub(c.id) })
 
@@ -237,6 +296,12 @@ export function focusGraph(g: Graph, focus?: string | null, cap = 25, showHubs =
   // A weak match (a model that merely starts with the word) only counts when nothing matches by name.
   const strong = scored.some(([, s]) => s >= 2)
   const focused = scored.filter(([, s]) => !strong || s >= 2).sort((a, b) => b[1] - a[1] || b[0].files - a[0].files).slice(0, 5).map(([c]) => c)
+  if (!focused.length && folders?.length) {
+    // Not a module of its own, but a folder inside one: say where, so the reader can focus that module.
+    const hit = folders.filter(d => stem(d.split('/').pop()!) === q || stem(d.split('/').pop()!).startsWith(q)).sort((a, b) => a.length - b.length)[0]
+    const inside = hit ? g.concepts.filter(c => hit.startsWith(c.id + '/')).sort((a, b) => b.id.length - a.id.length)[0] : null
+    if (inside) return { repo: g.repo, sha: g.sha, focus, nodes: [], edges: [], hidden: { dependencies: 0, dependents: 0, second: 0, hubs: [] }, total: g.concepts.length, inside: { folder: hit!, concept: inside.id } } as FocusGraph
+  }
   const F = new Set(focused.map(c => c.id))
   const deps = new Map<string, number>(), users = new Map<string, number>()
   // Shared foundations (UI kit, the Team model) are listed by name instead of drawn: they connect to everything.
@@ -532,7 +597,7 @@ function scanInChild(repo: string, sha: string) {
 export async function graphFor(repoPath: string, home?: string): Promise<Graph> {
   const repo = await checkRepo(repoPath, home)
   const sha = (await git(repo, ['rev-parse', 'HEAD'], 5000)).trim()
-  const key = keyOf(repo, sha, JSON.stringify(containersFor(repo)))
+  const key = keyOf('graph-v2-adaptive', repo, sha, JSON.stringify(containersFor(repo)))
   const file = DIR && join(DIR, `${key}.json`)
   if (!graphs.has(key)) {
     graphs.set(key, (async () => {
@@ -549,7 +614,7 @@ export async function graphFor(repoPath: string, home?: string): Promise<Graph> 
 
 export async function exploreGraph(repo: string, focus?: string | null, hubs = false) {
   const g = await graphFor(repo)
-  const f = focusGraph(g, focus, 25, hubs)
+  const f = focusGraph(g, focus, 25, hubs, g.folders)
   return { ...f, concepts: g.concepts.length, remote: await remoteOf(g.repo), names: g.concepts.map(c => c.id).concat(Object.keys(g.models)).sort() }
 }
 
@@ -585,7 +650,7 @@ export async function exploreNode(repo: string, id: string) {
   // Shared foundations (used by most of the repo) are listed after the links that are specific to this concept.
   const users = new Map<string, number>()
   for (const e of g.edges) users.set(e.to, (users.get(e.to) ?? 0) + 1)
-  const hub = (x: string) => (users.get(x) ?? 0) > Math.max(8, g.concepts.length * 0.15)
+  const hub = (x: string) => (users.get(x) ?? 0) > Math.max(8, Math.min(g.concepts.length * 0.15, 12 + g.concepts.length * 0.03))
   const ev = (e: Edge) => ({ ...e, hub: hub(e.from === c.id ? e.to : e.from), evidence: e.evidence.map(x => ({ ...x, ...link(x.file, x.line) })) })
   return {
     concept: c, sha: g.sha, repo: g.repo, tree: ghUrl(r, 'tree', g.sha, c.path),

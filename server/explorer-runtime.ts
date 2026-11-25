@@ -163,6 +163,18 @@ async function prom(g: Grafana, dsName: string, q: string): Promise<{ value: num
   return { value: v == null ? null : Number(v), link: promLink(g, ds.uid, q) }
 }
 
+// The Prometheus-type datasources that actually have Kubernetes pod metrics, found by asking each one (cached).
+// Two at most, so the table can compare them (for PostHog: VictoriaMetrics and PostHog's own metrics).
+const podSources = (g: Grafana) => cached(`pods:${g.name}`, 3600_000, async () => {
+  const proms = (await datasources(g)).filter(d => d.type === 'prometheus')
+  const ok: string[] = []
+  for (const d of proms) {
+    try { const r = await gget(g, `/api/datasources/proxy/uid/${d.uid}/api/v1/query?query=${encodeURIComponent('count(kube_pod_info)')}`, 8000); if (Number(r?.data?.result?.[0]?.value?.[1]) > 0) ok.push(d.name) } catch {}
+    if (ok.length >= 2) break
+  }
+  return ok
+})
+
 // The tokens that name a concept, e.g. products/metrics → metrics; alerts_platform → alerts, platform.
 const tokensOf = (concept: string) => [...new Set(concept.split('/').pop()!.toLowerCase().split(/[_\-\s]+/).map(t => t.replace(/s$/, '')).filter(t => t.length >= 3 && !['api', 'app', 'web', 'lib', 'src', 'ui'].includes(t)))]
 
@@ -209,7 +221,7 @@ async function whereItRunsNow(concept: string, opts: { charts?: string | null; r
         ['CPU throttled (5m)', `sum(rate(container_cpu_cfs_throttled_periods_total{${pod}}[5m])) / sum(rate(container_cpu_cfs_periods_total{${pod}}[5m]))`, '%'],
       ]
       // Two sources on purpose: VictoriaMetrics is today's reference, PostHog metrics is where it's moving.
-      for (const ds of ['VictoriaMetrics', 'posthog-prometheus']) {
+      for (const ds of await podSources(g)) {
         await Promise.all(qs.map(async ([label, q, unit]) => {
           try { const r = await prom(g, ds, q); facts.push({ label, value: r.value, unit, source: `${g.name} · ${ds}`, query: q, link: r.link }) }
           catch (e: any) { facts.push({ label, value: null, unit, source: `${g.name} · ${ds}`, query: q, link: undefined }) }

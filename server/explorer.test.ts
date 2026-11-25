@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, ghMemo, importsOf, MECHANICAL, namesIt, prOf, scan } from './explorer.ts'
+import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, ghMemo, grouping, importsOf, MECHANICAL, namesIt, prOf, rootsOf, scan } from './explorer.ts'
 
 // A tiny product repo: dashboards are built on insights, alerts on insights, everything on core.
 function fixture() {
@@ -144,4 +144,21 @@ test('GitHub history answers are kept, failures are retried', async () => {
   const fail = async () => { tries++; return null }
   await ghMemo('t:fail', fail); await ghMemo('t:fail', fail)
   assert.equal(tries, 2)
+})
+
+test('grouping splits a module too big to reason about into its subfolders, and leaves noise alone', () => {
+  const files = [...Array(30)].flatMap((_, i) => [`src/app/api/a${i}.py`, `src/app/issues/b${i}.py`, `src/app/grouping/c${i}.py`, `vendor/lib${i}/x.go`])
+  const g = grouping(files, [], 40)
+  assert.equal(g.of('src/app/issues/b1.py'), 'src/app/issues')
+  assert.equal(g.of('src/app/api/a1.py'), 'src/app/api')
+  assert.equal(g.of('vendor/lib3/x.go'), 'vendor')
+})
+
+test('rootsOf finds src/ Python packages, Go module paths and JS workspace names', () => {
+  const files = ['src/sentry/__init__.py', 'src/sentry/api/__init__.py', 'go.mod', 'packages/core/package.json', 'package.json']
+  const content: Record<string, string> = { 'go.mod': 'module github.com/acme/vm\n', 'packages/core/package.json': '{"name":"@acme/core"}', 'package.json': '{"name":"acme"}' }
+  const r = rootsOf(files, f => content[f] ?? '')
+  assert.deepEqual(r.pyRoots, ['src'])
+  assert.deepEqual(r.go, [['github.com/acme/vm', '']])
+  assert.deepEqual(r.js.find(([n]) => n === '@acme/core'), ['@acme/core', 'packages/core'])
 })
