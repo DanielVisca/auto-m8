@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { humanCron, useLive } from './api'
+import { humanCron, post, useLive } from './api'
 
 // The Railyard's scout timetable, merged with the scout list (Library → Scouts).
 type Run = { at: number; done?: number | null; status: string; emitted: number; url: string | null; summary?: string | null; failure?: string | null; findings?: string[]; cost?: number | null; perch?: string | null }
@@ -129,15 +129,32 @@ type Config = { id: string; skill_name: string; display_name?: string; descripti
 type TeamRun = { run_id: string; skill_name: string; status: string; emitted_count?: number; created_at: string; posthog_url?: string | null; summary?: string | null; failure_reason?: string | null; perch_id?: string | null }
 
 const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n).toLocaleString()}`
+// A 7-day cost cell that never shows missing spend as $0: '$X' fully priced, '$X+' when some runs have
+// no spend data (the real cost is higher), 'no data' when none do. '$0.00' only means runs that cost nothing.
+export function costCell(w: { usd: number | null; runs: number; untracked: number } | undefined | null): { label: ReactNode; title: string } | undefined {
+  if (!w?.runs) return undefined
+  const n = w.untracked ?? 0
+  const base = `${w.runs} run${w.runs === 1 ? '' : 's'} in the last 7 days at API prices`
+  if (n >= w.runs) return { label: <span className="muted">no data</span>, title: `${base}; none reported spend, so the cost is unknown` }
+  if (n > 0) return { label: <span style={{ color: '#f59e0b' }}>{usd(w.usd ?? 0)}+</span>, title: `${base}; ${n} without spend data, so the real cost is higher` }
+  return { label: usd(w.usd ?? 0), title: w.usd ? base : `${base}; they used no model time (failed before starting)` }
+}
 
 // One table for the Scouts tab: each scout's cadence, last runs (newest right), 7-day cost, health and Run now.
 // Runs come from the Railyard snapshot (your scouts, last 10 each), falling back to the team runs feed.
 export function ScoutTable({ scouts, runs, showRoutines, sortByCadence, cost, msg, onRun, onOpenRun }: {
   scouts: Config[]; runs: TeamRun[]; showRoutines: boolean; sortByCadence: boolean
-  cost: (c: Config) => { label: string; title: string } | undefined | 0
+  cost: (c: Config) => { label: ReactNode; title: string } | undefined | 0
   msg: Record<string, string>; onRun: (c: Config) => void; onOpenRun: (r: TeamRun) => void
 }) {
-  const { data: ry } = useLive<{ scouts: Scout[]; routines: Routine[] }>('/api/railyard', [], undefined, 60_000)
+  const { data: ry, reload: reloadRy } = useLive<{ scouts: Scout[]; routines: Routine[] }>('/api/railyard', [], undefined, 60_000)
+  // Run now for local routines: same endpoint as Automations; the new run shows up as a pulsing mark.
+  const [rMsg, setRMsg] = useState<Record<string, string>>({})
+  const runRoutine = async (id: string) => {
+    setRMsg(m => ({ ...m, [id]: 'starting…' }))
+    try { await post(`/api/routines/${id}/run`); setRMsg(m => ({ ...m, [id]: 'started' })) } catch (e: any) { setRMsg(m => ({ ...m, [id]: `failed: ${e.message ?? e}` })) }
+    reloadRy?.()
+  }
   const rySkill = new Map((ry?.scouts ?? []).map(s => [s.skill, s]))
   const byUrl = new Map(runs.filter(r => r.posthog_url).map(r => [r.posthog_url!, r]))
   const rows = scouts.map(c => {
@@ -214,9 +231,11 @@ export function ScoutTable({ scouts, runs, showRoutines, sortByCadence, cost, ms
                   })}
                   {!rr.length && <span className={r.lastStatus === 'error' ? 'bad small' : 'muted small'}>{r.lastStatus ?? 'no runs'}</span>}
                 </td>
-                <td className="tt-wide" title={r.week?.runs ? `${r.week.runs} runs in the last 7 days at API prices${r.week.untracked > 0 ? `, ${r.week.untracked} without spend data` : ''}` : undefined}>
-                  {r.week?.runs && r.week.usd != null ? usd(r.week.usd) : <span className="muted">—</span>}
-                </td><td />
+                <td className="tt-wide" title={costCell(r.week)?.title}>{costCell(r.week)?.label ?? <span className="muted">—</span>}</td>
+                <td className="tt-act">
+                  {r.id && rMsg[r.id] && <span className="muted small">{rMsg[r.id]} </span>}
+                  {r.id && <button className="small" onClick={() => runRoutine(r.id!)}>Run now</button>}
+                </td>
               </tr>
             )
           })}

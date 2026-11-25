@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ago, api, humanCron, post, useLive } from './api'
 import { useProfiles } from './Profile'
-import { ScoutTable } from './ScoutTimetable'
+import { costCell, ScoutTable } from './ScoutTimetable'
 import { Evolve } from './Evolve'
 
 export function Library({ initial, onOpen }: { initial?: 'skills' | 'scouts' | 'learned'; onOpen: (id: string) => void }) {
@@ -165,7 +165,7 @@ function Scouts() {
         <ScoutTable
           scouts={sort === 'cost' ? [...configs].sort((a, b) => (cost(b)?.usd ?? 0) - (cost(a)?.usd ?? 0)) : configs}
           sortByCadence={sort === 'cadence'} runs={runList} showRoutines={mine && !q}
-          cost={c => cost(c) && { label: usd(cost(c).usd), title: `${cost(c).runs} runs in the last 7 days${cost(c).untracked > 0 ? `, ${cost(c).untracked} without spend data` : ''}` }}
+          cost={c => costCell(cost(c))}
           msg={msg} onRun={async c => { const r = await post(`/api/scouts/${c.id}/run`); setMsg({ ...msg, [c.id]: r.error ?? 'started' }); reload() }}
           onOpenRun={openRun} />
       )}
