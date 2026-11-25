@@ -884,6 +884,21 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
     if (id) post(`/api/chat/${encodeURIComponent(id)}/turbo`, { on })
     else try { localStorage.setItem('perch.turbo.next', on ? '1' : '0') } catch {}
   }
+  // Self drive: while on, a driver agent answers this chat's questions and blockers for you when its
+  // turn ends, and hands back only what only you can do (via Needs me). For a new chat it switches on
+  // once the chat starts.
+  const { data: drive, reload: reloadDrive } = useLive<{ on: boolean; replies: number; status: string | null; note: string | null }>(id ? `/api/chat/${encodeURIComponent(id)}/self-drive` : null, ['chats'])
+  const [driveNext, setDriveNext] = useState(false)
+  const driving = id ? !!drive?.on : driveNext
+  const toggleDrive = async () => {
+    if (!id) { setDriveNext(v => !v); return }
+    await post(`/api/chat/${encodeURIComponent(id)}/self-drive`, { on: !drive?.on })
+    reloadDrive()
+  }
+  const started = (newId: string) => {
+    if (!id && driveNext) { post(`/api/chat/${encodeURIComponent(newId)}/self-drive`, { on: true }); setDriveNext(false) }
+    onStarted(newId)
+  }
   const [context, setContext] = useState(true)
   const [pulled, setPulled] = useState<Related[]>([])
   const [related, setRelated] = useState<Related[]>([])
@@ -1037,7 +1052,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
         ? `Use the "${cmd.name}" skill from the PostHog skill store: load it with use_skill, then follow it.${rest ? `\n\nTask: ${rest}` : ''}`
         : `Use the ${cmd.name} skill.${rest ? `\n\n${rest}` : ''}`
       const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt: p2, cwd: id ? undefined : cwd, mode, context: true, folderId: folder?.id })
-      if (!id) onStarted(r.id)
+      if (!id) started(r.id)
       return
     }
     if (/^\/(autoresearch|optimi[sz]e)\b/.test(prompt)) { setOpt({ brief: prompt.replace(/^\/\S+\s*/, ''), direction: 'minimize', iterations: 10, target: '' }); setText(''); return }
@@ -1050,7 +1065,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
     // back in the next new chat.
     try { sessionStorage.removeItem(`perch.compose.shared.${id ?? 'new'}`) } catch {}
     setRelated([])
-    if (!id || r.id !== id) onStarted(r.id) // a carried-over conversation continues in a new chat
+    if (!id || r.id !== id) started(r.id) // a carried-over conversation continues in a new chat
   }
 
   const findRelated = () => {
@@ -1184,12 +1199,15 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
         />
         <button className={`turbo-btn${turbo ? ' on' : ''}`} onClick={toggleTurbo} aria-pressed={turbo} disabled={isLocalEngine(engine)}
           title={turbo ? 'Turbo is on for this chat: top model, high effort, parallel subagents, then a verify pass. Click to turn off.' : 'Turbo: finish faster with the top model working in parallel'}>⚡</button>
+        <button className={`turbo-btn${driving ? ' on' : ''}`} onClick={toggleDrive} aria-pressed={driving}
+          title={driving ? `Self drive is on: when this chat stops on a question or blocker, an agent answers for you and keeps it going. Only what only you can do comes back to you.${drive?.note ? ` Now: ${drive.note}` : ''} Click to turn off.` : 'Self drive: an agent answers this chat\'s questions and blockers for you until the work is done'}>🚗</button>
         {running && id
           ? <button className="stop" onClick={() => post(`/api/chat/${id}/interrupt`)} title="Stop">■</button>
           : <button className="primary" onClick={submit} disabled={!text.trim()}>↵</button>}
       </div>
       <div className="composer-opts">
         {!id && folder && <span className="chip">📁 {folder.name}</span>}
+        {driving && <span className="chip" title={drive?.note ?? ''}>🚗 Self drive{id && drive ? ` · ${drive.status === 'thinking' ? 'deciding…' : drive.status === 'needs_you' ? 'needs you' : drive.status === 'paused' ? 'paused' : `${drive.replies} ${drive.replies === 1 ? 'reply' : 'replies'}`}` : ' on start'}</span>}
         {!id && <input className="cwd" value={cwd} onChange={e => setCwd(e.target.value)} title="Working directory" list="cwds" />}
         {id && conv?.cwd && <span className="muted small" title={`${conv.cwd}\nRight-click to show in Finder`} data-path={conv.cwd} data-dir="1">{baseName(conv.cwd)}{conv.branch ? ` · ${conv.branch}` : ''}</span>}
         {/* Which model: Auto picks per message from what you already pay for; or pin one. */}

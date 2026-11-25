@@ -92,6 +92,7 @@ import { hookSignals } from './hookSignals.ts'
 import { handleHookPost } from './hookRoute.ts'
 import { dismiss as dismissAttention, sweep as attentionSweep } from './attention.ts'
 import { resumeStalls } from './resumestalls.ts'
+import { driveLog, driveState, onSelfDrive, setSelfDrive, startSelfDrive } from './selfdrive.ts'
 import { relay, relayGraph } from './relay.ts'
 import { harvest as harvestChat, harvestOf, lifecycleStatus, sweepLifecycle } from './lifecycle.ts'
 import { board, push as inboxPush, startOrchestra, stopTargets, unwatch as orchUnwatch, watch as orchWatch } from './orchestra.ts'
@@ -613,6 +614,8 @@ route('GET', '/api/chat/:id/engine', m => ({ engine: engineFor(decodeURIComponen
 route('POST', '/api/chat/:id/engine', async (m, req) => { setEngine(decodeURIComponent(m[1]), String((await body(req)).engine ?? '')); return { ok: true } })
 route('GET', '/api/chat/:id/turbo', m => ({ turbo: turboFor(decodeURIComponent(m[1])) }))
 route('POST', '/api/chat/:id/turbo', async (m, req) => { setTurbo(decodeURIComponent(m[1]), !!(await body(req)).on); return { ok: true } })
+route('GET', '/api/chat/:id/self-drive', m => { const id = decodeURIComponent(m[1]); return { ...driveState(id), log: driveLog(id) } })
+route('POST', '/api/chat/:id/self-drive', async (m, req) => setSelfDrive(decodeURIComponent(m[1]), !!(await body(req)).on))
 route('POST', '/api/chat/:id/rate', async (m, req) => rateLast(decodeURIComponent(m[1]), (await body(req)).rating))
 route('GET', '/api/insights/turns', (_m, _r, _s, q) => turnStats(Number(q.get('days') ?? 30)))
 route('GET', '/api/slack/drafts/:id', m => getDraft(decodeURIComponent(m[1])) ?? { error: 'That draft is gone.' })
@@ -1449,6 +1452,8 @@ startOrganizer()
 resumeFollowers()
 resumeHelpers()
 startOrchestra()
+startSelfDrive(id => chats.get(id)?.state === 'running')
+onSelfDrive.add(() => broadcast('chats'))
 // Lifecycle: stale chats get a closing pass (learnings to memory, a summary), then close.
 const sweepLife = () => sweepLifecycle().then(() => broadcast('conversations')).catch(e => console.error('lifecycle', e))
 setTimeout(sweepLife, 3 * 60_000).unref()

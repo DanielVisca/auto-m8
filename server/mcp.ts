@@ -693,6 +693,11 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     return items.slice(0, 20).map(e => `- [${e.source} ${e.tool}] ${e.title.slice(0, 200)}${e.numbers.length ? `\n  ${e.numbers.map(n => `${n.label}: ${n.value}`).join(' · ')}` : ''}${e.link ? `\n  ${e.link.slice(0, 400)}` : ''}`).join('\n') || 'No data queries in this conversation yet.'
   }
   if (name === 'ask_decision') {
+    // Self drive is on for this chat: a driver agent answers for the user when the turn ends, and it
+    // escalates the things only the user can do itself. Queuing here would stall the chat for nothing.
+    let driven = false
+    try { driven = !!get<any>('select 1 from self_drive where id = ? and enabled = 1', String(args.conversation_id)) } catch {}
+    if (driven) return 'Self drive is on for this chat: a driver agent answers for the user as soon as your turn ends. Don\'t queue this or wait. Keep doing everything that doesn\'t depend on it, then end your turn with the question, the options and your recommendation as your last lines. If it is irreversible or outward-facing, say so plainly; the driver hands those to the user.'
     // A claimed high-stakes decision needs evidence and a capable second look, not a timer
     // that treats silence as permission. Keep low-stakes recommendations on the existing path.
     if (args.stakes !== 'low') {
