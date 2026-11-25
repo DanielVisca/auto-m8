@@ -122,7 +122,13 @@ export function RailLine({ picked, onPick }: { picked?: string | null; onPick?: 
       )}
       <div className="flow-legend small">
         {Object.values(HOLDER).map(([c, l]) => <span key={l}><i className="sw" style={{ background: c }} />{l}</span>)}
-        <span className="muted">· pulsing = agent driving · red ring = stuck · ▮ = waiting on an after: PR to pass its first prod check · click a station to list it · size = diff</span>
+      </div>
+      {/* Each marker drawn the same way the dots on the line are, so the key needs no explaining. */}
+      <div className="flow-legend small muted">
+        <span><svg width={14} height={14} className="lg"><circle cx={7} cy={7} r={5} fill="#8b5cf6" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} /></svg>agent working on it</span>
+        <span><svg width={14} height={14} className="lg"><circle cx={7} cy={7} r={4.5} fill="#6b7280" stroke="#ef4444" strokeWidth={2} /></svg>stuck</span>
+        <span><svg width={16} height={16} className="lg"><circle cx={6} cy={9} r={5} fill="#6b7280" /><rect x={10} y={1} width={4} height={9} rx={1} fill="#ef4444" /></svg>waiting for another PR to ship first</span>
+        <span><svg width={24} height={14} className="lg"><circle cx={4} cy={7} r={3} fill="#6b7280" /><circle cx={16} cy={7} r={6} fill="#6b7280" /></svg>bigger = larger diff</span>
       </div>
     </div>
   )
