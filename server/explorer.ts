@@ -497,7 +497,7 @@ export const MECHANICAL = /\b(move[sd]?|moving|renam\w*|relocat\w*|extract\w*|mi
 const earliest = (...cs: (Commit | null)[]) => cs.filter(Boolean).sort((a, b) => a!.date.localeCompare(b!.date))[0] ?? null
 const termFor = (c: Concept) => { const n = c.name.replace(/[_-]/g, ' ').replace(/ies$/, 'y').replace(/s$/, ''); return n.length >= 4 && !GENERIC.has(c.name.toLowerCase()) && !GENERIC.has(n.toLowerCase()) ? n : null }
 
-export async function buildTimeline(repo: string, nodes: Concept[], edges: Edge[], progress: (t: Timeline) => void, budgetMs = 150_000): Promise<Timeline> {
+export async function buildTimeline(repo: string, nodes: Concept[], edges: Edge[], progress: (t: Timeline) => void, budgetMs = 150_000, models: Graph['models'] = {}): Promise<Timeline> {
   const r = await remoteOf(repo)
   const shallow = (await git(repo, ['rev-parse', '--is-shallow-repository'], 5000).catch(() => 'false')).trim() === 'true'
   const useGh = shallow && !!r && await gh(['auth', 'status'], 8000).then(() => true, () => false)
@@ -511,6 +511,15 @@ export async function buildTimeline(repo: string, nodes: Concept[], edges: Edge[
   const t: Timeline = { status: 'running', done: 0, total: nodes.length + edges.length + nodes.length, source, shallow, since: boundary, events: [], milestones: {} }
   const deadline = Date.now() + budgetMs
   const intro = new Map<string, Commit>()
+  // Where each table was created: Django migrations are never moved or edited, so the oldest migration that
+  // creates a model dates it exactly. Later copies (squashes, moves into products/) are newer, so earliest wins.
+  const created = new Map<string, string[]>()
+  try {
+    const out = await git(repo, ['grep', '-n', '-A3', 'migrations.CreateModel(', '--', '*/migrations/*.py'], 20_000)
+    // Squashed migrations re-create old tables wholesale: they're not when a table was born.
+    for (const m of out.matchAll(/^(.+?\.py)-\d+-\s*name=["'](\w+)["']/gm)) if (!/squash/i.test(m[1])) (created.get(m[2]) ?? created.set(m[2], []).get(m[2])!).push(m[1])
+  } catch {}
+  const fileStart = (f: string) => useGh ? ghMemo(`first:${r!.owner}/${r!.name}:${f}`, () => ghFirst(r!, f).catch(() => null)) : shallow ? Promise.resolve(null) : localFirst(repo, f, r).catch(() => null)
   const step = () => { t.done++; progress(t) }
   for (const c of nodes) {
     if (Date.now() > deadline) { step(); continue }
@@ -519,10 +528,27 @@ export async function buildTimeline(repo: string, nodes: Concept[], edges: Edge[
       const [p, m] = useGh
         ? [await ghMemo(`first:${r!.owner}/${r!.name}:${c.path}`, () => ghFirst(r!, c.path).catch(() => null)), term ? await ghMemo(`mention:${r!.owner}/${r!.name}:${term}`, () => ghMention(r!, term).catch(() => null)) : null]
         : [await localFirst(repo, c.path, r).catch(() => null), term && !shallow ? await localMention(repo, term, r).catch(() => null) : null]
-      const first = earliest(p, m)
+      // A name in a commit subject only counts as the concept's start when it's the commit's declared scope
+      // (feat(metrics): …, metrics: …). A passing use of a common word ("performance metrics", 2020) doesn't.
+      const scoped = m && term && new RegExp(`(^|\\()${term.replace(/\s+/g, '[-_ ]?')}s?(\\)|:)`, 'i').test(m.subject) ? m : null
+      // Its data models: GitHub blame on each `class X(` line follows the file through moves, so a module that
+      // was moved into a new folder still gets its real start. Commits that only moved or reformatted don't count.
+      let born: Commit | null = null
+      for (const name of c.models.slice(0, 4)) {
+        const mm = models[name]; if (!mm || !useGh || !ghRef) continue
+        const line = await blameLine(r!, ghRef, mm.file, `class ${name}(`).catch(() => null)
+        if (line && !MECHANICAL.test(line.subject)) born = earliest(born, line)
+      }
+      if (!born && !useGh && !shallow) for (const name of c.models.slice(0, 2)) { const mm = models[name]; if (mm) born = earliest(born, await localPickaxe(repo, `class ${name}(`, mm.file, r).catch(() => null)) }
+      let table: Commit | null = null, tableFile = '', tableModel = ''
+      for (const name of c.models.slice(0, 4)) for (const f of (created.get(name) ?? []).slice(0, 4)) {
+        const d = await fileStart(f); if (d && (!table || d.date < table.date)) { table = d; tableFile = f; tableModel = name }
+      }
+      const first = earliest(table, born, p, scoped)
       if (first) {
         intro.set(c.id, first)
-        t.events.push({ date: first.date, kind: 'concept', id: c.id, approx: shallow || first === m, source: first === m ? `oldest commit mentioning “${term}”` : `first commit under ${c.path}`, commit: first })
+        const how = first === table ? `the ${tableModel} table was created (${tableFile.split('/').pop()}); its oldest surviving table, older renamed ones aren't traced` : first === born ? 'when its data models were written (GitHub blame on their class lines)' : first === scoped ? `oldest commit scoped to “${term}”` : `first commit under ${c.path} (it may have moved here)`
+        t.events.push({ date: first.date, kind: 'concept', id: c.id, approx: first !== table && (shallow || first !== born), source: how, commit: first })
       }
     } catch {}
     step()
@@ -621,14 +647,14 @@ export async function exploreGraph(repo: string, focus?: string | null, hubs = f
 export async function exploreTimeline(repo: string, focus?: string | null, onUpdate?: () => void) {
   const g = await graphFor(repo)
   const f = focusGraph(g, focus)
-  const key = keyOf('timeline-v2-blame', g.repo, g.sha, focus ?? '', f.nodes.map(n => n.id).join(',')) // bump when dating changes, so saved timelines are rebuilt
+  const key = keyOf('timeline-v4-migrations', g.repo, g.sha, focus ?? '', f.nodes.map(n => n.id).join(',')) // bump when dating changes, so saved timelines are rebuilt
   const file = DIR && join(DIR, `timeline-${key}.json`)
   const have = timelines.get(key)
   if (have) return have
   if (file && existsSync(file)) try { const t = JSON.parse(readFileSync(file, 'utf8')); timelines.set(key, t); return t } catch {}
   const t: Timeline = { status: 'running', done: 0, total: 1, source: '', shallow: false, since: null, events: [], milestones: {} }
   timelines.set(key, t)
-  buildTimeline(g.repo, f.nodes, f.edges, p => { Object.assign(t, p, { status: 'running' }); onUpdate?.() })
+  buildTimeline(g.repo, f.nodes, f.edges, p => { Object.assign(t, p, { status: 'running' }); onUpdate?.() }, 150_000, g.models)
     .then(done => { Object.assign(t, done); if (file) writeFileSync(file, JSON.stringify(t)); onUpdate?.() })
     .catch(e => { t.status = 'done'; t.error = String(e?.message ?? e); timelines.delete(key); onUpdate?.() })
   return t

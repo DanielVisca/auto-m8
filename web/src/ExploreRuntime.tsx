@@ -207,7 +207,9 @@ export function DataSection({ concept, repos, bare, onSummary }: { concept: stri
         // Lead with the cluster that holds most of its own tables (named like it), not the first one found.
         const ownT = r.tables.filter((t: any) => t.how.some((h: string) => /^table name|db_table/.test(h)))
         const key = (n?: string | null) => String(n ?? '').replace(/_primary_replica$|_replica$/, '')
-        const top = [...r.clusters].map(c => ({ c, b: ownT.filter((t: any) => key(t.cluster) === key(c.name)).reduce((n: number, t: any) => n + (t.bytes ?? 0), 0) })).sort((x, y) => y.b - x.b)[0]
+        // Its own tables that its code also names come first (ops has big tables only named like "metric").
+        const coded = (t: any) => t.how.some((h: string) => h.startsWith('named in code'))
+        const top = [...r.clusters].map(c => { const here = ownT.filter((t: any) => key(t.cluster) === key(c.name)); return { c, n: here.filter(coded).reduce((n: number, t: any) => n + (t.bytes ?? 0) + 1, 0), b: here.reduce((n: number, t: any) => n + (t.bytes ?? 0), 0) } }).sort((x, y) => y.n - x.n || y.b - x.b)[0]
         return `${r.tables.length} table${r.tables.length === 1 ? '' : 's'}${top ? ` · mostly ${key(top.c.name)}${top.c.disk.max != null ? `, ${pct(top.c.disk.max)} full` : ''}` : ''}`
       })())
   }, [r]) // eslint-disable-line
