@@ -101,6 +101,7 @@ import { summarizePrs, addTactic, evaluatePlaybook, feedback as searchFeedback, 
 import { dryRun as dryRunSuggestion, later as laterSuggestion, undo as undoSuggestion } from './autopilot.ts'
 import { accept as acceptSuggestion, dismiss as dismissSuggestion, onAutopilot, overview as autopilotOverview, review, scan as autopilotScan, startAutopilot } from './autopilot.ts'
 import { toItems, itemsOf } from './transcript.ts'
+import { ignoreNeed, needs as wishNeeds, startWishes, wishCycle } from './wishes.ts'
 import { cycle as evolveCycle, forge, ignore as ignoreUseCase, onEvolve, overview as evolveOverview, restore as restoreSkill, retire as retireSkill, rollback as rollbackSkill, startEvolve } from './evolve.ts'
 import { startShepherd } from './shepherd.ts'
 import { localScoutSpend, scanTranscripts, spendSummary, startSpend } from './spend.ts'
@@ -1036,14 +1037,15 @@ route('GET', '/api/autoresearch', () => ({ runs: listRuns() }))
 route('GET', '/api/autoresearch/for/:conv', m => runFor(decodeURIComponent(m[1])) ?? { none: true })
 route('POST', '/api/autoresearch/:id/:action', m => { ({ pause: pauseOpt, resume: resumeOpt, stop: stopOpt } as any)[m[2]]?.(m[1]); return { ok: true } })
 route('GET', '/api/mcp/wishes', async () => {
-  // What agents said they lacked, grouped, each with what the PostHog MCP registry would connect.
-  const rows = all<any>(`select lower(coalesce(nullif(suggested, ''), need)) k, max(suggested) suggested, group_concat(need, ' | ') needs, count(*) n, count(distinct conversation_id) convs, max(created_at) last, group_concat(conversation_id) ids
-                         from capability_wishes group by k order by n desc, last desc limit 20`)
-  for (const r of rows.slice(0, 8)) {
-    try { const d: any = await discoverMcp(r.suggested || String(r.needs).split(' | ')[0], 3); r.candidates = (d.results ?? d.candidates ?? []).slice(0, 3).map((c: any) => ({ name: c.title ?? c.name, liveness: c.liveness, score: c.combined_score ?? c.score, connect: c.connect?.[0] ?? null, id: c.id ?? c.server_id })) } catch { r.candidates = [] }
+  // What agents lacked (server/wishes.ts), grouped into needs, each with what the PostHog MCP registry would connect.
+  const r: any = wishNeeds()
+  for (const g of r.groups.filter((g: any) => g.kind === 'data').slice(0, 8)) {
+    try { const d: any = await discoverMcp(g.suggested || g.name, 3); g.candidates = (d.results ?? d.candidates ?? []).slice(0, 3).map((c: any) => ({ name: c.title ?? c.name, liveness: c.liveness, score: c.combined_score ?? c.score, connect: c.connect?.[0] ?? null, id: c.id ?? c.server_id })) } catch { g.candidates = [] }
   }
-  return { wishes: rows }
+  return r
 })
+route('POST', '/api/mcp/wishes/run', () => { wishCycle(); return { ok: true } })
+route('POST', '/api/mcp/wishes/:id/ignore', m => { ignoreNeed(decodeURIComponent(m[1])); return { ok: true } })
 route('GET', '/api/applenotes/status', () => { checkAccess(); if (notesStatus.access === 'granted' && !notesStatus.count) readNotes(); return notesStatus })
 route('GET', '/api/applenotes/:id', m => { const n = appleNotes().find(x => x.id === decodeURIComponent(m[1])); return n ? { ...n, url: noteUrl(n.id) } : { error: 'not found' } })
 route('POST', '/api/applenotes/:id/open', async m => { if (!/^[\w-]+$/.test(m[1])) return { error: 'bad id' }; await new Promise(r => execFileCb('open', [noteUrl(m[1])], r)); return { ok: true } })
@@ -1346,6 +1348,7 @@ startRace(broadcast, (id, prompt) => { send({ id, prompt, resume: true, by: 'aut
 startShadow(broadcast, () => runningChats().filter(c => c.state === 'running').length)
 startAutopilot()
 startEvolve()
+startWishes()
 startOrganizer()
 resumeFollowers()
 resumeHelpers()

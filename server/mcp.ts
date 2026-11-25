@@ -441,7 +441,8 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
   }
   if (name === 'report_missing_capability') {
     const kind = ['skill', 'tool'].includes(args.kind) ? args.kind : 'data'
-    dbRun('insert into capability_wishes (id, conversation_id, need, would_help, suggested, created_at, kind) values (?, ?, ?, ?, ?, ?, ?)',
+    if (!String(args.need ?? '').trim()) return 'need is required: say in a few words what you lacked.'
+    dbRun("insert into capability_wishes (id, conversation_id, need, would_help, suggested, created_at, kind, source) values (?, ?, ?, ?, ?, ?, ?, 'reported')",
       crypto.randomUUID(), args.conversation_id ?? null, String(args.need).slice(0, 300), String(args.would_have_helped ?? '').slice(0, 500), String(args.suggested ?? '').slice(0, 100), Date.now(), kind)
     return kind === 'data' ? 'Logged. Carry on with what you have, and say plainly what you could not check.' : 'Logged. auto-m8 groups these with the user\'s repeated asks and writes a skill once the job recurs. Carry on.'
   }

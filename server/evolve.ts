@@ -147,7 +147,7 @@ async function model(prompt: string): Promise<string> {
 }
 const json = (s: string, open = '{', close = '}') => JSON.parse(s.slice(s.indexOf(open), s.lastIndexOf(close) + 1))
 // Long skill bodies sometimes come back with an unescaped quote; one retry fixes nearly all of them.
-async function modelJson(prompt: string) {
+export async function modelJson(prompt: string) {
   try { return json(await model(prompt)) } catch (e) {
     if (!(e instanceof SyntaxError)) throw e
     return json(await model(`${prompt}\n\nYour previous reply was not valid JSON (${e.message}). Reply with ONLY valid JSON: escape quotes and newlines inside strings.`))

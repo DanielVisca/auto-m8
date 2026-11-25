@@ -511,6 +511,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .health-group > summary::before { content: '▸'; color: var(--muted); font-size: 10px; }
 .health-group[open] > summary::before { content: '▾'; }
 .health-group > .health-row { padding-left: 18px; }
+.health-group-body { padding: 0 0 8px 18px; display: flex; flex-direction: column; gap: 6px; }
+.wish-quote { border-left: 2px solid var(--line); padding-left: 8px; }
 
 .dim-line { opacity: .55; }
 .line.wrap .grow, .line .grow.small { overflow-wrap: anywhere; }
@@ -1297,17 +1299,18 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 
 /* Settings: tabs in a side panel, the chosen tab's cards beside it. Narrow screens get a scrolling row of tabs. */
 .settings-layout { display: flex; align-items: flex-start; min-height: 100%; }
-.settings-nav { position: sticky; top: 0; flex: 0 0 180px; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px 12px 14px; border-right: 1px solid var(--line); align-self: stretch; }
+.settings-nav { position: sticky; top: 0; flex: 0 0 180px; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px 12px 14px; align-self: flex-start; max-height: 100vh; overflow-y: auto; box-sizing: border-box; } /* flex-start, not stretch: a stretched nav is as tall as the page, so sticky never sticks */
 .settings-nav h2 { margin: 4px 8px 10px; font-size: 17px; }
 .settings-nav button { text-align: left; background: none; border: 0; border-radius: 6px; padding: 6px 8px; cursor: pointer; color: inherit; font: inherit; }
 .settings-nav button:hover { background: var(--bg2); }
 .settings-nav button.on { background: var(--bg3); font-weight: 600; }
-.settings-page { flex: 1; min-width: 0; margin: 0; }
+.settings-page { flex: 1; min-width: 0; margin: 0; border-left: 1px solid var(--line); min-height: 100vh; }
 @media (max-width: 640px) {
   .settings-layout { flex-direction: column; }
   .settings-nav { position: static; flex-direction: row; flex-basis: auto; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px; width: 100%; box-sizing: border-box; }
   .settings-nav h2 { display: none; }
   .settings-nav button { white-space: nowrap; }
+  .settings-page { border-left: 0; min-height: 0; }
 }
 .pr-owner { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; }
 /* Side panel list: the sidebar's rows at panel width. */

@@ -292,23 +292,39 @@ function PhoneAccess() {
   )
 }
 
-// What agents said they were missing, and what the PostHog MCP registry would connect for it.
+// What agents lacked: learned from what they ran into (server/wishes.ts), grouped into needs,
+// with what the PostHog MCP registry would connect for each.
+const SIGNAL: Record<string, string> = { 'tool-miss': 'looked for a tool that wasn\'t there', unavailable: 'a tool failed: not connected or allowed', said: 'told you it couldn\'t', reported: 'reported it' }
 function Wishes() {
-  const { data } = useLive<{ wishes: any[] }>('/api/mcp/wishes')
-  if (!data?.wishes.length) return null
+  const { data, reload } = useLive<{ groups: any[]; meta: any }>('/api/mcp/wishes', [], undefined, 5 * 60_000)
+  const [busy, setBusy] = useState(false)
+  if (!data) return null
+  const { groups, meta } = data
   return (
     <section className="card">
-      <h3>Agents wished they had…</h3>
-      <div className="muted small">When an agent couldn't answer confidently for lack of a data source, it logged what was missing. Recommendations come from the PostHog MCP registry, ranked by liveness and real usage. Over time this is the list of what to connect, or build.</div>
-      {data.wishes.map((w, i) => (
-        <div key={i} className="health-row">
-          <span className="badge">{w.n}</span>
-          <div className="grow">
-            <div><b>{w.suggested || String(w.needs).split(' | ')[0]}</b> <span className="muted small">{w.convs} conversations · {ago(w.last)} ago</span></div>
-            <div className="muted small clamp">{String(w.needs).split(' | ').slice(0, 3).join(' · ')}</div>
-            {w.candidates?.length > 0 && <div className="small">Connect: {w.candidates.map((c: any) => <span key={c.name} className="chip" title={`${c.liveness ?? 'unprobed'} · score ${c.score ?? '?'}`}><Brand id={brandFor(c.name ?? '')} size={12} /> {c.name}</span>)}</div>}
+      <div className="card-head"><h3>Agents wished they had…</h3>
+        <button disabled={busy} onClick={async () => { setBusy(true); await post('/api/mcp/wishes/run'); setTimeout(() => { setBusy(false); reload() }, 4000) }}>{busy ? 'Reading…' : 'Read recent chats now'}</button></div>
+      <div className="muted small">Learned from what agents ran into, without asking them: a tool search that found nothing, a tool that wasn't connected or allowed, or the agent telling you it couldn't reach something. Repeats are merged into one need. Most recurring first.</div>
+      <div className="muted small">{meta?.last ? `Last signal ${ago(meta.last)} ago · ${meta.week ?? 0} this week · ${meta.observed ?? 0} observed, ${meta.reported ?? 0} reported` : 'Nothing captured yet.'}{meta?.lastRun ? ` · checked ${ago(meta.lastRun)} ago` : ''}{meta?.pending ? ` · ${meta.pending} waiting to be grouped` : ''}{meta?.error ? ` · last run failed: ${meta.error}` : ''}</div>
+      {groups.map(g => (
+        <details key={g.id} className="health-group">
+          <summary>
+            <span className="badge" title="conversations">{g.convs}</span>
+            <b>{g.name}</b>
+            <span className="muted small grow">{g.convs} chat{g.convs === 1 ? '' : 's'} · {g.n} time{g.n === 1 ? '' : 's'} · last {ago(g.last)} ago · {g.kind}</span>
+            <button className="link small" onClick={async ev => { ev.preventDefault(); await post(`/api/mcp/wishes/${encodeURIComponent(g.id)}/ignore`); reload() }}>not needed</button>
+          </summary>
+          <div className="health-group-body">
+            {g.description && <div className="small">{g.description}</div>}
+            {g.examples?.map((e: any, i: number) => (
+              <div key={i} className="small wish-quote">
+                <span className="muted">{SIGNAL[e.signal ?? 'reported'] ?? e.signal}, {ago(e.created_at)} ago{e.conversation_id ? <> · <a href={`#chat/${encodeURIComponent(e.conversation_id)}`}>open chat</a></> : null}</span>
+                <div className="clamp">“{e.need}”</div>
+              </div>
+            ))}
+            {g.candidates?.length > 0 && <div className="small">Connect: {g.candidates.map((c: any) => <span key={c.name} className="chip" title={`${c.liveness ?? 'unprobed'} · score ${c.score ?? '?'}`}><Brand id={brandFor(c.name ?? '')} size={12} /> {c.name}</span>)}</div>}
           </div>
-        </div>
+        </details>
       ))}
     </section>
   )
