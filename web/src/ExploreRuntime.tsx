@@ -194,15 +194,36 @@ export function DataSection({ concept, repos, bare, onSummary }: { concept: stri
   }, [url])
   useEffect(() => {
     onSummary?.(!r ? 'asking ClickHouse…' : 'error' in r ? 'error' : !r.tables.length ? 'no ClickHouse tables'
-      : `${r.tables.length} table${r.tables.length === 1 ? '' : 's'}${r.clusters.length ? ` · ${r.clusters.slice(0, 2).map(c => `${c.name}${c.disk.max != null ? ` ${pct(c.disk.max)} full` : ''}`).join(', ')}` : ''}`)
+      : (() => {
+        // Lead with the cluster that holds most of its own tables (named like it), not the first one found.
+        const ownT = r.tables.filter((t: any) => t.how.some((h: string) => /^table name|db_table/.test(h)))
+        const key = (n?: string | null) => String(n ?? '').replace(/_primary_replica$|_replica$/, '')
+        const top = [...r.clusters].map(c => ({ c, b: ownT.filter((t: any) => key(t.cluster) === key(c.name)).reduce((n: number, t: any) => n + (t.bytes ?? 0), 0) })).sort((x, y) => y.b - x.b)[0]
+        return `${r.tables.length} table${r.tables.length === 1 ? '' : 's'}${top ? ` · mostly ${key(top.c.name)}${top.c.disk.max != null ? `, ${pct(top.c.disk.max)} full` : ''}` : ''}`
+      })())
   }, [r]) // eslint-disable-line
   if (!r) return <div className="ex-sec small muted">{!bare && <h5>Data</h5>}<i className="spin" /> Asking ClickHouse (system tables) and Prometheus…</div>
   if ('error' in r) return <div className="ex-sec small">{!bare && <h5>Data</h5>}<span className="bad">{r.error}</span></div>
-  const tables = all ? r.tables : r.tables.slice(0, 8)
+  // Strongest evidence first (named in the concept's code), then the biggest: that's where its data really lives.
+  const named = (t: any) => t.how.some((h: string) => h.startsWith('named in code'))
+  // Its own tables are named like it (or are its models' db_table); a table its code merely mentions (the shared
+  // events table, say) is data it reads, not data it holds, so it ranks after its own however big it is.
+  const own = (t: any) => t.how.some((h: string) => /^table name|db_table/.test(h))
+  const score = (t: any) => (own(t) ? 2 : 0) + (named(t) ? 1 : 0)
+  const sorted = [...r.tables].sort((a: any, b: any) => score(b) - score(a) || (b.bytes ?? 0) - (a.bytes ?? 0))
+  const tables = all ? sorted : sorted.slice(0, 8)
+  // How much of this concept's data each cluster holds, so the cluster that matters comes first.
+  const base = (n?: string | null) => String(n ?? '').replace(/_primary_replica$|_replica$/, '')
+  const holds = (c: any) => {
+    const here = r.tables.filter((t: any) => base(t.cluster) === base(c.name) || (t.host && c.hosts?.includes(t.host) && !t.cluster))
+    const mine = here.filter(own)
+    return { bytes: mine.reduce((n: number, t: any) => n + (t.bytes ?? 0), 0), named: mine.filter(named).reduce((n: number, t: any) => n + (t.bytes ?? 0) + 1, 0), tables: mine.length, codeTables: mine.filter(named).length, reads: here.filter(t => !own(t)).map((t: any) => t.table) }
+  }
+  const clusters = [...r.clusters].map((c: any) => ({ c, h: holds(c) })).sort((a, b) => b.h.named - a.h.named || b.h.bytes - a.h.bytes)
   return (
     <div className="ex-sec small">
       {!bare && <h5>Data <span className="muted" title={r.matchedBy}>· ClickHouse tables named in its code or like “{r.tokens.join('”, “')}”</span></h5>}
-      {r.clusters.map(c => <ClusterCard key={c.name} c={c} />)}
+      {clusters.map(({ c, h }) => <ClusterCard key={c.name} c={c} h={h} />)}
       {!r.tables.length && <div className="muted" title={r.datasources?.length ? `Searched ${r.datasources.map(d => `${d.name}: ${d.tables} tables`).join(', ')}` : undefined}>None of its code names a ClickHouse table, and no table is named like it. Its data may live in Postgres (see its models under Code).</div>}
       {r.tables.length > 0 && (
         <table className="ex-facts ex-tables">
@@ -273,7 +294,7 @@ const roleOf = (file: string) => { const d = file.split('/').slice(-2, -1)[0] ??
 const level = (v: number | null | undefined) => v == null ? '' : v > 0.9 ? 'bad' : v > 0.8 ? 'warn' : ''
 
 // One cluster: how full it is at a glance, each node's fullest disk as a bar, and the hardware by role.
-function ClusterCard({ c }: { c: any }) {
+function ClusterCard({ c, h }: { c: any; h: { bytes: number; tables: number; codeTables: number; reads: string[] } }) {
   const [all, setAll] = useState(false)
   // One row per node: its fullest disk.
   const byNode = new Map<string, { node: string; disk: string; used: number }>()
@@ -287,6 +308,7 @@ function ClusterCard({ c }: { c: any }) {
         <b title={c.ds ? `Seen via ${c.ds}` : undefined}>{c.name}</b>
         <span className="muted">{c.shards != null ? `${c.shards} shard${c.shards === 1 ? '' : 's'} · ${c.replicas} node${c.replicas === 1 ? '' : 's'}` : ''}</span>
         <span className="grow" />
+        <span className="muted tiny" title={`${h.tables} of this concept's tables are on this cluster; ${h.codeTables} of them are named in its code`}>{h.bytes ? `its tables: ${bytes(h.bytes)}` : h.tables ? `${h.tables} table${h.tables === 1 ? '' : 's'}` : h.reads.length ? `reads ${h.reads.slice(0, 2).join(', ')}` : ''}{h.tables && !h.codeTables ? ' · name match only' : ''}</span>
         {c.disk.nodes ? <a className={`ex-full ${level(c.disk.max)}`} href={c.disk.link} target="_blank" rel="noreferrer" title={`Fullest disk in the cluster\n${c.disk.source}\n${c.disk.query}`}>{pct(c.disk.max)} full</a> : null}
       </div>
       {c.disk.nodes ? (
