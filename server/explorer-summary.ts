@@ -38,7 +38,8 @@ async function own(repo: string, path: string): Promise<Own | null> {
   const depth = path.split('/').length
   const near = (re: RegExp) => files.filter(f => re.test(f) && f.split('/').length <= depth + 1)
   for (const f of near(/(^|\/)product\.ya?ml$/)) { const d = /^\s*description:\s*["']?(.+?)["']?\s*$/m.exec(read(join(repo, f)))?.[1]; if (d && d.length > 20) return { text: d, file: f } }
-  for (const f of [...near(/(^|\/)README\.md$/i), ...near(/(^|\/)(AGENTS|CLAUDE)\.md$/)]) { const p = firstParagraph(read(join(repo, f))); if (p.length > 30) return { text: p, file: f } }
+  // AGENTS.md / CLAUDE.md are instructions for agents, not descriptions; the AI summary reads them instead.
+  for (const f of near(/(^|\/)README\.md$/i)) { const p = firstParagraph(read(join(repo, f))); if (p.length > 30) return { text: p, file: f } }
   for (const f of near(/(^|\/)(__init__\.py|index\.tsx?|mod\.rs|lib\.rs|doc\.go)$/)) { const d = leadingDoc(read(join(repo, f))); if (d) return { text: d, file: f } }
   return null
 }
