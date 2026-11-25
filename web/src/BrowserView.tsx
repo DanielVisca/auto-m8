@@ -308,18 +308,36 @@ export function BrowserDock({ owner, approvals, mode, onMode }: { owner: string;
   const PKEY = 'perch.browserDock.pip'
   const [pip, setPipState] = useState<{ w: number; h: number | null; right: number; top: number }>(() => { try { return { w: 340, h: null, right: 18, top: 52, ...JSON.parse(localStorage.getItem(PKEY) ?? '{}') } } catch { return { w: 340, h: null, right: 18, top: 52 } } })
   const setPip = (p: typeof pip) => { setPipState(p); try { localStorage.setItem(PKEY, JSON.stringify(p)) } catch {} }
+  // The chat's size: the saved PiP is fitted inside it (smaller, nearer the corner) when the chat is
+  // narrower or shorter than when you placed it, instead of hanging off its edge.
+  const [chatBox, setChatBox] = useState<{ w: number; h: number } | null>(null)
+  useLayoutEffect(() => {
+    const chat = box.current?.closest('.chat') as HTMLElement | null
+    if (mode !== 'pip' || !chat) return
+    const f = () => setChatBox({ w: chat.clientWidth, h: chat.clientHeight })
+    const ro = new ResizeObserver(f); ro.observe(chat); f()
+    return () => ro.disconnect()
+  }, [mode])
+  const shown = (() => {
+    if (!chatBox) return pip
+    const w = Math.max(160, Math.min(pip.w, chatBox.w - 24))
+    const h = pip.h == null ? null : Math.max(100, Math.min(pip.h * (w / pip.w), chatBox.h - 140))
+    const right = Math.max(8, Math.min(pip.right, chatBox.w - w - 8))
+    const top = Math.max(8, Math.min(pip.top, chatBox.h - (h ?? w * 0.62) - 110))
+    return { w, h, right, top }
+  })()
   const pipDrag = (e: React.PointerEvent, kind: 'move' | 'size') => {
     if (kind === 'move' && (e.target as HTMLElement).closest('button')) return
     e.preventDefault()
     const chat = box.current?.closest('.chat') as HTMLElement | null
     const el = box.current
     if (!chat || !el) return
-    const cr = chat.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, ...pip, h: pip.h ?? el.offsetHeight }
+    const cr = chat.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, ...shown, h: shown.h ?? el.offsetHeight }
     let last = pip
     const move = (ev: PointerEvent) => {
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y
       last = kind === 'move'
-        ? { ...start, h: pip.h, right: Math.max(0, Math.min(cr.width - start.w, start.right - dx)), top: Math.max(0, Math.min(cr.height - 60, start.top + dy)) }
+        ? { ...start, h: shown.h, right: Math.max(0, Math.min(cr.width - start.w, start.right - dx)), top: Math.max(0, Math.min(cr.height - 60, start.top + dy)) }
         : { ...start, w: Math.max(200, Math.min(cr.width - 40, start.w - dx)), h: Math.max(120, Math.min(cr.height - start.top - 10, start.h + dy)) }
       setPipState(last)
     }
@@ -364,10 +382,10 @@ export function BrowserDock({ owner, approvals, mode, onMode }: { owner: string;
     addEventListener('pointermove', move); addEventListener('pointerup', up)
   }
   if (mode === 'pip') return (
-    <div ref={box} className={`browser-dock pip ${pip.h ? 'sized' : ''}`} style={{ width: pip.w, height: pip.h ?? undefined, right: pip.right, top: pip.top }}
+    <div ref={box} className={`browser-dock pip ${shown.h ? 'sized' : ''}`} style={{ width: shown.w, height: shown.h ?? undefined, right: shown.right, top: shown.top }}
       onPointerDown={e => { if ((e.target as HTMLElement).closest('.pip-head')) pipDrag(e, 'move') }}>
       <ApprovalBar approvals={approvals} />
-      <BrowserView owner={owner} compact mini mode={mode} onMode={onMode} cap={pip.h} fit={!!pip.h} />
+      <BrowserView owner={owner} compact mini mode={mode} onMode={onMode} cap={shown.h} fit={!!shown.h} />
       <div className="pip-resize" onPointerDown={e => { e.stopPropagation(); pipDrag(e, 'size') }} onDoubleClick={() => setPip({ ...pip, w: 340, h: null })} title="Drag to resize. Double-click for the default size." />
     </div>
   )
