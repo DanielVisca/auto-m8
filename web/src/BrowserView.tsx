@@ -48,11 +48,12 @@ function keyOf(e: React.KeyboardEvent): { type: 'key'; key: string } | { type: '
 export type DockMode = 'bottom' | 'side' | 'pip'
 // mode/onMode: the dock's layout buttons. fit: tell the agent's window to take this view's shape (side
 // panel). mini: picture in picture, a small live picture with its buttons on hover.
-export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit, mini }: { owner: string; compact?: boolean; onCollapse?: () => void; cap?: number | null; mode?: DockMode; onMode?: (m: DockMode) => void; fit?: boolean; mini?: boolean }) {
+export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit, mini, feedOn, onFeed }: { owner: string; compact?: boolean; onCollapse?: () => void; cap?: number | null; mode?: DockMode; onMode?: (m: DockMode) => void; fit?: boolean; mini?: boolean; feedOn?: boolean; onFeed?: (on: boolean) => void }) {
   const img = useRef<HTMLImageElement>(null)
   const root = useRef<HTMLDivElement>(null)
   const [chrome, setChrome] = useState(0) // header and approval rows above the page
   const chromeRef = useRef(0); chromeRef.current = chrome
+  const [feedH, setFeedH] = useState(0)
   const stage = useRef<HTMLDivElement>(null)
   const sock = useRef<WebSocket | null>(null)
   const meta = useRef<{ deviceWidth: number; deviceHeight: number }>({ deviceWidth: 0, deviceHeight: 0 })
@@ -61,6 +62,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
   const [hasFrame, setHasFrame] = useState(false)
   const [ratio, setRatio] = useState<number | null>(null) // the page's width/height, so the view fills its width without side bars
   const [err, setErr] = useState<string | null>(null)
+  const [feedItems, setFeedItems] = useState<FeedItem[]>([])
 
   // What sits above the page in the dock (the header, approval rows), so a cap leaves the page the rest.
   useLayoutEffect(() => {
@@ -89,6 +91,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
           }
           setHasFrame(true)
         } else if (m.t === 'state') setSt({ url: m.url, title: m.title, paused: !!m.paused, approvals: m.approvals ?? [] })
+        else if (m.t === 'feed') setFeedItems(old => (m.items.length > 1 ? m.items : [...old, ...m.items]).slice(-150))
         else if (m.t === 'error') setErr(m.error)
       }
       ws.onclose = e => {
@@ -107,30 +110,47 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
   // Side panel: the agent's window takes the panel's shape once a resize settles, so the page fills it.
   // Leaving the side panel puts the window back to its usual size.
   const sentRatio = useRef<number | null>(null)
+  const sentKey = useRef('')
+  const feedBox = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = root.current
     if (!fit || !el) {
-      // A dock outside the side panel wants the usual shape back, even if an earlier side panel (another
-      // window, before a reload) left it tall. The server skips this when it never reshaped the window.
-      if (sentRatio.current != null || mode) { sentRatio.current = null; post(`/api/browser/${enc(owner)}/fit`, { ratio: null }).catch(() => {}) }
+      // The strip below wants the usual shape back, even if an earlier side panel (another window, before
+      // a reload) left it tall; the server skips it when the window is already that size. PiP fits any
+      // shape, so it leaves the window alone.
+      if (sentRatio.current != null || mode === 'bottom') { sentRatio.current = null; post(`/api/browser/${enc(owner)}/fit`, { ratio: null }).catch(() => {}) }
       return
     }
     let t: any
     const check = () => {
       clearTimeout(t)
       t = setTimeout(() => {
-        const w = el.clientWidth, h = el.clientHeight - chromeRef.current
+        const w = el.clientWidth, h = el.clientHeight - chromeRef.current - (feedBox.current?.offsetHeight ?? 0)
         if (w < 100 || h < 100) return
-        const r = w / h, last = sentRatio.current
-        if (last != null && Math.abs(r - last) / last < 0.04) return
-        sentRatio.current = r
-        post(`/api/browser/${enc(owner)}/fit`, { ratio: r }).catch(() => {})
+        const r = w / h, last = sentRatio.current, key = `${r.toFixed(3)}:${w}`
+        if (last != null && Math.abs(r - last) / last < 0.04 && sentKey.current.split(':')[1] === String(w)) return
+        sentRatio.current = r; sentKey.current = key
+        post(`/api/browser/${enc(owner)}/fit`, { ratio: r, width: w }).catch(() => {})
       }, 600)
     }
     const ro = new ResizeObserver(check)
     ro.observe(el); check()
-    return () => { ro.disconnect(); clearTimeout(t) }
-  }, [fit, owner])
+    el.addEventListener('perch-refit', check)
+    return () => { ro.disconnect(); clearTimeout(t); el.removeEventListener('perch-refit', check) }
+  }, [fit, owner, feedOn])
+  // Something else (another view of this window) changed its shape: put the panel's shape back, at
+  // most every 10s so two views can't fight over it.
+  const reassertAt = useRef(0)
+  useEffect(() => {
+    const want = sentRatio.current
+    if (!fit || !ratio || want == null || Math.abs(ratio - want) / want < 0.06) return
+    const t = setTimeout(() => {
+      if (Date.now() - reassertAt.current < 10_000) return
+      reassertAt.current = Date.now(); sentRatio.current = null; sentKey.current = ''
+      root.current && root.current.dispatchEvent(new Event('perch-refit'))
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [ratio, fit])
   useEffect(() => () => { if (sentRatio.current != null) post(`/api/browser/${enc(owner)}/fit`, { ratio: null }).catch(() => {}) }, [owner])
 
   const send = (ev: any) => { const ws = sock.current; if (ws?.readyState === 1) ws.send(JSON.stringify({ t: 'input', ev })) }
@@ -196,6 +216,7 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
         <button className={ov.on ? 'primary' : ''} title={ov.on ? `PostHog data on (project ${ov.project ?? '?'}, ${ov.elements ?? 0} click patterns). Click to turn off.` : 'Draw PostHog usage, rage/dead clicks, errors and latency on this page'} onClick={() => overlay(!ov.on)}>📊 PostHog data</button>
         {ov.on && <button className={ov.mode === 'inspect' ? 'primary' : ''} title="Inspect: hover an element to see its numbers, click it for usage, errors, live latency, replays and Investigate (Alt+I in the page)" onClick={() => overlay(true, ov.mode === 'inspect' ? 'ambient' : 'inspect')}>Inspect</button>}
         <button className="open-chrome" title="Open this window in the real Agent Chrome. Its pages show a ← auto-m8 button that brings you back here." onClick={() => act(() => openInChrome(owner))}>Open in Chrome ↗</button>
+        {onFeed && <button className={`icon ${feedOn ? 'on' : ''}`} title={feedOn ? 'Hide the live feed of what the agent does here' : 'Show a live feed of what the agent does here'} onClick={() => onFeed(!feedOn)}>≡</button>}
         {onMode && mode !== 'side' && <button className="icon" title="Dock at the side: the page takes the panel's shape" onClick={() => onMode('side')}>◨</button>}
         {onMode && mode !== 'bottom' && <button className="icon" title="Dock below the chat" onClick={() => onMode('bottom')}>⬓</button>}
         {onMode && <button className="icon" title="Picture in picture: a small live view in the corner" onClick={() => onMode('pip')}>⧉</button>}
@@ -204,13 +225,47 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
       </div>}
       <ApprovalBar approvals={st.approvals} />
       {err && <div className="muted small pad-x bad">{err}</div>}
-      <div ref={stage} className={`browser-stage ${taken ? 'taken' : ''} ${ratio ? 'fit' : ''}`} tabIndex={0} style={ratio ? { aspectRatio: String(ratio), maxHeight: cap ? Math.max(80, cap - chrome) : undefined } : undefined}
+      <div ref={stage} className={`browser-stage ${taken ? 'taken' : ''} ${ratio ? 'fit' : ''}`} tabIndex={0} style={ratio ? { aspectRatio: String(ratio), maxHeight: cap ? Math.max(80, cap - chrome - (feedOn ? feedH : 0)) : undefined } : undefined}
         onClick={e => { if (mini && !taken) { onMode?.('side'); return } if (!taken) return; const p = toPage(e.clientX, e.clientY); if (p) { stage.current?.focus(); send({ type: 'click', ...p }) } }}
         onKeyDown={e => { if (!taken) return; const k = keyOf(e); if (!k) return; e.preventDefault(); e.stopPropagation(); send(k) }}
         onPaste={e => { if (!taken) return; const text = e.clipboardData.getData('text'); if (text) { e.preventDefault(); send({ type: 'text', text }) } }}>
         <img ref={img} alt="" draggable={false} style={{ visibility: hasFrame ? 'visible' : 'hidden' }} />
         {!hasFrame && <div className="browser-empty muted small">{conn === 'none' ? 'No browser window for this chat right now.' : 'Waiting for the first picture…'}</div>}
         {!taken && hasFrame && !mini && <div className="browser-hint" onClick={() => setPaused(true)}>Take over to click and type</div>}
+      </div>
+      {feedOn && <BrowserFeed items={feedItems} boxRef={feedBox} onHeight={setFeedH} />}
+    </div>
+  )
+}
+
+export type FeedItem = { at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number }
+const FEED_ICON: Record<FeedItem['kind'], string> = { tool: '›', step: '•', nav: '→', net: '⇅', note: '!' }
+const fmtMs = (ms?: number) => ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+const ago = (at: number, now: number) => { const s = Math.max(0, Math.round((now - at) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h` }
+// The live feed: newest at the bottom, like stream comments; sticks to the bottom unless you scroll up.
+function BrowserFeed({ items, boxRef, onHeight }: { items: FeedItem[]; boxRef: React.RefObject<HTMLDivElement | null>; onHeight: (h: number) => void }) {
+  const list = useRef<HTMLDivElement>(null)
+  const stick = useRef(true)
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(t) }, [])
+  useLayoutEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight }, [items.length])
+  useLayoutEffect(() => {
+    const el = boxRef.current; if (!el) return
+    const ro = new ResizeObserver(() => onHeight(el.offsetHeight)); ro.observe(el); onHeight(el.offsetHeight)
+    return () => { ro.disconnect(); onHeight(0) }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div ref={boxRef} className="browser-feed">
+      <div ref={list} className="browser-feed-list" onScroll={e => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24 }}>
+        {!items.length && <div className="muted small browser-feed-empty">What the agent does in this window shows up here: pages it opens, clicks, what it reads, and requests that fail or crawl.</div>}
+        {items.map((it, i) => (
+          <div key={`${it.at}-${i}`} className={`browser-feed-row ${it.kind} ${it.level ?? ''}`} title={new Date(it.at).toLocaleTimeString()}>
+            <span className="ic">{FEED_ICON[it.kind]}</span>
+            <span className="tx">{it.text}</span>
+            {it.ms != null && it.ms >= 300 && <span className="ms">{fmtMs(it.ms)}</span>}
+            <span className="ago">{ago(it.at, now)}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -245,6 +300,33 @@ export function BrowserDock({ owner, approvals, mode, onMode }: { owner: string;
   const [share, setShareState] = useState<number>(() => { try { return Number(localStorage.getItem(WKEY)) || 0.5 } catch { return 0.5 } })
   const setShare = (v: number) => { setShareState(v); try { localStorage.setItem(WKEY, v.toFixed(3)) } catch {} }
   const [panelH, setPanelH] = useState<number | null>(null)
+  const FKEY = 'perch.browserDock.feed'
+  const [feedOn, setFeedOnState] = useState(() => { try { return localStorage.getItem(FKEY) !== '0' } catch { return true } })
+  const setFeedOn = (v: boolean) => { setFeedOnState(v); try { localStorage.setItem(FKEY, v ? '1' : '0') } catch {} }
+  // Picture in picture: drag its header to move it, its corner to resize it (both remembered). Once
+  // resized, the agent's window takes its shape too, like the side panel, so the picture has no bars.
+  const PKEY = 'perch.browserDock.pip'
+  const [pip, setPipState] = useState<{ w: number; h: number | null; right: number; top: number }>(() => { try { return { w: 340, h: null, right: 18, top: 52, ...JSON.parse(localStorage.getItem(PKEY) ?? '{}') } } catch { return { w: 340, h: null, right: 18, top: 52 } } })
+  const setPip = (p: typeof pip) => { setPipState(p); try { localStorage.setItem(PKEY, JSON.stringify(p)) } catch {} }
+  const pipDrag = (e: React.PointerEvent, kind: 'move' | 'size') => {
+    if (kind === 'move' && (e.target as HTMLElement).closest('button')) return
+    e.preventDefault()
+    const chat = box.current?.closest('.chat') as HTMLElement | null
+    const el = box.current
+    if (!chat || !el) return
+    const cr = chat.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, ...pip, h: pip.h ?? el.offsetHeight }
+    let last = pip
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - start.x, dy = ev.clientY - start.y
+      last = kind === 'move'
+        ? { ...start, h: pip.h, right: Math.max(0, Math.min(cr.width - start.w, start.right - dx)), top: Math.max(0, Math.min(cr.height - 60, start.top + dy)) }
+        : { ...start, w: Math.max(200, Math.min(cr.width - 40, start.w - dx)), h: Math.max(120, Math.min(cr.height - start.top - 10, start.h + dy)) }
+      setPipState(last)
+    }
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); document.body.style.cursor = ''; setPip(last) }
+    document.body.style.cursor = kind === 'move' ? 'grabbing' : 'nesw-resize'
+    addEventListener('pointermove', move); addEventListener('pointerup', up)
+  }
   useLayoutEffect(() => {
     const el = box.current
     if (mode !== 'side' || !el) return
@@ -282,16 +364,18 @@ export function BrowserDock({ owner, approvals, mode, onMode }: { owner: string;
     addEventListener('pointermove', move); addEventListener('pointerup', up)
   }
   if (mode === 'pip') return (
-    <div ref={box} className="browser-dock pip">
+    <div ref={box} className={`browser-dock pip ${pip.h ? 'sized' : ''}`} style={{ width: pip.w, height: pip.h ?? undefined, right: pip.right, top: pip.top }}
+      onPointerDown={e => { if ((e.target as HTMLElement).closest('.pip-head')) pipDrag(e, 'move') }}>
       <ApprovalBar approvals={approvals} />
-      <BrowserView owner={owner} compact mini mode={mode} onMode={onMode} />
+      <BrowserView owner={owner} compact mini mode={mode} onMode={onMode} cap={pip.h} fit={!!pip.h} />
+      <div className="pip-resize" onPointerDown={e => { e.stopPropagation(); pipDrag(e, 'size') }} onDoubleClick={() => setPip({ ...pip, w: 340, h: null })} title="Drag to resize. Double-click for the default size." />
     </div>
   )
   if (mode === 'side') return (
     <div ref={box} className="browser-dock side">
       <div className="browser-dock-grip side" onPointerDown={startSideDrag} onDoubleClick={() => setShare(0.5)}
         title="Drag to resize the side panel. Double-click for half and half." />
-      <BrowserView owner={owner} compact cap={panelH} fit mode={mode} onMode={onMode} />
+      <BrowserView owner={owner} compact cap={panelH} fit mode={mode} onMode={onMode} feedOn={feedOn} onFeed={setFeedOn} />
     </div>
   )
   if (collapsed) return (

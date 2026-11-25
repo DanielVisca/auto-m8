@@ -768,7 +768,7 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
     ro.observe(el); setChatW(el.clientWidth)
     return () => ro.disconnect()
   }, [browserOwned])
-  const wide = chatW >= SIDE_MIN_CHAT
+  const wide = chatW === 0 || chatW >= SIDE_MIN_CHAT // not measured yet: don't flash the strip (it resets a fitted window)
   const dockMode = (dockChoice ?? (wide ? 'side' : 'bottom')) === 'side' && !wide ? 'bottom' : (dockChoice ?? (wide ? 'side' : 'bottom'))
   useEffect(() => {
     const el = root.current

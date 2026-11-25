@@ -21,7 +21,7 @@ export function browserRoutes(route: Route, body: Body) {
   route('POST', '/api/browser/start', async () => { await B.ensureBrowser(); return B.browserStatus() })
   route('POST', '/api/browser/approvals/:id', async (m, req) => { const b = await body(req); return B.answerApproval(m[1], !!b.ok, !!b.always) })
   route('POST', '/api/browser/:owner/pause', async (m, req) => B.setPaused(decodeURIComponent(m[1]), !!(await body(req)).paused))
-  route('POST', '/api/browser/:owner/fit', async (m, req) => { const b = await body(req); return B.fitViewport(decodeURIComponent(m[1]), typeof b.ratio === 'number' && isFinite(b.ratio) ? b.ratio : null) })
+  route('POST', '/api/browser/:owner/fit', async (m, req) => { const b = await body(req); return B.fitViewport(decodeURIComponent(m[1]), typeof b.ratio === 'number' && isFinite(b.ratio) ? b.ratio : null, typeof b.width === 'number' && isFinite(b.width) ? b.width : undefined) })
   route('POST', '/api/browser/:owner/show',async m => { await B.showWindow(decodeURIComponent(m[1])); return { ok: true } })
   route('POST', '/api/browser/:owner/open', async (m, req) => { const b = await body(req); const s = (await B.session(decodeURIComponent(m[1])))!; if (b.url) await B.navigate(s, String(b.url)); return { ok: true, url: s.url } })
   route('DELETE', '/api/browser/:owner', async m => { await B.closeSession(decodeURIComponent(m[1])); return { ok: true } })
@@ -77,6 +77,9 @@ export async function browserSocket(owner: string, ws: WebSocket) {
     stop = await B.watchFrames(owner, (d, m) => { if (ws.readyState === 1 && ws.bufferedAmount < 2_000_000) ws.send(JSON.stringify({ t: 'frame', d, m })) })
   } catch (e: any) { ws.send(JSON.stringify({ t: 'error', error: e.message })); ws.close(4404, 'no browser window'); return }
   state()
+  ws.send(JSON.stringify({ t: 'feed', items: B.feedFor(owner) }))
+  const onFeed = (o: string, item: B.FeedItem) => { if (o === owner && ws.readyState === 1) ws.send(JSON.stringify({ t: 'feed', items: [item] })) }
+  B.feedListeners.add(onFeed)
   const onChange = () => { if (ws.readyState === 1) state() }
   B.onBrowserChange.add(onChange)
   ws.on('message', async raw => {
@@ -86,5 +89,5 @@ export async function browserSocket(owner: string, ws: WebSocket) {
       else if (m.t === 'pause') B.setPaused(owner, !!m.paused)
     } catch (e: any) { if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'error', error: e.message })) }
   })
-  ws.on('close', () => { B.onBrowserChange.delete(onChange); stop?.() })
+  ws.on('close', () => { B.onBrowserChange.delete(onChange); B.feedListeners.delete(onFeed); stop?.() })
 }

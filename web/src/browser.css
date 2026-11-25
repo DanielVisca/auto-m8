@@ -33,3 +33,25 @@
 .browserview.mini .pip-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; padding: 2px 6px; gap: 2px; background: color-mix(in srgb, var(--bg) 88%, transparent); opacity: 0; transition: opacity .15s; }
 .browserview.mini:hover .pip-head { opacity: 1; }
 .browserview.mini .pip-head button.icon { padding: 0 5px; font-size: 13px; }
+/* Live feed under the side panel's page: stream-comment style, newest at the bottom. */
+.browser-feed { flex: none; height: clamp(140px, 26%, 300px); border-top: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+.browser-feed-list { flex: 1; overflow-y: auto; padding: 6px 10px 8px; font-size: 12px; line-height: 1.45; }
+.browser-feed-empty { padding: 6px 2px; }
+.browser-feed-row { display: flex; gap: 7px; align-items: baseline; padding: 1px 0; animation: feedIn .25s ease-out; }
+.browser-feed-row .ic { width: 12px; flex: none; text-align: center; color: var(--muted); }
+.browser-feed-row .tx { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.browser-feed-row .ms, .browser-feed-row .ago { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.browser-feed-row.nav .tx { color: var(--accent); }
+.browser-feed-row.net .tx, .browser-feed-row.note .tx { color: var(--muted); }
+.browser-feed-row.warn .tx, .browser-feed-row.warn .ic { color: #d9a441; }
+.browser-feed-row.bad .tx, .browser-feed-row.bad .ic { color: #e5655b; }
+@keyframes feedIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* With the feed on, the feed keeps a steady height and the page is fitted to the space above it. */
+.browser-dock.side .browserview:has(.browser-feed) .browser-stage.fit { flex: none; }
+/* PiP: drag the header to move, the bottom-left corner to resize. */
+.chat .browser-dock.pip.sized .browserview { height: 100%; }
+.chat .browser-dock.pip.sized .browser-stage.fit { max-height: none; flex: 1; aspect-ratio: auto !important; }
+.browserview.mini .pip-head { cursor: grab; }
+.pip-resize { position: absolute; left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; z-index: 3; }
+.pip-resize::after { content: ''; position: absolute; left: 3px; bottom: 3px; width: 7px; height: 7px; border-left: 2px solid var(--muted); border-bottom: 2px solid var(--muted); opacity: 0; transition: opacity .15s; }
+.browser-dock.pip:hover .pip-resize::after { opacity: .8; }

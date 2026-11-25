@@ -60,6 +60,21 @@ const emit = (owner: string, event: string, text: string) => browserEvents.forEa
 const changed = () => onBrowserChange.forEach(f => { try { f() } catch {} })
 const hook = (e: Parameters<typeof browserHooks extends Set<infer F> ? F : never>[0]) => browserHooks.forEach(f => { try { (f as any)(e) } catch (err) { console.error('browserHooks', err) } })
 
+// The live feed under the side panel's page: what the agent does in this window and what the page
+// does back (failed or slow requests, dialogs, takeovers), newest last. In memory only, per window.
+export type FeedItem = { at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number }
+const feeds = new Map<string, FeedItem[]>()
+export const feedListeners = new Set<(owner: string, item: FeedItem) => void>()
+export function feed(owner: string, item: Omit<FeedItem, 'at'> & { at?: number }) {
+  const it: FeedItem = { at: Date.now(), ...item, text: item.text.length > 240 ? item.text.slice(0, 239) + '…' : item.text }
+  const list = feeds.get(owner) ?? []
+  list.push(it); if (list.length > 150) list.splice(0, list.length - 150)
+  feeds.set(owner, list)
+  feedListeners.forEach(f => { try { f(owner, it) } catch {} })
+}
+export const feedFor = (owner: string) => feeds.get(owner) ?? []
+const shortUrl = (u: string) => { try { const x = new URL(u); return (x.host + x.pathname).replace(/\/$/, '') + (x.search ? '?…' : '') } catch { return u } }
+
 export const sessions = new Map<string, Session>()
 export const approvals = new Map<string, Approval>()
 // Whether the conversation owning a window is mid-turn (set by main.ts from chat.ts; tests leave it off).
@@ -305,6 +320,7 @@ function wire(c: CDP) {
     const s = bySid(sid); if (!s || p.frame.parentId) return
     s.mainFrame = p.frame.id
     if (p.frame.loaderId !== s.loaderId) { s.loaderId = p.frame.loaderId; s.ctx = null }
+    if (p.frame.url !== s.url && !/^about:/.test(p.frame.url)) feed(s.owner, { kind: 'nav', text: shortUrl(p.frame.url) })
     s.url = p.frame.url
     hook({ type: 'navigate', session: s })
     if (s.shown) setTimeout(() => { pill(s) }, 400)
@@ -318,6 +334,7 @@ function wire(c: CDP) {
     const accept = p.type === 'alert' || p.type === 'beforeunload'
     try { await c.send('Page.handleJavaScriptDialog', { accept }, sid) } catch {}
     s.log.push({ do: 'wait', text: `dialog ${p.type}: ${p.message}`, urlAfter: s.url, took: 0, at: Date.now() })
+    feed(s.owner, { kind: 'note', level: 'warn', text: `The page showed a ${p.type} dialog (${accept ? 'accepted' : 'dismissed'}): ${p.message}` })
   })
   c.on('Network.requestWillBeSent', (p, sid) => {
     const s = bySid(sid); if (!s) return
@@ -343,6 +360,12 @@ function wire(c: CDP) {
     // How long each request took (and why it failed): the product overlay's live latency.
     const n = s.net.findLast(n => n.id === p.requestId)
     if (n && n.ms == null) { n.ms = Date.now() - n.at; if (p.errorText) n.failed = p.errorText }
+    // Worth a line in the feed: the page's own requests that failed, errored or crawled.
+    if (n && /^(Document|XHR|Fetch)$/.test(n.type) && !/^(chrome-extension|data|blob):/.test(n.url)) {
+      if (n.failed && !/ERR_ABORTED|ERR_BLOCKED/.test(n.failed)) feed(s.owner, { kind: 'net', level: 'bad', text: `${n.method} ${shortUrl(n.url)} failed: ${n.failed.replace(/^net::/, '')}`, ms: n.ms })
+      else if ((n.status ?? 0) >= 400) feed(s.owner, { kind: 'net', level: (n.status ?? 0) >= 500 ? 'bad' : 'warn', text: `${n.status} ${n.method} ${shortUrl(n.url)}`, ms: n.ms })
+      else if ((n.ms ?? 0) > 3000) feed(s.owner, { kind: 'net', level: 'warn', text: `slow: ${n.method} ${shortUrl(n.url)}`, ms: n.ms })
+    }
   }
   c.on('Network.loadingFinished', done)
   c.on('Network.loadingFailed', done)
@@ -866,6 +889,7 @@ export async function userInput(owner: string, ev: { type: 'click' | 'move' | 'd
 export function setPaused(owner: string, paused: boolean) {
   const s = sessions.get(owner)
   if (!s) return { error: 'no browser window' }
+  if (s.paused !== paused) feed(owner, { kind: 'note', text: paused ? 'You took over: the agent waits.' : 'Handed back to the agent.' })
   s.paused = paused
   run('update browser_sessions set paused = ? where owner = ?', paused ? 1 : 0, owner)
   if (!paused) s.shown = false
@@ -928,11 +952,11 @@ export async function showWindow(owner: string) {
 }
 
 // The live view's shape. Docked at the side, the panel is tall, so the page keeps a desktop width
-// (WIDTH CSS px) and takes the panel's height: no empty bars, more of the page in view. ratio null
+// (from the panel's width) and takes the panel's height: no empty bars, more of the page in view. ratio null
 // puts the window back to its launch size (--window-size above). Called after a drag settles, never
 // mid-drag; the page reflows once, which the agent's next snapshot picks up.
 export const FIT_WIDTH = 1280
-export async function fitViewport(owner: string, ratio: number | null) {
+export async function fitViewport(owner: string, ratio: number | null, panelWidth?: number) {
   const s = await session(owner, false)
   if (!s) throw new Error('no browser window for this conversation')
   const c = await ensureBrowser()
@@ -947,10 +971,13 @@ export async function fitViewport(owner: string, ratio: number | null) {
   const r = Math.max(0.4, Math.min(3, ratio))
   // The window's own toolbars sit outside the page: size the window so the page itself gets the shape.
   const [dw, dh] = await evalIn(s, '[outerWidth - innerWidth, outerHeight - innerHeight]', { page: true, timeoutMs: 5000 }).catch(() => [0, 87]) as [number, number]
-  const height = Math.round(Math.max(500, Math.min(2400, FIT_WIDTH / r)))
+  // The page's width follows the panel's: about 1.7 CSS px per screen px keeps text readable while
+  // sites still lay out as desktop (1024 to 1600). The height then fills the panel.
+  const width = panelWidth ? Math.round(Math.max(1024, Math.min(1600, panelWidth * 1.7))) : FIT_WIDTH
+  const height = Math.round(Math.max(500, Math.min(3200, width / r)))
   await c.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => {})
-  await c.send('Browser.setWindowBounds', { windowId, bounds: { width: FIT_WIDTH + dw, height: height + dh } })
-  return { ok: true, width: FIT_WIDTH, height }
+  await c.send('Browser.setWindowBounds', { windowId, bounds: { width: width + dw, height: height + dh } })
+  return { ok: true, width, height }
 }
 
 // Someone clicked "← perch" in the Agent Chrome: perch comes forward on that chat.

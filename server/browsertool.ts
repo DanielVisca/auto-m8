@@ -38,7 +38,51 @@ async function view(s: B.Session, mode: string, opts: { find?: string; max?: num
   return out
 }
 
+// Every call also goes in the window's live feed (B.feed): what the agent asked for, how long it took,
+// and whether it failed. act lists its steps one per line.
+const QUIET = new Set(['status', 'paths', 'remember'])
 export async function browserTool(owner: string, a: any): Promise<ToolResult> {
+  const action = String(a?.action ?? '')
+  if (!owner || QUIET.has(action) || !B.sessions.has(owner) && action !== 'open') return browserToolRun(owner, a)
+  const t0 = Date.now()
+  const what = describeCall(a)
+  try {
+    const r = await browserToolRun(owner, a)
+    const ms = Date.now() - t0
+    if (action === 'act') {
+      for (const line of r.text.split('\n')) {
+        const m = /^\d+\. (.*)$/.exec(line)
+        if (m) B.feed(owner, { kind: 'step', text: m[1], level: /^FAILED/.test(m[1]) ? 'bad' : undefined })
+        else if (/^\(stopped/.test(line)) B.feed(owner, { kind: 'step', level: 'warn', text: line.replace(/[()]/g, '') })
+      }
+    } else B.feed(owner, { kind: 'tool', text: what, ms, level: /^(No browser window|Error|FAILED)/.test(r.text) ? 'bad' : undefined })
+    return r
+  } catch (e: any) {
+    B.feed(owner, { kind: 'tool', level: 'bad', text: `${what}: ${String(e?.message ?? e).split('\n')[0]}`, ms: Date.now() - t0 })
+    throw e
+  }
+}
+function describeCall(a: any): string {
+  const act = String(a.action ?? '')
+  const host = (u: string) => { try { const x = new URL(u); return x.host + x.pathname.replace(/\/$/, '') } catch { return u } }
+  switch (act) {
+    case 'open': return `${a.goal ? `${a.goal}: ` : ''}open ${host(String(a.url ?? ''))}${a.mode && a.mode !== 'interactive' ? ` (${a.mode})` : ''}`
+    case 'snapshot': return `look at the page${a.find ? ` for "${a.find}"` : ''}`
+    case 'screenshot': return 'take a screenshot'
+    case 'read': return a.what === 'network' ? `read network calls${a.filter ? ` (${a.filter})` : ''}` : a.what === 'response' ? `read response ${a.filter ?? ''}` : 'read the page text'
+    case 'fetch': return `fetch ${host(String(a.url ?? ''))}`
+    case 'eval': return `run script: ${String(a.expression ?? '').replace(/\s+/g, ' ').slice(0, 80)}`
+    case 'wait': return a.for === 'approval' ? 'wait for your approval' : a.for === 'resume' ? 'wait for you to hand back' : `wait for "${a.text ?? ''}"`
+    case 'overlay': return `PostHog overlay ${a.value ?? ''}`
+    case 'begin': return `start: ${a.goal ?? ''}`
+    case 'finish': return a.ok ? 'done' : 'gave up'
+    case 'replay': return 'replay a saved path'
+    case 'show': return 'open in Chrome'
+    case 'close': return 'close the window'
+    default: return act
+  }
+}
+async function browserToolRun(owner: string, a: any): Promise<ToolResult> {
   if (!owner) return { text: 'Give conversation_id (yours).' }
   const action = String(a.action ?? '')
   const mode = String(a.mode ?? 'interactive')
