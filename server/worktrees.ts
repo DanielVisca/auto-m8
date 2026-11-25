@@ -37,8 +37,28 @@ export type Kind = 'pr' | 'helper' | 'autoresearch' | 'selffix' | 'other'
 export type Worktree = {
   path: string; name: string; repo: string | null; kind: Kind; branch: string | null; head: string | null
   pr: string | null; prState: string | null; dirty: number | null; unique: number | null
+  noise?: string | null // uncommitted state that isn't work (generated agent config, a half-finished checkout)
   lastUsed: number; running: string[]; conversations: string[]
   keep: string | null // why it stays; null = the sweep may remove it
+}
+
+// Uncommitted state that is not anyone's work, so it must not pin a checkout forever (it pinned
+// ~190 of 208 on 2026-11-24, filling the disk):
+// - agent tool config the repo's own tooling writes into every checkout (.codex/, .agents/);
+// - a checkout that never finished or was half-emptied: thousands of tracked files missing from
+//   disk and nothing else changed. Every one of those files is still in HEAD.
+// Everything else counts as work and keeps the checkout (or is stashed when removal is forced).
+const GENERATED = /^"?(\.codex|\.agents)(\/|"?$)/
+const BROKEN_CHECKOUT_MIN = 1000
+export function classifyStatus(porcelain: string): { work: number; noise: string | null } {
+  const lines = porcelain.split('\n').filter(Boolean)
+  const paths = lines.map(l => ({ xy: l.slice(0, 2), path: l.slice(3).split(' -> ').pop()! }))
+  const generated = paths.filter(p => GENERATED.test(p.path)).length
+  const rest = paths.filter(p => !GENERATED.test(p.path))
+  const deletions = rest.filter(p => p.xy === ' D' || p.xy === 'D ' || p.xy === 'DD').length
+  const broken = rest.length >= BROKEN_CHECKOUT_MIN && deletions === rest.length
+  const notes = [generated ? `${generated} generated agent config file${generated === 1 ? '' : 's'}` : '', broken ? `half-finished checkout (${deletions} tracked files missing, all still in HEAD)` : ''].filter(Boolean)
+  return { work: broken ? 0 : rest.length, noise: notes.join('; ') || null }
 }
 
 const roots = () => [...new Set(localRepos().map(r => join(dirname(r.path), DIR_NAME)))].filter(existsSync)
@@ -75,7 +95,7 @@ const lowGit = (cwd: string, args: string[], timeout = 120_000) =>
 // checkouts, staging and most git commands rewrite it), for up to REUSE_FOR. Unstaged edits don't
 // touch the index, so the count can lag; that only affects display: remove() inspects fresh.
 const REUSE_FOR = 6 * H
-const memo = new Map<string, { touched: number; at: number; branch: string | null; head: string | null; dirty: number; unique: number }>()
+const memo = new Map<string, { touched: number; at: number; branch: string | null; head: string | null; dirty: number; noise: string | null; unique: number }>()
 
 export async function inspect(path: string, opts: { reuse?: boolean } = {}): Promise<Worktree> {
   const name = basename(path)
@@ -90,21 +110,23 @@ export async function inspect(path: string, opts: { reuse?: boolean } = {}): Pro
   if (!repo) return { ...base, keep: 'not linked to a git repo any more (orphan folder); check it by hand' }
   const m = memo.get(path)
   if (opts.reuse && m && m.touched === touched && Date.now() - m.at < REUSE_FOR) {
-    Object.assign(base, { branch: m.branch, head: m.head, dirty: m.dirty, unique: m.unique, kind: kindOf(name, m.branch) })
+    Object.assign(base, { branch: m.branch, head: m.head, dirty: m.dirty, noise: m.noise, unique: m.unique, kind: kindOf(name, m.branch) })
   } else try {
     const g = opts.reuse ? lowGit : git
     const [branch, head] = await Promise.all([g(path, ['rev-parse', '--abbrev-ref', 'HEAD']), g(path, ['rev-parse', '--short', 'HEAD'])])
     base.branch = branch === 'HEAD' ? null : branch
     base.head = head
     base.kind = kindOf(name, base.branch)
-    base.dirty = (await g(path, ['status', '--porcelain'], 90_000)).split('\n').filter(Boolean).length
+    const status = classifyStatus(await g(path, ['status', '--porcelain'], 90_000))
+    base.dirty = status.work
+    base.noise = status.noise
     // Commits only this worktree has: not on any remote, PR ref or other local branch.
     const not = ['--not', ...(base.branch ? [`--exclude=${base.branch}`] : []), '--branches', '--remotes', '--glob=refs/perch/*']
     base.unique = Number(await g(path, ['rev-list', '--count', 'HEAD', ...not]))
     // Key on the index mtime after status, which may have refreshed it.
     let after = touched
     try { after = statSync(join(gitdir ?? path, 'index')).mtimeMs } catch {}
-    memo.set(path, { touched: after, at: Date.now(), branch: base.branch, head: base.head, dirty: base.dirty, unique: base.unique })
+    memo.set(path, { touched: after, at: Date.now(), branch: base.branch, head: base.head, dirty: base.dirty, noise: base.noise ?? null, unique: base.unique })
   } catch {}
   if (base.kind === 'pr') {
     const n = Number(name.match(/-pr(\d+)$/)![1])
@@ -187,6 +209,7 @@ export async function remove(path: string, opts: { force?: boolean; onlyIfIdle?:
   await git(w.repo, ['worktree', 'remove', '--force', path], 300_000)
   await git(w.repo, ['worktree', 'prune']).catch(() => {})
   if (cache) cache.list = cache.list.filter(x => x.path !== path)
+  if (w.noise && !w.dirty) notes.push(`dropped ${w.noise}`)
   if (w.branch) notes.push(`branch ${w.branch} kept`)
   return { ok: true, note: notes.join('; ') || 'removed' }
 }
@@ -251,6 +274,6 @@ export function describe(list: Worktree[], limit = 60) {
   const ago = (t: number) => { const h = (Date.now() - t) / H; return h < 1 ? 'now' : h < 48 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago` }
   const go = list.filter(w => !w.keep).length
   const head = `${list.length} auto-m8 worktrees, ${go} removable now (the hourly sweep takes them), ${list.length - go} kept.`
-  const rows = list.slice(0, limit).map(w => `- ${w.path} | ${w.kind}${w.pr ? ` ${w.pr} (${w.prState ?? '?'})` : ''} | ${w.branch ?? `detached ${w.head ?? '?'}`} | dirty ${w.dirty ?? '?'}, only-here commits ${w.unique ?? '?'} | used ${ago(w.lastUsed)}${w.running.length ? ` | RUNNING ${w.running.join(',')}` : ''} | ${w.keep ? `keep: ${w.keep}` : 'removable'}`)
+  const rows = list.slice(0, limit).map(w => `- ${w.path} | ${w.kind}${w.pr ? ` ${w.pr} (${w.prState ?? '?'})` : ''} | ${w.branch ?? `detached ${w.head ?? '?'}`} | dirty ${w.dirty ?? '?'}${w.noise ? ` (ignored: ${w.noise})` : ''}, only-here commits ${w.unique ?? '?'} | used ${ago(w.lastUsed)}${w.running.length ? ` | RUNNING ${w.running.join(',')}` : ''} | ${w.keep ? `keep: ${w.keep}` : 'removable'}`)
   return [head, ...rows, list.length > limit ? `…and ${list.length - limit} more` : ''].filter(Boolean).join('\n')
 }

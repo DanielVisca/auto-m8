@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import './delegate.ts'
 import './optimize.ts'
 import './shepherd.ts'
-import { createHelper, inspect, remove } from './worktrees.ts'
+import { classifyStatus, createHelper, inspect, remove } from './worktrees.ts'
 
 const sh = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'user.email=t@t', '-c', 'user.name=t', '-C', cwd, ...a], { encoding: 'utf8' }).trim()
 function repo() {
@@ -55,4 +55,25 @@ test('detached commits found nowhere else get a rescue branch', async () => {
 
 test('only perch worktrees can be removed', async () => {
   assert.equal((await remove(repo())).ok, false)
+})
+
+test('generated agent config and half-finished checkouts are not work', () => {
+  assert.deepEqual(classifyStatus(' M .codex/config.toml\n?? .codex/agents/\n?? .agents/skills/x/\n'), { work: 0, noise: '3 generated agent config files' })
+  const missing = Array.from({ length: 1200 }, (_, i) => ` D frontend/f${i}.ts`).join('\n')
+  assert.equal(classifyStatus(missing).work, 0)
+  // A few deletions, or deletions next to an edit, are someone's work.
+  assert.equal(classifyStatus(' D a.ts\n D b.ts').work, 2)
+  assert.equal(classifyStatus(missing + '\n M real.ts').work, 1201)
+  assert.equal(classifyStatus(' M .codex/config.toml\n M src/app.ts').work, 1)
+})
+
+test('a checkout with only generated agent config is removed without a stash', async () => {
+  const dir = repo()
+  const w = await createHelper(dir, 'c0dec0de-0000-0000-0000-000000000000')
+  execFileSync('mkdir', ['-p', join(w.dir, '.codex', 'agents')]); writeFileSync(join(w.dir, '.codex', 'agents', 'r.toml'), 'x')
+  const info = await inspect(w.dir)
+  assert.equal(info.dirty, 0); assert.match(info.noise ?? "", /generated/)
+  const r = await remove(w.dir)
+  assert.ok(r.ok, r.note); assert.match(r.note, /dropped 1 generated agent config file/)
+  assert.equal(sh(dir, 'stash', 'list'), '')
 })
