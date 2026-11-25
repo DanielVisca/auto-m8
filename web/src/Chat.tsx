@@ -484,7 +484,7 @@ const Focus = createContext<{ index: number | null; tool?: string; n: number }>(
 let pendingFocus: { convId: string; at: FocusAt; t: number } | null = null
 export function focusInChat(convId: string, at: FocusAt) {
   pendingFocus = { convId, at, t: Date.now() }
-  dispatchEvent(new CustomEvent('perch-focus', { detail: pendingFocus }))
+  dispatchEvent(new CustomEvent('perch-chat-jump', { detail: pendingFocus }))
 }
 const indexOf = (items: Item[], at: FocusAt) => {
   if (at.tool) { const i = items.findIndex(it => it.kind === 'assistant' && it.blocks.some(b => b.type === 'tool' && b.id === at.tool)); if (i >= 0) return i }
@@ -515,8 +515,8 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
       setFocus(x => ({ index: i, tool: f.at.tool, n: x.n + 1 }))
     }
     take()
-    addEventListener('perch-focus', take)
-    return () => removeEventListener('perch-focus', take)
+    addEventListener('perch-chat-jump', take)
+    return () => removeEventListener('perch-chat-jump', take)
   }, [convId, has]) // eslint-disable-line
   useEffect(() => {
     if (focus.index == null) return
