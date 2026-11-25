@@ -459,15 +459,18 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
       </>
     )
   }
-  const specificCount = (l: any[]) => l.filter(e => !e.hub).length
+  // Count modules, not links: a module with both a foreign key and an import is one module.
+  const other = (e: any) => e.from === d.concept.id ? e.to : e.from
+  const specificCount = (l: any[]) => new Set(l.filter(e => !e.hub).map(other)).size
+  const allCount = (l: any[]) => new Set(l.map(other)).size
   return (
     <div className="card explore-node">
       <div className="ex-title"><b title={d.concept.path}>{d.concept.name}</b>{d.tree && <a className="small muted" href={d.tree} target="_blank" rel="noreferrer" title="Open this folder on GitHub"> ↗</a>}</div>
       <div className="ex-chips small">
         <span className="ex-chip" title={`${d.concept.path}\n${d.concept.files} files tracked by git`}>{d.concept.files} files</span>
         {introduced && <a className="ex-chip" href={introduced.commit.url ?? undefined} target="_blank" rel="noreferrer" title={`First seen ${introduced.date.slice(0, 10)} by ${introduced.commit.author}\n${introduced.commit.subject}\n${introduced.source}${introduced.approx ? '\n≈ estimate: this clone is shallow' : ''}`}>since {introduced.date.slice(0, 7)}{introduced.approx ? ' ≈' : ''}</a>}
-        <span className="ex-chip" title={`Built on ${d.dependsOn.length} modules: ${specificCount(d.dependsOn)} specific, ${d.dependsOn.length - specificCount(d.dependsOn)} shared foundations`}>built on {specificCount(d.dependsOn)}</span>
-        <span className="ex-chip" title={`${d.usedBy.length} modules build on it: ${specificCount(d.usedBy)} specific, ${d.usedBy.length - specificCount(d.usedBy)} shared foundations`}>used by {specificCount(d.usedBy)}</span>
+        <span className="ex-chip" title={`Built on ${allCount(d.dependsOn)} modules: ${specificCount(d.dependsOn)} specific, ${allCount(d.dependsOn) - specificCount(d.dependsOn)} shared foundations`}>built on {specificCount(d.dependsOn)}</span>
+        <span className="ex-chip" title={`${allCount(d.usedBy)} modules build on it: ${specificCount(d.usedBy)} specific, ${allCount(d.usedBy) - specificCount(d.usedBy)} shared foundations`}>used by {specificCount(d.usedBy)}</span>
       </div>
       <div className="ex-actions small">
         <button className="small" onClick={onAsk} title="Ask the chat about this concept; it gets the map's evidence and is told to cite files">Ask</button>
@@ -480,10 +483,10 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
       <Section id="data" title="Data" summary={data} hint="ClickHouse tables its code names (or named like it), read from system tables via Grafana; disk fullness from Prometheus; instance types from terraform. Click any number for its query.">
         <DataSection concept={d.concept.id} repos={workspace} bare onSummary={setData} />
       </Section>
-      <Section id="builton" title="Built on" summary={`${specificCount(d.dependsOn)} specific${d.dependsOn.length > specificCount(d.dependsOn) ? ` + ${d.dependsOn.length - specificCount(d.dependsOn)} shared` : ''}`} hint="Modules this one imports or has foreign keys to. ▸ shows the lines of code; click a name to focus the map there.">
+      <Section id="builton" title="Built on" summary={`${specificCount(d.dependsOn)} specific${allCount(d.dependsOn) > specificCount(d.dependsOn) ? ` + ${allCount(d.dependsOn) - specificCount(d.dependsOn)} shared` : ''}`} hint="Modules this one imports or has foreign keys to. ▸ shows the lines of code; click a name to focus the map there.">
         <Edges title="Built on" list={d.dependsOn} other="to" />
       </Section>
-      <Section id="usedby" title="Built on it" summary={`${specificCount(d.usedBy)} specific${d.usedBy.length > specificCount(d.usedBy) ? ` + ${d.usedBy.length - specificCount(d.usedBy)} shared` : ''}`} hint="Modules that import this one or have foreign keys to it: what would feel a change here.">
+      <Section id="usedby" title="Built on it" summary={`${specificCount(d.usedBy)} specific${allCount(d.usedBy) > specificCount(d.usedBy) ? ` + ${allCount(d.usedBy) - specificCount(d.usedBy)} shared` : ''}`} hint="Modules that import this one or have foreign keys to it: what would feel a change here.">
         <Edges title="Built on it" list={d.usedBy} other="from" />
       </Section>
       <Section id="code" title="Code" summary={[d.docs.length ? `${d.docs.length} docs` : '', d.models.length ? `${d.models.length} models` : '', d.largest.length ? 'largest files' : ''].filter(Boolean).join(' · ')} hint="Where to start reading: the team's own notes, the data models (with what they point at), and the biggest files.">
