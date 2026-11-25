@@ -144,11 +144,13 @@ export async function ensureBrowser(): Promise<CDP> {
   connecting = (async () => {
     try {
       let url = await endpointFromFile()
+      const launched = !url
       if (!url) { await launch(); url = await waitEndpoint(20_000) }
       const c = await CDP.connect(url)
       wire(c)
       await c.send('Target.setDiscoverTargets', { discover: true })
       cdp = c
+      hideAgentChrome(launched) // a freshly launched Chrome comes to the front by itself
       changed()
       if (readopt) { readopt = false; setTimeout(() => { resumeBrowser().catch(e => console.error('resumeBrowser after recovery', e.message)) }, 0) }
       return c
@@ -275,7 +277,7 @@ function wire(c: CDP) {
   })
   c.on('Target.targetCreated', p => {
     const m = String(p.targetInfo?.url ?? '').match(/^about:blank#perch-back:(.+)$/)
-    if (!m) return
+    if (!m) { if (p.targetInfo?.type === 'page') hideAgentChrome(); return } // popups and window.open
     c.send('Target.closeTarget', { targetId: p.targetInfo.targetId }).catch(() => {})
     backToPerch(decodeURIComponent(m[1]))
   })
@@ -410,6 +412,7 @@ export async function session(owner: string, create = true): Promise<Session | n
   }
   // A new background window: doesn't steal focus from whatever you're doing.
   const { targetId } = await c.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: true })
+  hideAgentChrome() // macOS unhides the app for every new window
   return attach(c, owner, targetId)
 }
 
@@ -873,8 +876,28 @@ export function setPaused(owner: string, paused: boolean) {
 // Bring an app to the front by pid (no Automation permission needed: AppKit from osascript's own process).
 export function activatePid(pid: number) {
   if (!pid) return
-  const js = `ObjC.import('AppKit'); var a = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${pid}); if (a) a.activateWithOptions(3)`
+  const js = `ObjC.import('AppKit'); var a = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${pid}); if (a) { a.unhide; a.activateWithOptions(3) }`
   try { spawn('/usr/bin/osascript', ['-l', 'JavaScript', '-e', js], { stdio: 'ignore' }).unref() } catch {}
+}
+
+// Agent windows stay hidden unless you ask for them: each chat gets its own window, and on macOS every new
+// one brought the Agent Chrome forward, so you ended up with a pile of Chrome windows. Hiding the app
+// (Cmd-H) keeps pages running, and the live view keeps streaming (checked 2026-11-24: 31 screencast frames
+// in 3s with the app hidden). Settings → Browser → "Show agent windows in Chrome" turns this off. It never
+// hides while you have a window open via "Open in Chrome", or while the Agent Chrome is the app you're in.
+let hideQueued = false
+export function hideAgentChrome(evenIfFront = false) {
+  if (headless() || settings.browser.showWindows || process.platform !== 'darwin' || hideQueued) return
+  if ([...sessions.values()].some(s => s.shown)) return
+  const pid = lockPid() ?? chromePid
+  if (!pid) return
+  hideQueued = true
+  setTimeout(() => { // coalesce a burst of new windows into one hide, after macOS has shown them
+    hideQueued = false
+    if (settings.browser.showWindows || [...sessions.values()].some(s => s.shown)) return
+    const js = `ObjC.import('AppKit'); var a = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${pid}); var f = $.NSWorkspace.sharedWorkspace.frontmostApplication; if (a && (${evenIfFront} || !(f && f.processIdentifier == ${pid}))) a.hide`
+    try { spawn('/usr/bin/osascript', ['-l', 'JavaScript', '-e', js], { stdio: 'ignore' }).unref() } catch {}
+  }, 300)
 }
 
 // The "back to perch" pill: a closed shadow root (invisible to snapshots), shown only while the owner has
@@ -910,6 +933,7 @@ export function backToPerch(owner: string) {
   const s = sessions.get(owner)
   if (s) s.shown = false
   activatePid(process.ppid) // the perch app (Electron runs the server as its child)
+  hideAgentChrome()
   changed()
 }
 

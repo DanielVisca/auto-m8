@@ -58,6 +58,7 @@ function AgentBrowser({ settings, save }: { settings: any; save: (p: any) => any
           <button className="icon" title="Ask again next time" onClick={() => set({ allowedActions: (B.allowedActions ?? []).filter((x: string) => x !== k) })}>×</button>
         </div>
       ))}
+      <label className="field"><input type="checkbox" checked={!!B.showWindows} onChange={e => set({ showWindows: e.target.checked })} /> Show agent windows in Chrome <span className="muted small">off: they stay hidden and you watch them here; "Open in Chrome ↗" still shows one</span></label>
       <label className="field"><input type="checkbox" checked={!!B.recordVisual} onChange={e => set({ recordVisual: e.target.checked })} /> Keep screenshots of each step <span className="muted small">to replay what an agent did; kept {B.recordingDays ?? 14} days</span></label>
     </section>
   )

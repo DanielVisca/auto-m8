@@ -65,7 +65,7 @@ export type Settings = {
   // On for installs that predate it; a fresh install starts with it off (see FRESH below).
   autonomy: { enabled: boolean; pausedAt?: number | null; reason?: string | null; interrupted?: string[] } // enabled off = paused (server/pause.ts)
   welcome?: boolean // fresh installs: show the setup checklist on Home until it is dismissed
-  browser: { enabled: boolean; chromePath: string; headless: boolean; defaultPolicy: 'trusted' | 'allow' | 'read' | 'deny'; sites: Record<string, 'trusted' | 'allow' | 'read' | 'deny'>; confirmIrreversible: boolean; allowedActions: string[]; maxSessions: number; recordingDays: number; recordVisual: boolean }
+  browser: { enabled: boolean; chromePath: string; headless: boolean; defaultPolicy: 'trusted' | 'allow' | 'read' | 'deny'; sites: Record<string, 'trusted' | 'allow' | 'read' | 'deny'>; confirmIrreversible: boolean; allowedActions: string[]; maxSessions: number; recordingDays: number; recordVisual: boolean; showWindows: boolean }
 }
 
 const POSTHOG_CODE = join(HOME, 'Library/Application Support/@posthog/posthog-code/claude')
@@ -95,7 +95,7 @@ export const defaults: Settings = {
   lifecycle: { enabled: true },
   owner: { name: '' },
   autonomy: { enabled: true },
-  browser: { enabled: true, chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: false, defaultPolicy: 'allow', sites: {}, confirmIrreversible: true, allowedActions: [], maxSessions: 6, recordingDays: 14, recordVisual: false },
+  browser: { enabled: true, chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: false, defaultPolicy: 'allow', sites: {}, confirmIrreversible: true, allowedActions: [], maxSessions: 6, recordingDays: 14, recordVisual: false, showWindows: false },
 }
 
 function merge(base: Settings, patch: Partial<Settings>): Settings {
