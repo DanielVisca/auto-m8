@@ -106,6 +106,10 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
           <input type="checkbox" checked={settings.autonomy?.enabled !== false} onChange={e => save({ autonomy: { enabled: e.target.checked } })} />
           <span className="grow">Let agents act on their own <span className="muted small">PR shepherds, autopilot, evolve, closing passes on quiet chats. They run Claude in the background on your subscription.</span></span>
         </label>
+        <label className="line">
+          <input type="checkbox" checked={!!settings.telemetry?.enabled} onChange={e => save({ telemetry: { ...settings.telemetry, enabled: e.target.checked } })} />
+          <span className="grow">Send anonymous usage stats <span className="muted small">Which features get used and how long setup takes, with a random install id. No code, prompts, repo names or file paths. DO_NOT_TRACK=1 turns it off.</span></span>
+        </label>
       </section>
       <Kits />
       <section className="card">

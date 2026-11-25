@@ -19,7 +19,7 @@ Rule: everything personal becomes a setting. An existing `settings.json` keeps t
 4. **Paths and hardware:** `~/Development` (chat cwd, PR checkouts, code search, self-fix), "15 cores, 48 GB, 6 worktrees" in prompts.
 5. **Small things:** a hardcoded Slack workspace id, PostHog-specific bot lists in journey.ts, `PostHog/posthog` repo filters in proof/railyard/prflow.
 
-No telemetry; every outbound call uses the user's own credentials.
+Every outbound call uses the user's own credentials. The one exception is opt-out anonymous usage stats on fresh installs (server/telemetry.ts, allowlisted event properties only; off for older installs and with DO_NOT_TRACK=1).
 
 ## Plan
 
@@ -39,3 +39,4 @@ No telemetry; every outbound call uses the user's own credentials.
 - [x] 2. Packs: autonomy switch (off for fresh installs, on for existing). PostHog: project picked from the key on fresh installs, host/project in Settings, PR-menu cloud actions, StampHog, Review and the skill store hidden without a key, prompts mention PostHog only with a key. Setup gaps stay out of Health.
 - [x] 3. First-run checklist on Home (Setup.tsx), plus Settings → You and your agents
 - [x] 4. README install + first run (https clone); fresh-user test (server/fresh.test.ts). Still open: public repo or signed .app; Railyard/proof stay PostHog-shaped (empty without a key)
+- [x] 5. Two-minute first run: one screen of what this Mac already has (logins, chats, repos, MCP servers, Chrome, GitHub org; `server/onboarding.ts`), asking only for Claude and GitHub, ending in a chat that briefs the user on their recent work. Unblocker cards on Home and a once-per-chat nudge (`server/suggestions.ts`, `add(kind, key, text, action)` for other signals). Opt-out anonymous usage stats (`server/telemetry.ts`). Existing installs: none of it shows, stats stay off.

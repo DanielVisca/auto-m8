@@ -73,6 +73,9 @@ import { setSwrDir, swr } from './swr.ts'
 import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
 import { cloneLayout, LAYOUT_DIR, listLayouts, listVersions as listLayoutVersions, loadLayout, readTile, restoreVersion as restoreLayoutVersion, sharedLayouts, snapshot as snapshotLayouts, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
+import { markFirstOpen, recent as telemetryRecent, secondsSinceFirstOpen, startTelemetry, telemetryState, track } from './telemetry.ts'
+import { briefPrompt, detect as detectSetup } from './onboarding.ts'
+import * as suggestions from './suggestions.ts'
 import { closeTerm, createTerm, listTerms, onTermsChange, readTerm, runPending, sendTerm, termEvents, terms, typedInto, waitTerm } from './term.ts'
 import { completePairing, deviceFor, isLoopback, lanHosts, listDevices, revokeDevice, setRemoteOnlyPort, startPairing, UNPAIRED_PAGE } from './remote.ts'
 import { gitInfo, idleFromLogs, leaseFor, leases, makeCloud, RETURN_BY } from './cloud.ts'
@@ -473,6 +476,7 @@ async function startChat(b: Row) {
   // You writing in a thread an agent started makes it yours: it joins your lists.
   if (b.id && by === 'you') run(`update perch_started set by = 'you' where id = ? and coalesce(by, '') != 'you'`, b.id)
   const id = send({ by, id: b.id, cwd: b.cwd ?? inFolder?.cwd ?? undefined, prompt, selectionText: String(b.prompt ?? ''), images: att.images, mode: b.mode, context: b.context !== false, turbo: typeof b.turbo === 'boolean' ? b.turbo : undefined, engine: typeof b.engine === 'string' ? b.engine : undefined })
+  if (!b.id && by === 'you') track('chat_started', { engine: String(b.engine || 'auto').split(':')[0] })
   if (inFolder && !b.id) editLabels([id], [inFolder.label])
   for (const other of b.contextIds ?? []) link(id, other, 'context')
   // A new chat started while focused belongs to the focus: give it the area's label.
@@ -952,7 +956,49 @@ route('GET', '/api/status', () => ({
   // For the setup checklist (web/src/Setup.tsx).
   setup: { owner: process.env.PERCH_OWNER_NAME, cwdExists: existsSync(settings.chat.cwd), cwdIsHome: settings.chat.cwd.replace(/\/+$/, '') === homedir(), chrome: existsSync(settings.browser.chromePath) },
 }))
+// First run (onboarding.ts): what this Mac already has, the steps as they complete, and the end of
+// setup, which opens a chat that is already briefing the user on their recent work.
+route('GET', '/api/onboarding/detect', async (_m, _r, _s, q) => detectSetup(q.get('fresh') === '1'))
+const STEPS = new Set(['detect', 'claude', 'github', 'cwd', 'owner', 'telemetry'])
+route('POST', '/api/onboarding/step', async (_m, req) => {
+  const b = await body(req), step = String(b.step ?? '')
+  if (!STEPS.has(step)) return { error: 'unknown step' }
+  if (b.ok === false) track('setup_step_failed', { step, reason_code: String(b.reason_code ?? 'unknown') })
+  else {
+    track('setup_step_completed', { step, seconds_since_first_open: secondsSinceFirstOpen() })
+    if (step === 'claude' || step === 'github') track('connection_added', { kind: step })
+  }
+  return { ok: true }
+})
+route('POST', '/api/onboarding/finish', async (_m, req) => {
+  const b = await body(req)
+  const patch: Row = { welcome: false }
+  if (typeof b.name === 'string' && b.name.trim()) patch.owner = { name: b.name.trim().slice(0, 60) }
+  if (typeof b.cwd === 'string' && b.cwd.trim() && existsSync(b.cwd.trim())) patch.chat = { ...settings.chat, cwd: b.cwd.trim() }
+  if (typeof b.telemetry === 'boolean') patch.telemetry = { ...settings.telemetry, enabled: b.telemetry }
+  const s = updateSettings(patch)
+  if (patch.owner) process.env.PERCH_OWNER_NAME = s.owner.name
+  broadcast('settings')
+  track('onboarding_completed', { seconds: secondsSinceFirstOpen() })
+  if (b.brief === false || !status.claude?.loggedIn) return { ok: true }
+  const recent = list({ limit: 15 }).conversations.map((c: Row) => ({ title: c.title || c.first_prompt?.slice(0, 80) || 'untitled', updated_at: c.updated_at }))
+  const r = await startChat({ prompt: await briefPrompt(recent), engine: 'claude:sonnet', by: 'you', noRoute: true })
+  return { ok: true, chatId: r.id }
+})
+route('GET', '/api/suggestions', () => ({ suggestions: suggestions.active() }))
+route('POST', '/api/suggestions/act', async (_m, req) => {
+  const b = await body(req)
+  suggestions.acted(String(b.kind ?? ''), String(b.key ?? ''))
+  if (b.settings && typeof b.settings === 'object' && 'autonomy' in b.settings) { updateSettings({ autonomy: { ...settings.autonomy, enabled: !!(b.settings as Row).autonomy?.enabled } }); broadcast('settings') }
+  broadcast('suggestions')
+  return { ok: true }
+})
+route('POST', '/api/suggestions/dismiss', async (_m, req) => { const b = await body(req); suggestions.dismiss(String(b.kind ?? ''), String(b.key ?? '')); broadcast('suggestions'); return { ok: true } })
+route('POST', '/api/usage/feature', async (_m, req) => { const f = String((await body(req)).feature ?? ''); if (/^[a-z_]{1,30}$/.test(f)) suggestions.noteFeature(f); return { ok: true } })
+// What usage stats would go out, for Settings: whether it's sending and the last events (all allowlisted).
+route('GET', '/api/telemetry', () => ({ ...telemetryState(), recent: telemetryRecent.slice(-20) }))
 const loginChanged = () => {
+  if (claudeLogin.state === 'done') track('connection_added', { kind: 'claude' })
   if (claudeLogin.state === 'done') status.claudeAuthLapse = undefined // a fresh sign-in: the next chat process reads it
   broadcast('status')
   if (claudeLogin.state === 'done') refreshBasics().then(() => broadcast('status'))
@@ -964,7 +1010,7 @@ route('POST', '/api/claude/login', async (_m, req) => {
   return startLogin(loginChanged, settings.sources.find(s => s.id === c?.source)?.configDir)
 })
 // MCP servers that need OAuth (e.g. the Slack plugin): authorize from auto-m8, no /mcp in a terminal.
-onMcpLogin.add(s => { if (s.state === 'done') resetMcpRows(); broadcast('mcp-login') })
+onMcpLogin.add(s => { if (s.state === 'done') { resetMcpRows(); track('connection_added', { kind: 'mcp' }) } broadcast('mcp-login') })
 route('POST', '/api/mcp/login', async (_m, req) => {
   const server = String((await body(req)).server ?? '')
   if (!/^[\w:. -]{1,80}$/.test(server)) throw new Error('Which MCP server?')
@@ -980,6 +1026,7 @@ route('POST', '/api/posthog/key', async (_m, req) => {
   if (key) setPosthogKey(String(key).trim()); else clearPosthogKey()
   posthogStatus.user = undefined
   await syncTasks()
+  if (key && posthogStatus.ok) track('connection_added', { kind: 'posthog' })
   broadcast('status')
   return { ok: posthogStatus.ok, error: posthogStatus.error }
 })
@@ -1207,7 +1254,7 @@ route('POST', '/api/autopilot/:id/dryrun', (m, req, res) => {
 })
 route('POST', '/api/routines/:id/resume', m => { run('update routines set enabled = 1, paused_reason = null where id = ?', m[1]); review(m[1]); broadcast('autopilot'); return { ok: true } })
 route('GET', '/api/routines', () => ({ routines: listRoutines(), webhookBase: `http://127.0.0.1:${PORT}/hooks/` }))
-route('POST', '/api/routines', async (_m, req) => saveRoutine(await body(req)))
+route('POST', '/api/routines', async (_m, req) => { suggestions.noteFeature('routines'); return saveRoutine(await body(req)) })
 route('DELETE', '/api/routines/:id', m => { deleteRoutine(m[1]); return { ok: true } })
 // Kits (docs/kits.md): import someone's skills, routines and CLAUDE.md snippet; preview first.
 route('GET', '/api/kits', () => ({ kits: kits.installed() }))
@@ -1360,6 +1407,32 @@ setInterval(() => { try { expireBoards() } catch (e) { console.error('expireBoar
 startScheduler()
 startRailyard()
 startSpend()
+// Usage stats (telemetry.ts; off unless enabled and a key is set) and the unblocker cards (suggestions.ts).
+if (settings.welcome) markFirstOpen()
+startTelemetry()
+{
+  // Events derived from what's already recorded, counted from now on (never history).
+  const maxOf = (sql: string) => Number(get<Row>(sql)?.n ?? 0)
+  let agentPrs = maxOf(`select count(*) n from conversation_prs where created = 1`)
+  let shepherdMerged = maxOf(`select count(*) n from shepherd_watch where merged_at is not null`)
+  let stallId = maxOf(`select coalesce(max(id), 0) n from availability`)
+  const derive = () => {
+    try {
+      const prs = maxOf(`select count(*) n from conversation_prs where created = 1`)
+      for (let i = agentPrs; i < Math.min(prs, agentPrs + 20); i++) track('pr_opened_by_agent')
+      agentPrs = prs
+      const merged = maxOf(`select count(*) n from shepherd_watch where merged_at is not null`)
+      for (let i = shepherdMerged; i < Math.min(merged, shepherdMerged + 20); i++) track('pr_merged_via_shepherd')
+      shepherdMerged = merged
+      for (const s of all<Row>(`select id, cause from availability where id > ? and kind = 'stall' order by id limit 20`, stallId)) track('server_stall', { reason_code: String(s.cause ?? 'unknown').toLowerCase().replace(/[^a-z0-9_]+/g, '_').slice(0, 40) || 'unknown' })
+      stallId = maxOf(`select coalesce(max(id), 0) n from availability`)
+    } catch (e) { console.error('telemetry derive', e) }
+  }
+  setInterval(derive, 5 * 60_000).unref()
+  const scanSuggestions = () => { try { suggestions.scan(); broadcast('suggestions') } catch (e) { console.error('suggestions', e) } }
+  setTimeout(scanSuggestions, 60_000).unref()
+  setInterval(scanSuggestions, 10 * 60_000).unref()
+}
 startRace(broadcast, (id, prompt) => { send({ id, prompt, resume: true, by: 'automatic model race' }) })
 startShadow(broadcast, () => runningChats().filter(c => c.state === 'running').length)
 startAutopilot()

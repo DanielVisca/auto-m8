@@ -10,6 +10,7 @@ import { agentEnv, localJob, localRoomSync, localUpSync } from './local.ts'
 import { usageNow, noteClaude } from './usage.ts'
 import { billing, claudeEnv, noteChatAccount, pickSub, shareFolder, subDir, subOf, subUsage, type Billing } from './account.ts'
 import { subscriptionBudget } from './subscription-budget.ts'
+import { NUDGE, nudgesOn } from './suggestions.ts'
 import { chooseProvider } from './subscription-budget.ts'
 import { runTextJobs } from './job-fallback.ts'
 import { allCapped, available, capFrom, capScope, claudeFixed, isCodex, isLocal, markCapped, route, tierLabel, wantsCodex, type Tier } from './router.ts'
@@ -214,7 +215,7 @@ function baseArgs(mode: string, context: boolean, id?: string, turbo = false) {
 function systemPrompt(context: boolean, id?: string, turbo = false) {
   const sign = id ? `GITHUB COMMENTS: you post from ${possessive(ownerName())} account, so end every comment, review or reply body you post on GitHub with this signature after a blank line (bare bot commands like "/trunk merge" are exempt):\n${signature({ PERCH_AGENT: agentLabel(id), PERCH_CONVERSATION_ID: id })}` : ''
   const PEERS = 'PEERS: Claude, Codex and local models are peers in auto-m8 with the same auto-m8 tools, MCP servers, instructions and memory. If an MCP server or tool fails for you, call mcp_access to see whether the other agents have it working, and if one does, delegate the job to it (delegate engine=claude or engine=codex) instead of giving up or asking the user.'
-  return [DRIVER(), PEERS, context && id ? contextPrompt(id) : '', sign, id ? originPrompt(id) : '', turbo ? TURBO : ''].filter(Boolean).join('\n\n')
+  return [DRIVER(), PEERS, context && id ? contextPrompt(id) : '', context && id && nudgesOn() ? NUDGE : '', sign, id ? originPrompt(id) : '', turbo ? TURBO : ''].filter(Boolean).join('\n\n')
 }
 
 // ---------- durable chat processes ----------

@@ -187,7 +187,7 @@ if (typeof window !== 'undefined') {
 }
 
 // One EventSource for the whole app; components subscribe to the topics they care about.
-type Topic = 'conversations' | 'layouts' | 'chats' | 'terms' | 'status' | 'settings' | 'home' | 'autopilot' | 'folders' | 'errors' | 'autoresearch' | 'prflow' | 'canvas' | 'canvasdata' | 'prs' | 'evolve' | 'browser' | 'shadow' | 'race' | 'product-research' | 'mcp-login' | 'docs'
+type Topic = 'conversations' | 'layouts' | 'chats' | 'terms' | 'status' | 'settings' | 'home' | 'autopilot' | 'folders' | 'errors' | 'autoresearch' | 'prflow' | 'canvas' | 'canvasdata' | 'prs' | 'evolve' | 'browser' | 'shadow' | 'race' | 'product-research' | 'mcp-login' | 'docs' | 'suggestions'
 const subs = new Map<Topic, Set<() => void>>()
 let es: EventSource | null = null, dropped = false
 function ensureEvents() {

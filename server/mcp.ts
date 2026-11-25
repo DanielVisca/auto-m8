@@ -379,11 +379,15 @@ export function condensed(items: Item[], max: number) {
   return text.length > max ? text.slice(0, max / 3) + '\n\n[… middle clipped …]\n\n' + text.slice(-(2 * max) / 3) : text
 }
 
+const FEATURE_OF: Record<string, string> = { search_conversations: 'search', needs_me: 'needs_me', shepherd: 'shepherd', delegate: 'delegate', race: 'race', browser: 'browser', canvas: 'boards', board: 'boards' }
 async function call(name: string, args: any): Promise<string | { content: any[] }> {
   // Agents copy conversation links into id arguments: accept auto-m8://<id> and the old perch://<id>.
   if (args && typeof args === 'object') {
     for (const k of ['conversation_id', 'from', 'to', 'owner', ...(name === 'get_conversation' ? ['id'] : [])]) if (typeof args[k] === 'string') args[k] = convIdOf(args[k])
   }
+  // Which main surfaces agents use (suggestions.ts noteFeature): counted by the server, never the arguments.
+  const feature = FEATURE_OF[name]
+  if (feature) { const port = process.env.PERCH_PORT ?? 4777; fetch(`http://127.0.0.1:${port}/api/usage/feature`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify({ feature }), signal: AbortSignal.timeout(3000) }).catch(() => {}) }
   if (name === 'needs_me') {
     const port = process.env.PERCH_PORT ?? 4777, base = `http://127.0.0.1:${port}/api/needs`
     const headers = { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }
