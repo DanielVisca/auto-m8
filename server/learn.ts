@@ -16,6 +16,7 @@
 import { createHash } from 'node:crypto'
 import { all, db, get, run } from './db.ts'
 import { maxHelpers } from './owner.ts'
+import { helperWorktreesRunning } from './worktrees.ts'
 import { prFlow } from './prflow.ts'
 import { prSpend } from './prspend.ts'
 import { lastSample } from './quiet.ts'
@@ -171,7 +172,7 @@ export function sample(now = Date.now(), runningChats = 0) {
   const start = new Date(now); start.setHours(0, 0, 0, 0)
   const s = {
     claudePct: pct(u.claude), codexPct: pct(u.codex), strained: strained(m ? { availBytes: m.availBytes, load1: m.load1, cores: m.cores } : null),
-    helpers: get<any>(`select count(*) n from delegations where status = 'running' and worktree is not null`)?.n ?? 0, helperCap: maxHelpers,
+    helpers: helperWorktreesRunning(), helperCap: maxHelpers,
     shepherdCapped: get<any>(`select count(*) n from shepherd_watch where paused_reason like 'hit % runs today' and paused_at >= ?`, start.getTime())?.n ?? 0,
   }
   const needs = get<any>(`select count(*) n from needs where status = 'needs_you'`)?.n ?? 0

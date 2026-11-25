@@ -291,16 +291,28 @@ export async function sweep(opts: { dryRun?: boolean } = {}): Promise<SweepResul
 }
 
 // ---------- helper worktrees ----------
-export const helperWorktreesRunning = () =>
-  get<{ n: number }>(`select count(*) n from delegations where worktree is not null and status in ('running', 'needs-help')`)?.n ?? 0
+// What holds a helper slot: a helper whose chat is mid-turn right now, one started in the last few
+// minutes (its chat may not be up yet), or one blocked (needs-help) for under 2 hours while its parent
+// answers. Before this every 'running' or 'needs-help' row counted forever, so helpers blocked on
+// permissions for days, or marked running after a resumed turn died, filled all 6 slots with nothing
+// actually running (2026-11-25: 5 needs-help rows 1-13 days old plus 1 finished-but-'running').
+// Their worktrees are still kept (see keepReason), they just stop blocking new helpers.
+export const HELPER_SLOT = { blockedHoldMs: 2 * 3_600_000, startGraceMs: 10 * 60_000 }
+export function helperSlotHolders(now = Date.now(), liveIds = new Set([...chats.values()].filter(c => c.state === 'running').map(c => c.id))) {
+  const rows = all<any>(`select id, child, name, status, created_at, finished_at from delegations where worktree is not null and status in ('running', 'needs-help')`)
+  return rows.filter(d => d.status === 'running'
+    ? liveIds.has(d.child) || now - d.created_at < HELPER_SLOT.startGraceMs
+    : now - (d.finished_at ?? d.created_at) < HELPER_SLOT.blockedHoldMs)
+}
+export const helperWorktreesRunning = () => helperSlotHolders().length
 
 // A fresh worktree on a new branch from the HEAD of `cwd`'s repo. The parent's uncommitted
 // changes are not in it.
 export async function createHelper(cwd: string, id: string) {
   const top = await git(cwd, ['rev-parse', '--show-toplevel']).catch(() => '')
   if (!top) throw new Error(`${cwd} is not a git checkout, so there is nothing to make a worktree of. Delegate without worktree, or pass a repo as cwd.`)
-  const running = helperWorktreesRunning()
-  if (running >= LIMITS.maxHelperWorktrees) throw new Error(`${running} helpers are already working in their own worktrees; this Mac (${machineLine}, one Docker) shouldn't take more. Wait for one to report, or delegate without a worktree for read-only work.`)
+  const holders = helperSlotHolders()
+  if (holders.length >= LIMITS.maxHelperWorktrees) throw new Error(`${holders.length} helpers are already working in their own worktrees (${holders.map(h => `"${h.name}" ${h.status}`).join(', ')}); this Mac (${machineLine}, one Docker) shouldn't take more. Wait for one to report, or delegate without a worktree for read-only work.`)
   const root = join(dirname(top), DIR_NAME)
   mkdirSync(root, { recursive: true })
   let free = await freeGb(root)

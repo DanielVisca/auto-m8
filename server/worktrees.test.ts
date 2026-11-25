@@ -83,3 +83,19 @@ test('a checkout with only generated agent config is removed without a stash', a
   assert.ok(r.ok, r.note); assert.match(r.note, /dropped 1 generated agent config file/)
   assert.equal(sh(dir, 'stash', 'list'), '')
 })
+
+test('only helpers actually at work hold a helper slot', async () => {
+  const { run } = await import('./db.ts')
+  const { helperSlotHolders, HELPER_SLOT } = await import('./worktrees.ts')
+  const now = Date.now(), h = 3_600_000
+  const add = (id: string, child: string, status: string, created: number, finished: number | null) =>
+    run(`insert into delegations (id, parent, child, name, brief, status, created_at, finished_at, worktree, branch) values (?, 'p', ?, ?, 'b', ?, ?, ?, '/tmp/wt-' || ?, 'b')`, id, child, id, status, created, finished, id)
+  add('slot-live', 'c-live', 'running', now - 5 * h, null)            // mid-turn right now
+  add('slot-new', 'c-new', 'running', now - 60_000, null)              // just started, chat not up yet
+  add('slot-zombie', 'c-zombie', 'running', now - 13 * 24 * h, now - 13 * 24 * h) // resumed turn died
+  add('slot-blocked', 'c-blocked', 'needs-help', now - h, now - h / 2) // parent still answering
+  add('slot-stale', 'c-stale', 'needs-help', now - 6 * 24 * h, now - 6 * 24 * h) // nobody answered
+  const held = helperSlotHolders(now, new Set(['c-live'])).map(d => d.id).filter(id => id.startsWith('slot-')).sort()
+  assert.deepEqual(held, ['slot-blocked', 'slot-live', 'slot-new'])
+  assert.ok(HELPER_SLOT.blockedHoldMs >= h)
+})
