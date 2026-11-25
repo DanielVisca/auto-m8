@@ -82,7 +82,7 @@ import { hookSignals } from './hookSignals.ts'
 import { handleHookPost } from './hookRoute.ts'
 import { dismiss as dismissAttention, sweep as attentionSweep } from './attention.ts'
 import { resumeStalls } from './resumestalls.ts'
-import { relay } from './relay.ts'
+import { relay, relayGraph } from './relay.ts'
 import { harvest as harvestChat, harvestOf, lifecycleStatus, sweepLifecycle } from './lifecycle.ts'
 import { board, push as inboxPush, startOrchestra, stopTargets, unwatch as orchUnwatch, watch as orchWatch } from './orchestra.ts'
 import { forParent as helpersOf, onDelegate, resumeFollowers as resumeHelpers, sendTo as helperSend, start as startHelper, stop as stopHelper } from './delegate.ts'
@@ -867,6 +867,7 @@ route('POST', '/api/lifecycle/:id/harvest', async m => {
   return h ?? { error: "The closing pass couldn't read the conversation. Try again." }
 })
 route('POST', '/api/relay', async (_m, req) => { const b = await body(req); try { return relay({ from: String(b.from ?? ''), to: String(b.to ?? ''), message: String(b.message ?? ''), reportBack: b.report_back !== false }) } catch (e: any) { return { error: e.message } } })
+route('GET', '/api/relay/graph', (_m, _r, _s, q) => relayGraph(Number(q.get('days') ?? 7)))
 route('POST', '/api/delegate/:id/stop', m => { stopHelper(m[1]); return { ok: true } })
 route('GET', '/api/delegate/for/:conv', m => ({ helpers: helpersOf(decodeURIComponent(m[1])) }))
 // Claude Code hooks (scripts/perch-hook.sh): exact Running / waiting-for-permission / done for every session,

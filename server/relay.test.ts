@@ -43,3 +43,19 @@ test('watch and board for an owner', async () => {
   assert.match(text, /auto-m8:\/\/wk-1 "worker"/)
   assert.match(text, /Events not yet delivered \(1\)/)
 })
+
+test('sentIn reads agent-sent messages under both the auto-m8 and old perch markers', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { sentIn } = await import('./relay.ts')
+  const f = join(mkdtempSync(join(tmpdir(), 'relay-')), 't.jsonl')
+  const line = (uuid: string, text: string) => JSON.stringify({ type: 'user', uuid, timestamp: '2026-11-24T10:00:00Z', message: { content: text } })
+  writeFileSync(f, [
+    line('u1', '[auto-m8: sent by an agent from auto-m8://aaa "Driver". Not typed by the user.]\n\nShip it.'),
+    line('u2', '[perch: sent by an agent from perch://bbb. Not typed by the user.]\n\nOld one.'),
+    line('u3', 'a message the user typed'),
+  ].join('\n'))
+  const got = sentIn(f)
+  assert.deepEqual(got.map(m => [m.from, m.preview]), [['aaa', 'Ship it.'], ['bbb', 'Old one.']])
+})
