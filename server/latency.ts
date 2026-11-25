@@ -7,6 +7,9 @@
 // Read it with GET /api/latency or the perch MCP tool `latency`. Durable history of the same data
 // (and client timings) lives in tracestore.ts, fed by the listeners below.
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { ChildProcess } from 'node:child_process'
+import dc from 'node:diagnostics_channel'
+import { basename } from 'node:path'
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
 
 export type Span = { name: string; start: number; ms: number }
@@ -77,11 +80,36 @@ export function recordDb(kind: string, sql: string, ms: number, now = Date.now()
 // trace, or background totals when there is none.
 export async function span<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
   const t = als.getStore(), start = performance.now()
-  try { return await fn() } finally {
-    const ms = performance.now() - start
-    if (t && !t.done) { if (t.spans.length < MAX_SPANS) t.spans.push({ name, start: Date.now() - ms - t.at, ms }) }
-    else { const minute = Math.floor(Date.now() / 60_000); const m = background.get(minute) ?? new Map(); background.set(minute, m); bump(m, name, ms) }
+  try { return await fn() } finally { addSpan(t, name, performance.now() - start) }
+}
+function addSpan(t: Trace | undefined, name: string, ms: number) {
+  if (t && !t.done) { if (t.spans.length < MAX_SPANS) t.spans.push({ name, start: Date.now() - ms - t.at, ms }) }
+  else { const minute = Math.floor(Date.now() / 60_000); const m = background.get(minute) ?? new Map(); background.set(minute, m); bump(m, name, ms) }
+}
+
+// Every subprocess and outbound HTTP call is a span without touching call sites: all execFile/spawn
+// go through ChildProcess.prototype.spawn, and fetch reports through undici's diagnostics channels.
+// Names: "gh api graphql", "git status", "fetch us.posthog.com /api/projects". The trace is the one
+// that started the work, captured at start. Long-lived processes (agent chats, terminals) aren't
+// latency: anything running over 10 minutes is left out.
+export const procName = (file: string, args: string[]) => `${basename(file)} ${args.filter(a => a && !a.startsWith('-') && a.length <= 30 && !a.includes('/') && !a.includes('=')).slice(0, 2).join(' ')}`.trim()
+export const fetchName = (origin: string, path: string) => { let host = origin; try { host = new URL(origin).host } catch {} return `fetch ${host} ${routeOf('', path.split('?')[0].split('/').slice(0, 4).join('/')).trim()}` }
+let instrumented = false
+export function instrumentIo() {
+  if (instrumented) return
+  instrumented = true
+  const proto = ChildProcess.prototype as any, orig = proto.spawn
+  proto.spawn = function (this: ChildProcess, o: any) {
+    const t = als.getStore(), start = performance.now()
+    const r = orig.call(this, o)
+    this.once('exit', () => { const ms = performance.now() - start; if (ms < 600_000) addSpan(t, procName(String(o?.file ?? 'proc'), (o?.args ?? []).slice(1)), ms) })
+    return r
   }
+  const started = new WeakMap<object, { at: number; t: Trace | undefined }>()
+  dc.subscribe('undici:request:create', (m: any) => started.set(m.request, { at: performance.now(), t: als.getStore() }))
+  const end = (m: any) => { const s = started.get(m.request); if (!s) return; started.delete(m.request); addSpan(s.t, fetchName(String(m.request.origin ?? ''), String(m.request.path ?? '')), performance.now() - s.at) }
+  dc.subscribe('undici:request:trailers', end)
+  dc.subscribe('undici:request:error', end)
 }
 
 // Event-loop delay: p50/p99/max for each 10s.
@@ -89,6 +117,7 @@ const loops: Loop[] = []
 let loopTimer: NodeJS.Timeout | null = null
 export function startLatency() {
   if (loopTimer) return
+  instrumentIo()
   const h = monitorEventLoopDelay({ resolution: 20 }); h.enable()
   loopTimer = setInterval(() => {
     const l = { at: Date.now(), p50: h.percentile(50) / 1e6, p99: h.percentile(99) / 1e6, max: h.max / 1e6 }

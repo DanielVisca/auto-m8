@@ -7,7 +7,6 @@
 // - When api.github.com was unreachable (VPN, wifi), every sync kept firing and failing on its own
 //   schedule. Now the first connection failure pauses GitHub calls with a growing back-off.
 import { execFile } from 'node:child_process'
-import { span } from './latency.ts'
 import { promisify } from 'node:util'
 import { recordError, resolveErrors } from './errors.ts'
 
@@ -154,7 +153,8 @@ export async function ghExec(args: string[], opts: { timeout?: number; maxBuffer
     throw Object.assign(new Error(`gh ${args.slice(0, 2).join(' ')}: skipped, GitHub's ${r} rate limit is used up (auto-m8 resumes at ${new Date(until).toLocaleTimeString()})`), { rateLimited: true, stdout: '', stderr: '' })
   }
   try {
-    const out = await span(`gh ${args.filter(a => !a.startsWith('-')).slice(0, 2).join(' ')}`, () => exec('gh', args, opts as any))
+    // Timed as a span by latency.ts's subprocess instrumentation ("gh api graphql").
+    const out = await exec('gh', args, opts as any)
     tally(caller, r, 'ok')
     return { stdout: String(out.stdout), stderr: String(out.stderr) }
   } catch (e: any) {

@@ -70,3 +70,22 @@ test('a normal machine is not reported as under pressure', () => {
   const d = diagnose({ requests: 3, eventLoop: null, inFlight: [], routes: [], slowest: [], background: [], stalls: [], machine: { severity: 'normal', reasons: [] } })
   assert.deepEqual(d, ['No slowness: requests, event loop and machine look healthy in this window.'])
 })
+
+test('subprocesses and fetches inside a request are spans of it', async () => {
+  const { instrumentIo } = await import('./latency.ts')
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  instrumentIo()
+  const t = startTrace('GET /api/x')
+  await runInTrace(t, () => promisify(execFile)('git', ['--version']))
+  await new Promise(r => setTimeout(r, 20))
+  endTrace(t, 200)
+  assert.ok(t.spans.some(s => s.name === 'git'), JSON.stringify(t.spans))
+})
+
+test('io span names fold ids and paths', async () => {
+  const { procName, fetchName } = await import('./latency.ts')
+  assert.equal(procName('/opt/homebrew/bin/gh', ['api', 'graphql', '-f', 'query=x']), 'gh api graphql')
+  assert.equal(procName('git', ['-C', '/Users/a/repo', 'status', '--porcelain']), 'git status')
+  assert.equal(fetchName('https://us.posthog.com', '/api/projects/2/insights?x=1'), 'fetch us.posthog.com /api/projects/:id')
+})
