@@ -6,7 +6,7 @@ import { ago, api, post, toast } from './api'
 import { Popover } from './Popover'
 
 type Target = { id: string; label: string; about: string; ok: boolean; why?: string }
-type Audience = { id: string; label: string; private?: boolean }
+type Audience = { id: string; label: string; kind?: 'private' | 'project' | 'members'; hint?: string; private?: boolean }
 type Share = { target: string; url: string | null; audience: string | null; audience_label: string | null; shared_at: number; notes: string[]; conflict?: boolean }
 
 export function ShareButton({ boardId }: { boardId: string }) {
@@ -66,9 +66,12 @@ export function ShareButton({ boardId }: { boardId: string }) {
               Who can see it
               <select value={audience} onChange={e => setAudience(e.target.value)} disabled={!audiences}>
                 {!audiences && <option>Loading channels…</option>}
-                {audiences?.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                {(['private', 'project', 'members'] as const).map(k => {
+                  const list = audiences?.filter(a => (a.kind ?? 'project') === k) ?? []
+                  return list.length ? <optgroup key={k} label={k === 'private' ? 'Private' : k === 'project' ? 'Public: everyone in the project' : 'Shared: members only'}>{list.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}</optgroup> : null
+                })}
               </select>
-              {chosen && !chosen.private && <span className="muted">Everyone in {chosen.label} can open it. Snapshots of auto-m8 data on the board go with it.</span>}
+              {chosen?.hint && <span className="muted">{chosen.hint}</span>}
             </label>
           )}
           {prev && <span className="muted small">Last shared {ago(prev.shared_at)}{prev.audience_label ? ` to ${prev.audience_label}` : ''}. Sharing again updates it to a new version{t?.id === 'posthog' ? ' (PostHog keeps the old ones)' : ''}. {prev.url && <a href={prev.url} target="_blank" rel="noreferrer">Open</a>}</span>}

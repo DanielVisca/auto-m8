@@ -17,7 +17,7 @@ db.exec(`create table if not exists board_shares (
   notes text, primary key (board_id, target)
 )`)
 
-export type Audience = { id: string; label: string; private?: boolean }
+export type Audience = { id: string; label: string; kind?: 'private' | 'project' | 'members'; hint?: string; private?: boolean }
 export type Share = { board_id: string; target: string; remote_id: string; url: string | null; audience: string | null; audience_label: string | null; version_id: string | null; shared_at: number; notes: string[] }
 export type ShareResult = Share & { conflict?: boolean }
 type Board = NonNullable<ReturnType<typeof getBoard>>
@@ -280,11 +280,18 @@ const posthogTarget: Target = {
     if (!project()) return { ok: false, why: 'Choose a PostHog project in Settings first' }
     try { await posthogFetch(`/api/projects/${project()}/canvases/?limit=1`); return { ok: true } } catch (e: any) { return { ok: false, why: e.message } }
   },
+  // PostHog's visibility, as its canvas header shows it: Private (your personal channel), Public
+  // (any public channel: everyone in the project can open it; the channel only files it, #general
+  // being the default home) and Shared (a private channel: its members only).
   async audiences() {
-    const r: any = await posthogFetch(`/api/projects/${project()}/task_channels/?limit=500`)
-    const list: any[] = r.results ?? r
-    return list.map(c => ({ id: c.id, label: c.channel_type === 'personal' ? 'Only me (my private channel)' : `#${c.name}`, private: c.channel_type === 'personal' }))
-      .sort((a, b) => Number(!!b.private) - Number(!!a.private) || a.label.localeCompare(b.label))
+    const [r, proj]: any[] = await Promise.all([posthogFetch(`/api/projects/${project()}/task_channels/?limit=500`), posthogFetch(`/api/projects/${project()}/`).catch(() => null)])
+    const everyone = `everyone in ${proj?.name ? `the ${proj.name} project` : 'the project'}`
+    const rank = { private: 0, project: 1, members: 2 } as const
+    return (r.results ?? r).map((c: any): Audience => {
+      if (c.channel_type === 'personal' || c.system_role === 'personal') return { id: c.id, kind: 'private', private: true, label: 'Private: only me', hint: 'Only you can open it.' }
+      if (c.channel_type === 'private') return { id: c.id, kind: 'members', label: `Members of #${c.name}`, hint: `A private space: only members of #${c.name} can open it.` }
+      return { id: c.id, kind: 'project', label: c.system_role === 'general' ? `Public: ${everyone} (#general)` : `Public, filed in #${c.name}`, hint: `Public: ${everyone} can open it${c.system_role === 'general' ? '' : `; #${c.name} is just where it's filed`}. Snapshots of auto-m8 data on the board go with it.` }
+    }).sort((a: Audience, b: Audience) => rank[a.kind!] - rank[b.kind!] || Number(b.label.includes('#general')) - Number(a.label.includes('#general')) || a.label.localeCompare(b.label))
   },
   async share(b, { audience, overwrite, prev, created }) {
     const p = project()
