@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { run } from './db.ts'
 import { family } from './family.ts'
-import { readableTitle } from './transcript.ts'
+import { readableTitle, userText } from './transcript.ts'
 import { tidy } from './titles.ts'
 
 test('titles drop pulled-in context, link markup and scout boilerplate', () => {
@@ -14,6 +14,15 @@ test('titles drop pulled-in context, link markup and scout boilerplate', () => {
   assert.equal(tidy('"Get all metrics into PostHog."'), 'Get all metrics into PostHog')
   assert.equal(readableTitle('<attached-images>\n- /Users/x/Library/Application Support/perch/attachments/a.png\n</attached-images>\n\ngreat, also fix the names\n[Image: source: /private/tmp/1.png]'), 'great, also fix the names')
   assert.equal(readableTitle('<attached-images>\n- /Users/x/a.png\n</attached-images>'), 'Image')
+  // Shared links and files lead the message, but the words you wrote name the chat.
+  assert.equal(readableTitle('🔗 https://posthog.slack.com/archives/C0B/p1795) 🔗 https://posthog.slack.com/archives/C0B/p1795 I keep starting on clustering'), 'I keep starting on clustering')
+  assert.equal(readableTitle('<shared-from-browser>\nPage "Slack" (https://posthog.slack.com/archives/C0B/p1795)\nhttps://posthog.slack.com/archives/C0B/p1795\n</shared-from-browser>\n\nis this ready?'), 'is this ready?')
+  assert.equal(readableTitle('☁ 🔗 https://posthog.slack.com/archives/C0B/p1795 pull in our expertise'), '☁ pull in our expertise')
+  assert.equal(readableTitle('📄 notes.md 🔗 https://github.com/PostHog/dash/pull/7'), '📄 notes.md 🔗 dash#7') // nothing else: keep the refs
+})
+
+test('a link shared from the browser shows once, without the closing bracket', () => {
+  assert.equal(userText('<shared-from-browser>\nPage "Slack" (https://posthog.slack.com/archives/C0B/p1795)\nhttps://posthog.slack.com/archives/C0B/p1795\n</shared-from-browser>\n\nhi'), '🔗 https://posthog.slack.com/archives/C0B/p1795\n\nhi')
 })
 
 test('a chat shows where it branched from and every branch off it', () => {

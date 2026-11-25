@@ -95,7 +95,7 @@ export function userText(content: unknown): string | null {
     .replace(/\n\n<perch-auto-race>[\s\S]*?<\/perch-auto-race>/g, '')
     // What perch added around your message: shown as short markers, not the machinery.
     .replace(/<attached-files>[\s\S]*?<\/attached-files>/g, m => (m.match(/^- .+\((.+)\)$/gm) ?? []).map(l => `📄 ${l.match(/\((.+)\)$/)![1]}`).join('\n'))
-    .replace(/<shared-from-browser>[\s\S]*?<\/shared-from-browser>/g, m => (m.match(/https?:\/\/\S+/g) ?? []).map(u => `🔗 ${u}`).join('\n') || '🔗 shared some text from the browser')
+    .replace(/<shared-from-browser>[\s\S]*?<\/shared-from-browser>/g, m => [...new Set((m.match(/https?:\/\/[^\s)"'<>]+/g) ?? []))].map(u => `🔗 ${u}`).join('\n') || '🔗 shared some text from the browser')
     .replace(/<file path="([^"]*)"\s*\/>/g, (_m, p) => `[${p.split('/').pop()}]`)
     .replace(/<github_pr number="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/github_pr>)/g, 'PR #$1').trim()
   return text || null
@@ -105,7 +105,17 @@ const ts = (s: unknown) => (typeof s === 'string' ? Date.parse(s) || null : null
 
 // A title you can read at a glance: no pulled-in context blocks, harness tags, link markup
 // or scout boilerplate. Links become what they point at (repo#123, host/path).
+// Links and files you attached are what the ask is about, not the ask: when you also wrote words,
+// those name the chat ("🔗 slack.com/… 🔗 slack.com/… is this ready?" reads as "is this ready?").
 export function readableTitle(s: string): string {
+  const raw = String(s ?? '')
+  const withoutRefs = cleanTitle(raw
+    .replace(/<(shared-from-browser|attached-files)[^>]*>[\s\S]*?(<\/\1>|$)/g, ' ')
+    .replace(/(?:🔗|📄)[ \t]*\S+/gu, ' '))
+  return withoutRefs.replace(/[\s☁]/gu, '') ? withoutRefs : cleanTitle(raw)
+}
+
+function cleanTitle(s: string): string {
   let t = String(s ?? '')
     .replace(/<earlier-conversations>[\s\S]*?(<\/earlier-conversations>|$)/g, ' ')
     .replace(/<(system-reminder|attached-files|attached-images|shared-from-browser|context|pasted_content)[^>]*>[\s\S]*?(<\/\1>|$)/g, ' ')

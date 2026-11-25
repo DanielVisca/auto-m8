@@ -330,9 +330,11 @@ export async function syncMyPrs() {
 }
 
 // Chats started with a pasted image were named after its path ("- /Users/…/perch/attachments/…") until
-// titles learned to skip attachment blocks. Re-read those once so they take their name from the ask.
+// titles learned to skip attachment blocks, and chats started with a shared link after it ("🔗 slack.com/…").
+// Re-read those so they take their name from the ask. Links-only chats keep the link, so cap the window.
 export function renameAttachmentTitled() {
-  const rows = all<{ path: string }>(`select path from conversations where path is not null and first_prompt like '- /%/perch/attachments/%'`)
+  const rows = all<{ path: string }>(`select path from conversations where path is not null and (first_prompt like '- /%/perch/attachments/%'
+    or (title is null and (first_prompt like '🔗%' or first_prompt like '📄%') and updated_at > ?))`, Date.now() - 30 * 86400_000)
   for (const r of rows) {
     const source = allSources().find(s => r.path.startsWith(s.dir + '/'))
     if (source) try { indexFile(r.path, source, true) } catch {}
