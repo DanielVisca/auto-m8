@@ -79,6 +79,7 @@
 .ex-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pending); margin-top: 5px; flex: none; }
 .ex-dot.connected { background: var(--ok); } .ex-dot.expired { background: var(--warn); } .ex-dot.error, .ex-dot.missing { background: var(--bad); }
 .ex-dep { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+.ex-judge { margin: 4px 0 2px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .ex-app { margin: 3px 0 0 2px; }
 .ex-app .ex-dot { margin: 0 4px 0 0; }
 .ex-code { margin-left: 14px; }

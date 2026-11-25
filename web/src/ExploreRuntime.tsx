@@ -138,6 +138,10 @@ type Fact = { label: string; value: number | string | null; unit?: string; sourc
 type Code = { image: string; sha: string; repo: string; behind: number | null; ahead: number | null; github: string | null }
 type App = { name: string; region: string; health?: string; sync?: string; deployedAt?: string; images?: string[]; chart?: string; namespace?: string; cluster?: string; code?: Code[]; error?: string }
 type Dep = { base: string; origin: 'yours' | 'org' | 'third-party' | 'unknown'; apps: App[]; facts: Fact[]; chartPath?: string }
+// Your answer to "is this it?" for a name-match deployment, per concept: yes promotes it, no hides it.
+type Verdicts = Record<string, 'yes' | 'no'>
+const VKEY = 'perch.explore.runtimeVerdicts'
+const loadVerdicts = (): Verdicts => { try { return JSON.parse(localStorage.getItem(VKEY) ?? '{}') } catch { return {} } }
 export type Runtime = { concept: string; tokens: string[]; argoError: string | null; grafana: string | null; deployments: Dep[]; matchedBy: string }
 
 // Where a concept runs: the deployments, whose code they run, and live numbers from two metric sources side by side.
@@ -145,6 +149,14 @@ export function WhereItRuns({ concept, repos, org, onLoaded, bare, onSummary }: 
   const url = `/api/explore/runtime?concept=${encodeURIComponent(concept)}&repos=${encodeURIComponent(repos.join(','))}&org=${encodeURIComponent(org ?? '')}`
   const [r, setR] = useState<Runtime | { error: string } | null>(() => keep<Runtime>(url).v ?? null)
   const [showInfra, setShowInfra] = useState(false)
+  const [showUnsure, setShowUnsure] = useState(false)
+  const [verdicts, setVerdicts] = useState<Verdicts>(loadVerdicts)
+  const vk = (base: string) => `${concept}|${base}`
+  const judge = (base: string, v: 'yes' | 'no' | null) => {
+    const next = { ...loadVerdicts() }
+    if (v) next[vk(base)] = v; else delete next[vk(base)]
+    localStorage.setItem(VKEY, JSON.stringify(next)); setVerdicts(next)
+  }
   useEffect(() => {
     const k = keep<Runtime>(url)
     setR(k.v ?? null); onLoaded?.(k.v ?? null)
@@ -155,20 +167,36 @@ export function WhereItRuns({ concept, repos, org, onLoaded, bare, onSummary }: 
   useEffect(() => {
     if (!r) return onSummary?.('checking Argo CD…')
     if ('error' in r) return onSummary?.('error')
-    const yours = r.deployments.filter(d => d.origin === 'yours').length, names = r.deployments.length - yours
-    onSummary?.(yours ? `${yours} app${yours === 1 ? '' : 's'} run your code` : `no app of its own${names ? ` (${names} name match${names === 1 ? '' : 'es'})` : ''}`)
-  }, [r]) // eslint-disable-line
+    const yours = r.deployments.filter(d => d.origin === 'yours' || verdicts[vk(d.base)] === 'yes').length
+    const names = r.deployments.filter(d => d.origin !== 'yours' && d.origin !== 'third-party' && !verdicts[vk(d.base)]).length
+    onSummary?.(yours ? `${yours} app${yours === 1 ? '' : 's'} run${yours === 1 ? 's' : ''} it` : names ? `not sure · ${names} app${names === 1 ? '' : 's'} share${names === 1 ? 's' : ''} its name` : 'no app of its own')
+  }, [r, verdicts]) // eslint-disable-line
   if (!r) return <div className="ex-sec small muted">{!bare && <h5>Where it runs</h5>}<i className="spin" /> Asking Argo CD and Grafana… (the first time takes up to a minute)</div>
   if ('error' in r) return <div className="ex-sec small">{!bare && <h5>Where it runs</h5>}<span className="bad">{r.error}</span></div>
-  const mine = r.deployments.filter(d => d.origin !== 'third-party'), infra = r.deployments.filter(d => d.origin === 'third-party')
+  // Only what's proven (its image carries one of your commits) or what you confirmed shows straight away.
+  // Name matches are guesses: they wait behind "show anyway" and ask you whether they're right.
+  const infra = r.deployments.filter(d => d.origin === 'third-party')
+  const sure = r.deployments.filter(d => d.origin === 'yours' || (d.origin !== 'third-party' && verdicts[vk(d.base)] === 'yes'))
+  const unsure = r.deployments.filter(d => d.origin !== 'yours' && d.origin !== 'third-party' && !verdicts[vk(d.base)])
+  const rejected = r.deployments.filter(d => d.origin !== 'yours' && d.origin !== 'third-party' && verdicts[vk(d.base)] === 'no')
   return (
     <div className="ex-sec">
       {!bare && <h5>Where it runs</h5>}
       {!bare && <div className="tiny muted">Argo CD apps with “{r.tokens.join('”, “')}” in their name. Only ones marked <b>runs your code</b> are proven to run this repo (their image is tagged with one of its commits); the rest just share the name. Code that's part of a bigger app (like a Django product inside the main web app) has no app of its own, so it won't show here.</div>}
       {r.argoError && <div className="small bad">Argo CD: {r.argoError}. Open Sources to connect it.</div>}
       {!r.argoError && !r.deployments.length && <div className="small muted">No Argo CD app is named like this concept. It may run inside another service (look at what's built on it), or as a scheduled job.</div>}
-      {mine.length > 0 && !mine.some(d => d.origin === 'yours') && <div className="small warn">None of these run code from your repos, so they're probably unrelated namesakes. This concept likely runs inside a larger app.</div>}
-      {mine.map(d => <DepCard key={d.base} d={d} />)}
+      {sure.map(d => <DepCard key={d.base} d={d} confirmed={d.origin !== 'yours'} onUndo={() => judge(d.base, null)} />)}
+      {unsure.length > 0 && (
+        <div className="small">
+          {!sure.length && <div className="muted">Not sure where this runs. No app is proven to run its code; it probably lives inside a larger app.</div>}
+          <button className="link small" onClick={() => setShowUnsure(!showUnsure)}>{showUnsure ? '▾ hide' : '▸ show anyway:'} {unsure.length} app{unsure.length === 1 ? '' : 's'} that only share{unsure.length === 1 ? 's' : ''} its name</button>
+          {!showUnsure && <span className="muted"> ({unsure.map(d => d.base).slice(0, 4).join(', ')}{unsure.length > 4 ? '…' : ''})</span>}
+          {showUnsure && unsure.map(d => <DepCard key={d.base} d={d} onJudge={v => judge(d.base, v)} />)}
+        </div>
+      )}
+      {rejected.length > 0 && <div className="tiny muted">You marked {rejected.map(d => d.base).join(', ')} as not this. {rejected.length === 1
+        ? <button className="link tiny" onClick={() => judge(rejected[0].base, null)}>undo</button>
+        : rejected.map(d => <button key={d.base} className="link tiny" onClick={() => judge(d.base, null)}>undo {d.base}</button>)}</div>}
       {infra.length > 0 && (
         <div className="small muted">
           <button className="link small" onClick={() => setShowInfra(!showInfra)}>{showInfra ? '▾' : '▸'} {infra.length} third-party deployments named like it</button> (not your code: {infra.map(d => d.base).slice(0, 4).join(', ')}{infra.length > 4 ? '…' : ''})
@@ -257,14 +285,16 @@ export function DataSection({ concept, repos, bare, onSummary }: { concept: stri
   )
 }
 
-function DepCard({ d }: { d: Dep }) {
+function DepCard({ d, onJudge, confirmed, onUndo }: { d: Dep; onJudge?: (v: 'yes' | 'no') => void; confirmed?: boolean; onUndo?: () => void }) {
   const labels = [...new Set(d.facts.map(f => f.label))]
   const sources = [...new Set(d.facts.map(f => f.source))]
   const cell = (label: string, source: string) => d.facts.find(f => f.label === label && f.source === source)
-  const badge = d.origin === 'yours' ? 'runs your code' : d.origin === 'org' ? 'name match only · built by your org' : d.origin === 'third-party' ? 'name match only · third-party' : 'name match only'
+  const badge = d.origin === 'yours' ? 'runs your code' : confirmed ? 'you confirmed it' : d.origin === 'org' ? 'name match only · built by your org' : d.origin === 'third-party' ? 'name match only · third-party' : 'name match only'
   return (
     <div className="ex-dep small">
-      <div><b>{d.base}</b> <span className={`ex-badge ${d.origin}`}>{badge}</span>{d.chartPath && <span className="muted"> · chart {shortPath(d.chartPath)}</span>}</div>
+      <div><b>{d.base}</b> <span className={`ex-badge ${confirmed ? 'yours' : d.origin}`}>{badge}</span>{d.chartPath && <span className="muted"> · chart {shortPath(d.chartPath)}</span>}
+        {confirmed && onUndo && <button className="link tiny" onClick={onUndo}> undo</button>}</div>
+      {onJudge && <div className="ex-judge">Is this where it runs? <button className="small" onClick={() => onJudge('yes')}>Yes</button> <button className="small" onClick={() => onJudge('no')}>No</button></div>}
       {d.apps.map(a => (
         <div key={a.name} className="ex-app">
           <span className={`ex-dot ${a.health === 'Healthy' ? 'connected' : a.error ? 'error' : 'expired'}`} title={`${a.health ?? '?'} · ${a.sync ?? '?'}`} />
