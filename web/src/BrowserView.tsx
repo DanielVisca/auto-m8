@@ -275,6 +275,15 @@ function JsCode({ src }: { src: string }) {
   return <>{out}</>
 }
 
+// The row already shows its error under the label: don't list it again in the details (as "error",
+// or as a failed call's "result" that is just the error text).
+const norm = (t: string) => t.replace(/^(Browser error|Error):\s*/, '').trim()
+function repeatsError(it: FeedItem, k: string, v: string) {
+  if (!it.error || (k !== 'error' && k !== 'result')) return false
+  const e = norm(it.error)
+  return norm(v).startsWith(e) || e.startsWith(norm(v).split('\n')[0])
+}
+
 // One span or event on the shared timeline [t0, t1]: a bar for spans (growing while running), a tick
 // for instant events. Concerns show in amber with their reason, always visible.
 function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1: number; now: number; depth?: number }) {
@@ -305,7 +314,7 @@ function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1:
       <span className="ago">{ago(it.at, now)}</span>
     </div>
     {open && <div className="feed-detail" style={{ marginLeft: 22 + depth * 14 }}>
-      {it.detail && Object.entries(it.detail).filter(([k, v]) => v && k !== 'host').map(([k, v]) => k === 'script'
+      {it.detail && Object.entries(it.detail).filter(([k, v]) => v && k !== 'host' && !repeatsError(it, k, v)).map(([k, v]) => k === 'script'
         ? <div key={k} className="kv"><span className="k">{k}</span><pre className="feed-code"><JsCode src={v} /></pre></div>
         : <div key={k} className="kv"><span className="k">{k}</span><span className={`v ${MONO.has(k) ? 'mono' : ''}`}>{v}</span></div>
       )}
