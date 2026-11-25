@@ -48,3 +48,17 @@ test('generated files never trip PostHog\'s text checks, and still mean the same
   for (const re of [checks[0], checks[3]]) assert.doesNotMatch(code, re)
   assert.deepEqual(new Function(`${code}; return [a, b, c]`)(), [['rules import'], "data from 'x'", '<script>'])
 })
+
+test('share status flags local changes made after the last share', async () => {
+  const { boardHash, shareStatus } = await import('./share.ts')
+  const b = createBoard('Ops')
+  const t = saveTile({ folder_id: b.id, kind: 'note', x: 0, y: 0, w: 3, h: 3, config: { text: 'one' } })
+  run(`insert into board_shares (board_id, target, remote_id, url, audience, audience_label, version_id, shared_at, notes, source_hash) values (?, 'posthog', 'not-a-canvas', 'https://example.test/c', 'a', 'Only me', 'v1', 1, '[]', ?)`, b.id, boardHash(board(b.id)!))
+  assert.equal((await shareStatus(b.id, true))[0].local_changes, false)
+  saveTile({ ...t, state: { seen: true } }) // saved tile state isn't a change to the board
+  assert.equal((await shareStatus(b.id, true))[0].local_changes, false)
+  saveTile({ ...t, config: { text: 'two' } })
+  const s = (await shareStatus(b.id, true))[0]
+  assert.equal(s.local_changes, true)
+  assert.equal(s.viewers, null) // no PostHog here: no viewer data, not an error
+})

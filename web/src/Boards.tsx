@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { post, toast, useLive, type Conversation } from './api'
 import { Canvas } from './Canvas'
 import { Splitter, useColumnWidth } from './Splitter'
+import { ShareStatus } from './Share'
 
 export type BoardSummary = { id: string; name: string; about: string | null; pinned: number; updated_at: number; ttl_seconds: number | null; expires_at: number | null; tiles: { id: string; kind: string; title: string; error: string | null }[] }
 export const useBoards = () => useLive<{ boards: BoardSummary[] }>('/api/boards', ['canvas'])
@@ -45,6 +46,7 @@ function BoardHead({ b, onBoards }: { b: BoardSummary; onBoards?: () => void }) 
     <div className="row-flex board-head" style={{ flexWrap: 'wrap' }}>
       {onBoards && <button className="link small" onClick={onBoards}>← Canvases</button>}
       <input className="board-name grow" value={name} onChange={e => setName(e.target.value)} onBlur={() => name.trim() && name !== b.name && save({ name: name.trim() })} />
+      <ShareStatus boardId={b.id} />
       <LifetimeSelect value={b.ttl_seconds} onChange={ttl_seconds => save({ ttl_seconds })} />
       <KeepBoard b={b} />
       <button className={`small ${b.pinned ? 'on' : ''}`} onClick={() => save({ pinned: !b.pinned })} title="Pinning keeps this canvas permanently and adds a link on Home (3 at most)">{b.pinned ? '⌂ On Home' : '⌂ Pin to Home'}</button>

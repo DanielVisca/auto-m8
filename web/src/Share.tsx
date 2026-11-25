@@ -43,7 +43,7 @@ export function ShareButton({ boardId }: { boardId: string }) {
     const r = await post<Share & { error?: string }>(`/api/boards/${encodeURIComponent(boardId)}/share`, { target, audience, overwrite }).catch(e => ({ error: String(e.message ?? e) } as any))
     setBusy(false)
     if (r.error) return setErr(r.error)
-    setResult(r); loadShares()
+    setResult(r); loadShares(); window.dispatchEvent(new Event('board-shared'))
     if (!r.conflict && r.url) { navigator.clipboard?.writeText(r.url).catch(() => {}); toast('Shared. Link copied.', { kind: 'ok' }) }
   }
   const chosen = audiences?.find(a => a.id === audience)
@@ -87,6 +87,59 @@ export function ShareButton({ boardId }: { boardId: string }) {
           )}
         </div>
       </Popover>
+    </>
+  )
+}
+
+// Where this board is shared, in the board's header: a link to each shared copy, a note when the
+// local board has changes the copy doesn't, and (like Drive's viewer avatars) little bubbles of
+// who opened it in the last 30 days, with a green ring for anyone on it in the last 5 minutes.
+type Viewer = { name: string; email: string | null; last: number; views: number; now: boolean }
+type Status = Share & { board_id: string; label: string; local_changes: boolean; remote_changed: boolean; viewers: Viewer[] | null; views: number | null }
+
+const shortAudience = (label: string | null) => !label ? '' : /filed in (#[\w-]+)/.exec(label)?.[1] ?? (label.startsWith('Only me') ? 'only me' : label.replace(/^Members of /, ''))
+const hue = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)
+const initials = (n: string) => n.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('') || '?'
+
+export function ShareStatus({ boardId }: { boardId: string }) {
+  const [list, setList] = useState<Status[]>([])
+  const [busy, setBusy] = useState(false)
+  const load = (fresh = false) => api.get<{ shares: Status[] }>(`/api/boards/${encodeURIComponent(boardId)}/share-status${fresh ? '?fresh=1' : ''}`).then(r => setList(r.shares ?? [])).catch(() => {})
+  useEffect(() => {
+    load()
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, 60_000)
+    const shared = () => load(true)
+    window.addEventListener('board-shared', shared)
+    return () => { clearInterval(t); window.removeEventListener('board-shared', shared) }
+  }, [boardId]) // eslint-disable-line
+  if (!list.length) return null
+  const update = async (s: Status, overwrite = false) => {
+    setBusy(true)
+    const r = await post<any>(`/api/boards/${encodeURIComponent(boardId)}/share`, { target: s.target, audience: s.audience, overwrite }).catch(e => ({ error: String(e.message ?? e) }))
+    setBusy(false)
+    if (r.error) toast(r.error)
+    else if (r.conflict) toast('It was edited in PostHog since you shared it. Use Replace to overwrite (PostHog keeps that version).')
+    else toast('Shared copy updated.', { kind: 'ok' })
+    load(true)
+  }
+  return (
+    <>
+      {list.map(s => (
+        <span key={s.target} className="row-flex small share-status" style={{ gap: 6, alignItems: 'center' }}>
+          <a href={s.url ?? undefined} target="_blank" rel="noreferrer" title={`${s.label}: ${s.audience_label ?? ''}. Shared ${ago(s.shared_at)}.`} className="muted">⇪ {s.target === 'posthog' ? 'PostHog' : s.label} · {shortAudience(s.audience_label)}</a>
+          {s.local_changes && <button className="link small" disabled={busy} onClick={() => update(s)} title="This board has changed since you shared it. Publish the changes as a new version.">● local changes · {busy ? 'updating…' : 'update'}</button>}
+          {s.remote_changed && <button className="link small" disabled={busy} style={{ color: 'var(--warn)' }} onClick={() => confirm('Replace the version edited in PostHog with this board? PostHog keeps the old version in its history.') && update(s, true)} title="Someone changed the shared copy in PostHog since you last shared it">edited in PostHog · replace</button>}
+          {!!s.viewers?.length && (
+            <span className="row-flex" style={{ gap: 0, alignItems: 'center' }} title={`${s.viewers.length} ${s.viewers.length === 1 ? 'person' : 'people'} opened it in the last 30 days`}>
+              {s.viewers.slice(0, 4).map((v, i) => (
+                <span key={v.email ?? v.name} title={`${v.name}${v.now ? ' · viewing now' : ` · viewed ${ago(v.last)}`}${v.views > 1 ? ` · ${v.views} visits` : ''}`}
+                  style={{ width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 600, color: '#fff', background: `hsl(${hue(v.email ?? v.name)} 45% 45%)`, marginLeft: i ? -5 : 0, boxShadow: v.now ? '0 0 0 2px var(--ok)' : '0 0 0 2px var(--bg)' }}>{initials(v.name)}</span>
+              ))}
+              {s.viewers.length > 4 && <span className="muted" style={{ marginLeft: 4 }}>+{s.viewers.length - 4}</span>}
+            </span>
+          )}
+        </span>
+      ))}
     </>
   )
 }

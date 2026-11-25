@@ -5,8 +5,9 @@
 //   channel by default). Versions, drafts and revert = PostHog's canvas versions. Tile state =
 //   ph.state (per viewer). Data runs as the viewer, with their own PostHog access.
 // More targets (a Claude artifact, ...) plug in by adding to TARGETS.
+import { createHash } from 'node:crypto'
 import { all, db, get, run } from './db.ts'
-import { posthogFetch } from './indexer.ts'
+import { ensureUser, posthogFetch, posthogStatus } from './indexer.ts'
 import { settings } from './settings.ts'
 import { board as getBoard } from './boards.ts'
 import type { Tile } from './canvas.ts'
@@ -16,19 +17,29 @@ db.exec(`create table if not exists board_shares (
   audience text, audience_label text, version_id text, shared_at integer not null,
   notes text, primary key (board_id, target)
 )`)
+if (!all<any>('pragma table_info(board_shares)').some(c => c.name === 'source_hash')) db.exec('alter table board_shares add column source_hash text')
 
 export type Audience = { id: string; label: string; kind?: 'private' | 'project' | 'members'; hint?: string; group?: string; private?: boolean }
 export type Share = { board_id: string; target: string; remote_id: string; url: string | null; audience: string | null; audience_label: string | null; version_id: string | null; shared_at: number; notes: string[] }
 export type ShareResult = Share & { conflict?: boolean }
 type Board = NonNullable<ReturnType<typeof getBoard>>
+export type Viewer = { name: string; email: string | null; last: number; views: number; now: boolean }
+export type ShareStatus = Share & { label: string; local_changes: boolean; remote_changed: boolean; viewers: Viewer[] | null; views: number | null }
 type Target = {
   id: string; label: string; about: string
+  // Optional: what the other side knows now (edited there? who opened it lately?).
+  status?(s: Share): Promise<{ remote_changed: boolean; viewers: Viewer[] | null; views: number | null }>
   available(): Promise<{ ok: boolean; why?: string }>
   audiences(): Promise<Audience[]>
   share(b: Board, opts: { audience?: string; overwrite?: boolean; prev?: Share; created: (remote: { remote_id: string; url: string | null; audience: string | null }) => void }): Promise<Omit<Share, 'board_id' | 'target' | 'shared_at'> & { conflict?: boolean }>
 }
 
-const parse = (r: any): Share => ({ ...r, notes: r.notes ? JSON.parse(r.notes) : [] })
+const parse = (r: any): Share => { const { source_hash: _h, ...rest } = r; return { ...rest, notes: r.notes ? JSON.parse(r.notes) : [] } }
+// What a share depends on: the board's name, about and tiles (layout and content, not their saved state).
+export function boardHash(b: { name: string; about?: string | null; tiles: Tile[] }) {
+  const tiles = [...b.tiles].sort((x, y) => x.id.localeCompare(y.id)).map(t => ({ id: t.id, kind: t.kind, x: t.x, y: t.y, w: t.w, h: t.h, config: t.config }))
+  return createHash('sha1').update(JSON.stringify({ name: b.name, about: b.about ?? '', tiles })).digest('hex')
+}
 export const sharesOf = (boardId: string): Share[] => all<any>('select * from board_shares where board_id = ? order by shared_at desc', boardId).map(parse)
 
 // ---------- Translation: a board as a PostHog canvas source project ----------
@@ -304,6 +315,31 @@ const posthogTarget: Target = {
         hint: `Anyone with access to ${scope} can open it, whichever channel it's filed in. Not the public internet: PostHog canvases have no public link. Snapshots of auto-m8 data on the board go with it.` }
     }).sort((a: Audience, b: Audience) => rank[a.kind!] - rank[b.kind!] || Number(b.label.includes('#general')) - Number(a.label.includes('#general')) || a.label.localeCompare(b.label))
   },
+  // Edited in PostHog since we published? Who has opened it lately? Views come from PostHog's own
+  // product analytics (its 'Canvas viewed' event and pageviews), so they show up only where the
+  // PostHog app reports usage into the configured project; elsewhere this stays empty.
+  async status(sh) {
+    const p = project()
+    const canvas: any = await posthogFetch(`/api/projects/${p}/canvases/${sh.remote_id}/`).catch(() => null)
+    const remote_changed = !!(canvas?.current_version_id && sh.version_id && canvas.current_version_id !== sh.version_id)
+    if (!/^[0-9a-f-]{20,}$/i.test(sh.remote_id)) return { remote_changed, viewers: null, views: null }
+    const me = (await ensureUser().catch(() => null), posthogStatus.user?.email ?? '').toLowerCase()
+    const id = sh.remote_id
+    const r: any = await posthogFetch(`/api/projects/${p}/query/`, { method: 'POST', body: JSON.stringify({ query: { kind: 'HogQLQuery', query: `
+      select person.properties.email as email, any(person.properties.name) as name, any(person.properties.first_name) as first, max(timestamp) as last, count() as n
+      from events
+      where timestamp > now() - interval 30 day
+        and ((event = 'Canvas viewed' and properties.dashboard_id = '${id}') or (event = '$pageview' and properties.$pathname like '%${id}%'))
+      group by email order by last desc limit 50` } }) }).catch(() => null)
+    if (!r?.results) return { remote_changed, viewers: null, views: null }
+    const viewers: Viewer[] = r.results
+      .filter((x: any[]) => String(x[0] ?? '').toLowerCase() !== me)
+      .map((x: any[]) => {
+        const email = x[0] ? String(x[0]) : null, ts = String(x[3]), last = Date.parse(/(z|[+-]\d\d:\d\d)$/i.test(ts) ? ts : ts.replace(' ', 'T') + 'Z')
+        return { name: String(x[1] || x[2] || (email ? email.split('@')[0] : 'Someone')), email, last, views: Number(x[4]) || 0, now: Date.now() - last < 5 * 60_000 }
+      })
+    return { remote_changed, viewers, views: viewers.reduce((a, v) => a + v.views, 0) }
+  },
   async share(b, { audience, overwrite, prev, created }) {
     const p = project()
     const { project: source, notes } = translateForPostHog(b)
@@ -357,6 +393,27 @@ export async function audiences(target: string) {
   return t.audiences()
 }
 
+// Where a board is shared, whether the local board has changes the shared copy lacks, and who has
+// opened it lately (cached a minute: views don't need to be second-fresh).
+const statusCache = new Map<string, { at: number; v: ShareStatus[] }>()
+export async function shareStatus(boardId: string, fresh = false): Promise<ShareStatus[]> {
+  const hit = statusCache.get(boardId)
+  if (hit && !fresh && Date.now() - hit.at < 60_000) return hit.v
+  const b = getBoard(boardId)
+  if (!b) return []
+  const hash = boardHash(b)
+  const rows = all<any>('select * from board_shares where board_id = ? order by shared_at desc', boardId)
+  // Shares made before hashes were kept: take the board as it is now as their baseline.
+  for (const r of rows) if (!r.source_hash) { r.source_hash = hash; run('update board_shares set source_hash = ? where board_id = ? and target = ?', hash, boardId, r.target) }
+  const v = await Promise.all(rows.map(async r => {
+    const sh = parse(r), t = TARGETS.find(x => x.id === sh.target)
+    const remote = await t?.status?.(sh).catch(() => null)
+    return { ...sh, label: t?.label ?? sh.target, local_changes: !!r.source_hash && r.source_hash !== hash, remote_changed: remote?.remote_changed ?? false, viewers: remote?.viewers ?? null, views: remote?.views ?? null }
+  }))
+  statusCache.set(boardId, { at: Date.now(), v })
+  return v
+}
+
 export async function shareBoard(boardId: string, target: string, opts: { audience?: string; overwrite?: boolean } = {}): Promise<ShareResult> {
   const b = getBoard(boardId)
   if (!b) throw new Error('No such board')
@@ -369,9 +426,10 @@ export async function shareBoard(boardId: string, target: string, opts: { audien
   let label = r.audience_label
   if (!label && r.audience) label = (await t.audiences().catch(() => [] as Audience[])).find(a => a.id === r.audience)?.label ?? null
   const row: Share = { board_id: boardId, target, remote_id: r.remote_id, url: r.url ?? null, audience: r.audience ?? null, audience_label: label, version_id: r.version_id ?? null, shared_at: r.conflict ? prev?.shared_at ?? Date.now() : Date.now(), notes: r.notes }
-  if (!r.conflict) run(`insert into board_shares (board_id, target, remote_id, url, audience, audience_label, version_id, shared_at, notes) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    on conflict(board_id, target) do update set remote_id = excluded.remote_id, url = excluded.url, audience = excluded.audience, audience_label = excluded.audience_label, version_id = excluded.version_id, shared_at = excluded.shared_at, notes = excluded.notes`,
-    row.board_id, row.target, row.remote_id, row.url, row.audience, row.audience_label, row.version_id, row.shared_at, JSON.stringify(row.notes))
+  if (!r.conflict) run(`insert into board_shares (board_id, target, remote_id, url, audience, audience_label, version_id, shared_at, notes, source_hash) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    on conflict(board_id, target) do update set remote_id = excluded.remote_id, url = excluded.url, audience = excluded.audience, audience_label = excluded.audience_label, version_id = excluded.version_id, shared_at = excluded.shared_at, notes = excluded.notes, source_hash = excluded.source_hash`,
+    row.board_id, row.target, row.remote_id, row.url, row.audience, row.audience_label, row.version_id, row.shared_at, JSON.stringify(row.notes), boardHash(b))
+  statusCache.delete(boardId)
   return { ...row, conflict: r.conflict }
 }
 
