@@ -39,3 +39,22 @@ test('a competitor reports coverage, depth, data scale and method, and its map i
   R.saveProduct({ id: p.id, scope: 'Traces and logs' })
   assert.equal(competitors().find(x => x.id === p.id)!.data_scale, '1 service, 10k spans')
 })
+
+test('board previews accept only a JPEG for a real board, and the canvases list reports when it was taken', async () => {
+  const { saveThumb, thumbFile } = await import('./explorehub.ts')
+  const b = createBoard('Shots')
+  assert.throws(() => saveThumb(b.id, Buffer.from('not a jpeg at all '.repeat(10)).toString('base64')), /JPEG/)
+  assert.throws(() => saveThumb('nope', 'x'), /No such board/)
+  assert.throws(() => thumbFile('../etc'), /Bad board id/)
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(200)]).toString('base64')
+  saveThumb(b.id, jpeg)
+  assert.ok(thumbFile(b.id))
+  assert.ok(canvases().find(x => x.id === b.id)!.thumb_at)
+})
+
+test('an unmapped repo previews as its top folders by file count', async () => {
+  const { codePreview } = await import('./explorehub.ts')
+  const p = await codePreview(process.cwd())
+  assert.ok(p.kind === 'folders' || p.kind === 'graph')
+  if (p.kind === 'folders') assert.ok(p.folders.some(f => f.name === 'server'))
+})

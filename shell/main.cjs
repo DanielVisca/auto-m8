@@ -368,6 +368,33 @@ ipcMain.handle('popout', (_e, url) => {
   w.loadURL(url)
   return true
 })
+// Canvas previews for Explore: render one board offscreen (?thumb=<id>: the board alone, no activity
+// pings, so temporary boards don't get renewed), wait for its tiles, and return a small JPEG.
+let thumbBusy = Promise.resolve(), thumbWin = null, thumbIdle = null
+function thumbWindow() {
+  if (thumbWin && !thumbWin.isDestroyed()) return thumbWin
+  thumbWin = new BrowserWindow({ show: false, width: 1440, height: 900, paintWhenInitiallyHidden: true,
+    webPreferences: { offscreen: true, preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true } })
+  thumbWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  thumbWin.webContents.setAudioMuted(true)
+  return thumbWin
+}
+ipcMain.handle('board-thumb', (_e, url) => {
+  if (!LOCAL.test(String(url)) || !/[?&]thumb=/.test(String(url))) return null
+  const job = thumbBusy.then(async () => {
+    clearTimeout(thumbIdle)
+    const w = thumbWindow()
+    try {
+      await Promise.race([w.loadURL(url), new Promise((_, rej) => setTimeout(() => rej(new Error('load timeout')), 15000))])
+      await new Promise(r => setTimeout(r, 6000)) // code tiles fetch data and draw
+      const img = await w.webContents.capturePage()
+      return img.resize({ width: 720, quality: 'good' }).toJPEG(72).toString('base64')
+    } catch (e) { shellLog(`board thumb failed: ${e.message}`); return null }
+    finally { thumbIdle = setTimeout(() => { if (thumbWin && !thumbWin.isDestroyed()) thumbWin.destroy(); thumbWin = null }, 60_000) }
+  })
+  thumbBusy = job.catch(() => null)
+  return job
+})
 ipcMain.handle('pin', (_e, on) => { win.setAlwaysOnTop(!!on, 'floating'); return win.isAlwaysOnTop() })
 ipcMain.handle('is-pinned', () => win.isAlwaysOnTop())
 // Big decisions waiting on you show on the dock icon, so you see them without opening perch.

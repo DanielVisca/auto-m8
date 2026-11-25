@@ -80,3 +80,22 @@
 .exh-strip button.on { border-color: var(--accent); }
 .exh-strip img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 @media (max-width: 800px) { .exh-body.with-info, .exh-map { grid-template-columns: minmax(0, 1fr); } .exh-info { position: static; max-height: none; } }
+
+/* Text stays inside its tile: buttons default to nowrap. */
+.exh-tile, .exh-card-main { white-space: normal; overflow: hidden; }
+.exh-tile > *, .exh-card-main > * { max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
+.exh-tile .small, .exh-card-main .small { display: block; }
+.exh-art-quad { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 3px; padding: 3px; box-sizing: border-box; align-items: stretch; }
+.exh-art-quad .exh-thumb { height: auto; min-height: 0; border-radius: 4px; padding: 2px; background: var(--bg); }
+.exh-thumb.shot { padding: 0; background: var(--bg); }
+.exh-thumb.shot img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+.exh-thumb.big { height: 180px; margin: 6px 0; }
+.exh-code { width: 100%; height: 100%; }
+.exh-code path { fill: none; stroke: var(--muted); opacity: .45; }
+.exh-code path.fk { stroke: var(--accent); opacity: .8; }
+.exh-code circle { fill: var(--accent); stroke: var(--bg); stroke-width: 1; }
+.exh-code text { fill: var(--muted); font-size: 8px; }
+.exh-code.tree rect { fill: color-mix(in srgb, var(--accent) 35%, var(--bg)); stroke: none; }
+.exh-code.tree text { fill: var(--fg); font-size: 9px; }
+.exh-tree-map { position: relative; width: 100%; height: 100%; }
+.exh-tree-map span { position: absolute; box-sizing: border-box; border: 1px solid var(--bg3); border-radius: 3px; background: color-mix(in srgb, var(--accent) 35%, var(--bg)); color: var(--fg); font-size: 9px; padding: 2px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

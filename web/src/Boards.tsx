@@ -25,6 +25,7 @@ function KeepBoard({ b }: { b: BoardSummary }) {
 export function BoardPage({ id, onOpen, onBoards }: { id: string; onOpen: (id: string) => void; onBoards: () => void }) {
   const { data, error } = useLive<any>(`/api/boards/${encodeURIComponent(id)}`, ['canvas'])
   const recent = recentList(useRecent().data)
+  useEffect(() => { post(`/api/boards/${encodeURIComponent(id)}/opened`, {}).catch(() => {}) }, [id])
   if (error) return <div className="pad muted">{error === 'No such board' ? 'This canvas expired or was removed.' : error} <button className="link" onClick={onBoards}>All boards</button></div>
   if (!data) return <div className="pad muted">…</div>
   if (data.error) return <div className="pad muted">This board is gone. <button className="link" onClick={onBoards}>All boards</button></div>
@@ -114,6 +115,7 @@ export function WithBoard({ conversationId, chat, onOpen }: { conversationId: st
   const cb = conversationId ? data?.board : null
   const recent = recentList(useRecent().data)
   const { data: b, error } = useLive<any>(cb ? `/api/boards/${encodeURIComponent(cb.board_id)}` : null, ['canvas'])
+  useEffect(() => { if (cb?.board_id) post(`/api/boards/${encodeURIComponent(cb.board_id)}/opened`, {}).catch(() => {}) }, [cb?.board_id])
   if (!cb || !b || b.error || error) return <>{chat}</>
   const set = (patch: any) => post(`/api/chat-board/${encodeURIComponent(conversationId!)}`, { board_id: cb.board_id, layout: cb.layout, ...patch })
   const head = (

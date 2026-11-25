@@ -331,7 +331,7 @@ export const shortPath = (p?: string | null) => (p ? p.replace(/^\/Users\/[^/]+/
 export const baseName = (p?: string | null) => (p ? p.split('/').filter(Boolean).pop() ?? p : '')
 
 // The Electron shell exposes a few window controls; in a browser they are absent.
-export const shell: { switchProfile?: (id: string) => Promise<string>; mini?: (on: boolean) => Promise<'mini' | 'restored' | 'none'>; miniSize?: (s: 'pill' | 'card' | 'panel') => Promise<string>; onMiniSize?: (cb: (s: 'pill' | 'card' | 'panel' | 'none') => void) => () => void; tuck?: (on: boolean) => Promise<'tucked' | 'restored' | 'none'>; isElectron?: boolean; pin?: (on: boolean) => Promise<boolean>; preset?: (n: string) => void; buttons?: (on: boolean) => void; isPinned?: () => Promise<boolean>; theme?: (t: string) => void; badge?: (text: string) => void } =
+export const shell: { boardThumb?: (url: string) => Promise<string | null>; switchProfile?: (id: string) => Promise<string>; mini?: (on: boolean) => Promise<'mini' | 'restored' | 'none'>; miniSize?: (s: 'pill' | 'card' | 'panel') => Promise<string>; onMiniSize?: (cb: (s: 'pill' | 'card' | 'panel' | 'none') => void) => () => void; tuck?: (on: boolean) => Promise<'tucked' | 'restored' | 'none'>; isElectron?: boolean; pin?: (on: boolean) => Promise<boolean>; preset?: (n: string) => void; buttons?: (on: boolean) => void; isPinned?: () => Promise<boolean>; theme?: (t: string) => void; badge?: (text: string) => void } =
   (window as any).perch ?? {}
 
 export const STATES: { id: State; label: string; hint: string }[] = [

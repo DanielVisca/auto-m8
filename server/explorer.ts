@@ -4,7 +4,7 @@
 // generic rules, edges are imports and ORM foreign keys between them.
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, posix, sep } from 'node:path'
@@ -650,6 +650,32 @@ export async function graphFor(repoPath: string, home?: string): Promise<Graph> 
     while (graphs.size > 4) graphs.delete(graphs.keys().next().value!)
   }
   return graphs.get(key)!
+}
+
+// The graph for HEAD if it was already scanned (memory or disk); never starts a scan. For previews.
+export async function cachedGraph(repoPath: string): Promise<Graph | null> {
+  const repo = await checkRepo(repoPath)
+  const sha = (await git(repo, ['rev-parse', 'HEAD'], 5000)).trim()
+  const key = keyOf('graph-v2-adaptive', repo, sha, JSON.stringify(containersFor(repo)))
+  if (graphs.has(key)) return graphs.get(key)!.catch(() => null)
+  const file = DIR && join(DIR, `${key}.json`)
+  if (file && existsSync(file)) try { return JSON.parse(readFileSync(file, 'utf8')) as Graph } catch {}
+  // An older scan of this repo still shows its shape; take the newest one.
+  if (!DIR) return null
+  let best: { at: number; g: Graph } | null = null
+  for (const f of readdirSync(DIR)) {
+    if (!f.endsWith('.json')) continue
+    const path = join(DIR, f)
+    try {
+      const at = statSync(path).mtimeMs
+      if (best && at < best.at) continue
+      const buf = Buffer.alloc(400), fd = openSync(path, 'r'); readSync(fd, buf, 0, 400, 0); closeSync(fd)
+      const head = buf.toString('utf8')
+      if (!head.includes(JSON.stringify(repo))) continue
+      best = { at, g: JSON.parse(readFileSync(path, 'utf8')) as Graph }
+    } catch {}
+  }
+  return best?.g ?? null
 }
 
 export async function exploreGraph(repo: string, focus?: string | null, hubs = false) {

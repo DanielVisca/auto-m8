@@ -1,12 +1,12 @@
 // Explore's landing page: pick what to explore (canvases, competitor products, codebases), then a
 // sortable gallery of each, with an info panel that links back to the chats behind every item.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ago, useLive } from './api'
-import { useRepos } from './ExploreRuntime'
+import { ago, post, shell, useLive } from './api'
+import type { Repo } from './ExploreRuntime'
 import './explorehub.css'
 
 type ChatRef = { id: string; title: string; role: string; at: number }
-type Canvas = { id: string; name: string; about: string | null; pinned: number; created_by: string | null; updated_at: number; opened_at: number | null; ttl_seconds: number | null; expires_at: number | null; kinds: Record<string, number>; errors: number; tiles: { id: string; kind: string; title: string; x: number; y: number; w: number; h: number }[]; chats: ChatRef[] }
+type Canvas = { id: string; name: string; about: string | null; pinned: number; created_by: string | null; updated_at: number; opened_at: number | null; thumb_at: number | null; ttl_seconds: number | null; expires_at: number | null; kinds: Record<string, number>; errors: number; tiles: { id: string; kind: string; title: string; x: number; y: number; w: number; h: number }[]; chats: ChatRef[] }
 type Product = { id: string; name: string; url: string; docs_url: string; trial_url: string; scope: string; context: string; sandbox: boolean; created_at: number; data_scale: string; method: string; items: number; status: Record<string, number>; covered: number; coverage: number; depth: string; first_at: number | null; last_at: number | null; evidence: number; screenshots: number; cover: string | null; chats: ChatRef[] }
 type Ev = { id: string; item_id: string; source: string; summary: string; url: string; captured_at: number; shot: boolean; friction: string | null; expected: string | null; chat: string | null; conv: string | null }
 type Item = { id: string; title: string; kind: string; url: string; status: string; notes: string; capability: string; depth: number; evidence: Ev[] }
@@ -23,6 +23,80 @@ function Thumb({ tiles }: { tiles: Canvas['tiles'] }) {
     <g key={t.id} className={`k-${t.kind}`}><rect x={t.x + .1} y={t.y + .1} width={Math.max(.4, t.w - .2)} height={Math.max(.4, t.h - .2)} rx=".25" />
       <text x={t.x + .35} y={t.y + .85} fontSize=".55">{t.title.slice(0, Math.max(4, t.w * 3))}</text></g>))}</svg></div>
 }
+// A board's preview: the app's cached screenshot when there is one, else its layout in miniature.
+function Preview({ c }: { c: Canvas }) {
+  const [broken, setBroken] = useState(false)
+  if (c.thumb_at && !broken) return <div className="exh-thumb shot"><img src={`/api/boards/${encodeURIComponent(c.id)}/thumb?v=${Math.round(c.thumb_at)}`} alt="" loading="lazy" onError={() => setBroken(true)} /></div>
+  return <Thumb tiles={c.tiles} />
+}
+// Inside the app, refresh missing or stale previews one at a time in a hidden window.
+// Stale = the board changed since its screenshot, and that screenshot is over 30 minutes old.
+const thumbQueue = new Set<string>()
+let thumbRunning = false
+function useThumbs(boards: Canvas[]) {
+  useEffect(() => {
+    if (!shell.boardThumb) return
+    const due = boards.filter(b => !b.thumb_at || (b.updated_at > b.thumb_at && Date.now() - b.thumb_at > 30 * 60_000))
+    for (const b of due.sort((a, b) => (b.opened_at ?? b.updated_at) - (a.opened_at ?? a.updated_at))) thumbQueue.add(b.id)
+    if (thumbRunning || !thumbQueue.size) return
+    thumbRunning = true
+    ;(async () => {
+      while (thumbQueue.size) {
+        const id = thumbQueue.values().next().value!
+        thumbQueue.delete(id)
+        try {
+          const jpeg = await shell.boardThumb!(`${location.origin.replace('localhost', '127.0.0.1')}/?thumb=${encodeURIComponent(id)}&theme=${document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')}`)
+          if (jpeg) await post(`/api/boards/${encodeURIComponent(id)}/thumb`, { jpeg })
+        } catch {}
+      }
+      thumbRunning = false
+    })()
+  }, [boards.map(b => `${b.id}:${b.thumb_at}:${b.updated_at}`).join(',')])
+}
+
+// ── Codebase previews ────────────────────────────────────────────────────────────────────────
+type CodePreview =
+  | { kind: 'graph'; sha: string; concepts: number; nodes: { id: string; name: string; files: number }[]; edges: { from: string; to: string; fk: boolean; weight: number }[] }
+  | { kind: 'folders'; files: number; folders: { name: string; files: number }[] }
+  | { kind: 'none' }
+type Codebase = Repo & { id: string; preview: CodePreview }
+const useCodebases = () => {
+  const d = useLive<any>('/api/explore/codebases', [], undefined, 15_000).data
+  return (Array.isArray(d) ? d : []).map((r: any) => ({ ...r, id: r.path })) as Codebase[]
+}
+// Mapped: its biggest modules on a ring, sized by files, with the imports (grey) and foreign keys
+// (accent) between them. Not mapped: its top folders as a treemap, sized by file count.
+function CodeArt({ p }: { p: CodePreview }) {
+  if (p.kind === 'graph') {
+    const W = 320, H = 120, n = p.nodes.length, max = Math.max(...p.nodes.map(x => x.files), 1)
+    const pos = new Map(p.nodes.map((x, i) => { const a = (i / n) * Math.PI * 2 - Math.PI / 2; return [x.id, { x: W / 2 + Math.cos(a) * 128, y: H / 2 + Math.sin(a) * 42 }] }))
+    const wmax = Math.max(...p.edges.map(e => e.weight), 1)
+    return <svg className="exh-code" viewBox={`0 0 ${W} ${H}`} aria-hidden>
+      {p.edges.map(e => { const a = pos.get(e.from)!, b = pos.get(e.to)!; return <path key={e.from + e.to} d={`M${a.x},${a.y} Q${W / 2},${H / 2} ${b.x},${b.y}`} className={e.fk ? 'fk' : ''} strokeWidth={0.4 + 1.6 * (e.weight / wmax)} /> })}
+      {p.nodes.map(x => { const q = pos.get(x.id)!; return <g key={x.id}><circle cx={q.x} cy={q.y} r={2.5 + 6 * Math.sqrt(x.files / max)} /><text x={q.x} y={q.y + (q.y > H / 2 ? 14 : -9)} textAnchor="middle">{x.name.slice(0, 14)}</text></g> })}
+    </svg>
+  }
+  if (p.kind === 'folders' && p.folders.length) {
+    const rects: { name: string; files: number; x: number; y: number; w: number; h: number }[] = []
+    const split = (items: { name: string; files: number }[], x: number, y: number, w: number, h: number) => {
+      if (!items.length) return
+      if (items.length === 1) { rects.push({ ...items[0], x, y, w, h }); return }
+      const total = items.reduce((s, i) => s + i.files, 0)
+      let acc = 0, k = 0
+      while (k < items.length - 1 && acc + items[k].files <= total / 2) acc += items[k++].files
+      if (k === 0) acc = items[k++].files
+      const f = acc / total
+      if (w >= h) { split(items.slice(0, k), x, y, w * f, h); split(items.slice(k), x + w * f, y, w * (1 - f), h) }
+      else { split(items.slice(0, k), x, y, w, h * f); split(items.slice(k), x, y + h * f, w, h * (1 - f)) }
+    }
+    split(p.folders, 0, 0, 100, 100)
+    // Percent boxes, so it fills any card shape and the labels stay crisp.
+    return <div className="exh-tree-map" aria-hidden>{rects.map((r, i) => (
+      <span key={r.name} style={{ left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%`, opacity: 1 - i * 0.06 }} title={`${r.name}: ${r.files} files`}>{r.w > 12 && r.h > 14 ? r.name : ''}</span>))}</div>
+  }
+  return <svg className="exh-code" viewBox="0 0 240 130" aria-hidden><text x="120" y="68" textAnchor="middle">no preview</text></svg>
+}
+
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const ROLE: Record<string, string> = { created: 'made it', shown: 'showed it', edited: 'edited it', tile: 'on a tile', docs: 'read docs', product: 'used the product', sandbox: 'used the trial' }
 
@@ -38,8 +112,11 @@ function Chats({ chats, onOpenChat, empty = 'No linked chats recorded.' }: { cha
 export function ExploreHub(nav: Nav) {
   const canvases = useLive<{ boards: Canvas[] }>('/api/explore/canvases', ['canvas']).data?.boards ?? []
   const products = useLive<{ products: Product[] }>('/api/explore/competitors', ['product-research']).data?.products ?? []
-  const repos = useRepos()
+  const repos = useCodebases()
   const recent = useMemo(() => { try { return JSON.parse(localStorage.getItem('perch.explore.repos') ?? '[]') as string[] } catch { return [] } }, [])
+  useThumbs(canvases)
+  const shown = [...canvases].sort((a, b) => (b.opened_at ?? b.updated_at) - (a.opened_at ?? a.updated_at)).slice(0, 4)
+  const mapped = repos.filter(r => r.preview.kind === 'graph').sort((a, b) => recent.indexOf(a.path) - recent.indexOf(b.path))
   const lastOpened = Math.max(0, ...canvases.map(c => c.opened_at ?? 0))
   const lastResearch = Math.max(0, ...products.map(p => p.last_at ?? 0))
   const shots = products.map(p => p.cover).filter(Boolean).slice(0, 4) as string[]
@@ -49,7 +126,7 @@ export function ExploreHub(nav: Nav) {
       <div className="muted small">Pick what to look through.</div>
       <div className="exh-tiles">
         <button className="exh-tile" onClick={() => nav.onSection('canvases')}>
-          <div className="exh-tile-art exh-art-canvas">{canvases.slice(0, 6).map(c => <span key={c.id}>{c.name}</span>)}</div>
+          <div className="exh-tile-art exh-art-quad">{shown.map(c => <Preview key={c.id} c={c} />)}</div>
           <b>Canvases</b>
           <span className="muted small">{canvases.length} boards · {canvases.filter(c => c.ttl_seconds != null).length} temporary{lastOpened ? ` · last opened ${ago(lastOpened)}` : ''}</span>
           <span className="small">Every board, sortable, with the chats that made it.</span>
@@ -60,10 +137,10 @@ export function ExploreHub(nav: Nav) {
           <span className="muted small">{products.length} products · {products.reduce((n, p) => n + p.screenshots, 0)} screenshots{lastResearch ? ` · last explored ${ago(lastResearch)}` : ''}</span>
           <span className="small">How far we mapped each one, screenshots and a quick tour.</span>
         </button>
-        <button className="exh-tile" onClick={() => nav.onSection('code')}>
-          <div className="exh-tile-art exh-art-code"><svg viewBox="0 0 120 60" aria-hidden><g stroke="currentColor" fill="none" opacity=".6"><path d="M20 30 L60 12 M20 30 L60 48 M60 12 L100 30 M60 48 L100 30 M60 12 L60 48" /></g>{[[20, 30], [60, 12], [60, 48], [100, 30]].map(([x, y]) => <circle key={`${x}${y}`} cx={x} cy={y} r="6" fill="var(--accent)" />)}</svg></div>
+        <button className="exh-tile" onClick={() => nav.onSection('codebases')}>
+          <div className="exh-tile-art exh-art-quad">{[...mapped, ...repos.filter(r => r.preview.kind !== 'graph')].slice(0, 4).map(r => <div key={r.path} className="exh-thumb"><CodeArt p={r.preview} /></div>)}</div>
           <b>Codebases</b>
-          <span className="muted small">{repos.length} repos on this Mac{recent.length ? ` · ${recent.length} mapped recently` : ''}</span>
+          <span className="muted small">{repos.length} repos on this Mac · {mapped.length} mapped</span>
           <span className="small">Architecture map: what each part is built on, and how it grew.</span>
         </button>
       </div>
@@ -109,6 +186,7 @@ function Gallery<T extends { id: string }>({ title, intro, items, sorts, filters
 // ── Canvases ─────────────────────────────────────────────────────────────────────────────────
 export function CanvasGallery(nav: Nav) {
   const items = useLive<{ boards: Canvas[] }>('/api/explore/canvases', ['canvas']).data?.boards ?? []
+  useThumbs(items)
   const lastTouch = (c: Canvas) => Math.max(c.opened_at ?? 0, c.updated_at)
   return <Gallery<Canvas> title="Canvases" intro="Every board. Click one to open it; ⓘ shows when it was used and the chats that made, showed or edited it."
     onSection={nav.onSection} items={items}
@@ -119,7 +197,7 @@ export function CanvasGallery(nav: Nav) {
     card={(c, select, selected) => (
       <div key={c.id} className={`exh-card ${selected ? 'sel' : ''}`}>
         <button className="exh-card-main" onClick={() => nav.onOpenBoard(c.id)} title={c.about ?? c.name}>
-          <Thumb tiles={c.tiles} />
+          <Preview c={c} />
           <b className="ellipsis">{c.name}</b>
           <span className="muted small">{c.tiles.length} tiles{c.errors ? ` · ${c.errors} failing` : ''} · {c.opened_at ? `opened ${ago(c.opened_at)}` : `changed ${ago(c.updated_at)}`}</span>
           <span className="exh-tags">{c.pinned ? <i>on Home</i> : null}{c.ttl_seconds != null ? <i className="warn">temporary · expires {until(c.expires_at)}</i> : null}{c.chats[0] && <i className="ellipsis">from {c.chats[0].title}</i>}</span>
@@ -295,4 +373,47 @@ function Tour({ slides, onItem }: { slides: { it: Item; e: Ev }[]; onItem: (id: 
       <div className="exh-strip">{slides.map((s, k) => <button key={s.e.id} className={k === i ? 'on' : ''} onClick={() => setI(k)} title={s.it.title}><img src={img(s.e.id)} alt="" loading="lazy" /></button>)}</div>
     </div>
   )
+}
+
+// ── Codebases ────────────────────────────────────────────────────────────────────────────────
+export function CodebaseGallery(nav: Nav) {
+  const items = useCodebases()
+  const recent = useMemo(() => { try { return JSON.parse(localStorage.getItem('perch.explore.repos') ?? '[]') as string[] } catch { return [] } }, [])
+  const rank = (r: Codebase) => { const i = recent.indexOf(r.path); return i < 0 ? 1e9 : i }
+  const size = (r: Codebase) => r.preview.kind === 'graph' ? r.preview.concepts * 1000 : r.preview.kind === 'folders' ? r.preview.files : 0
+  const t = (s: string | null) => s ? Date.parse(s) : 0
+  const sub = (r: Codebase) => r.preview.kind === 'graph' ? `mapped · ${r.preview.concepts} modules` : r.preview.kind === 'folders' ? `not mapped yet · ${r.preview.files.toLocaleString()} files` : 'no preview'
+  return <Gallery<Codebase> title="Codebases" intro="Repos on this Mac. Mapped ones show their biggest modules and the links between them; the rest show their top folders by size. Open one for the full architecture map."
+    onSection={nav.onSection} items={items}
+    sorts={[['Recently mapped', (a, b) => rank(a) - rank(b) || t(b.lastCommit) - t(a.lastCommit)], ['Last commit', (a, b) => t(b.lastCommit) - t(a.lastCommit)], ['Name', (a, b) => a.name.localeCompare(b.name)], ['Biggest', (a, b) => size(b) - size(a)]]}
+    filters={[['All', () => true], ['Mapped', r => r.preview.kind === 'graph'], ['Not mapped', r => r.preview.kind !== 'graph']]}
+    search={r => [r.name, r.org ?? '', r.path, r.branch ?? ''].join(' ')}
+    card={(r, select, selected) => (
+      <div key={r.path} className={`exh-card ${selected ? 'sel' : ''}`}>
+        <button className="exh-card-main" onClick={() => nav.onSection(r.path)} title={r.path}>
+          <div className="exh-thumb"><CodeArt p={r.preview} /></div>
+          <b className="ellipsis">{r.org ? `${r.org}/` : ''}{r.name}</b>
+          <span className="muted small ellipsis">{sub(r)}</span>
+          <span className="exh-tags">{r.branch && <i className="ellipsis">{r.branch}</i>}{r.lastCommit && <i>commit {ago(t(r.lastCommit))}</i>}{r.behindOrigin ? <i className="warn">{r.behindOrigin} behind</i> : null}</span>
+        </button>
+        <button className="exh-i" onClick={select} title="Info" aria-label={`Info about ${r.name}`}>ⓘ</button>
+      </div>
+    )}
+    info={r => (
+      <div className="exh-info-body">
+        <h3>{r.name}</h3>
+        <div className="exh-thumb big"><CodeArt p={r.preview} /></div>
+        <dl>
+          <dt>Path</dt><dd className="small">{r.path}</dd>
+          {r.remote && <><dt>Remote</dt><dd className="small">{r.remote}</dd></>}
+          <dt>Branch</dt><dd>{r.branch ?? '—'}{r.behindOrigin ? ` · ${r.behindOrigin} behind origin` : ''}</dd>
+          <dt>Last commit</dt><dd>{r.lastCommit ? `${ago(t(r.lastCommit))} ago · ${date(t(r.lastCommit))}` : '—'}</dd>
+          <dt>Last fetch</dt><dd>{r.lastFetch ? `${ago(t(r.lastFetch))} ago` : 'never'}{r.shallow ? ' · shallow clone' : ''}</dd>
+          <dt>Map</dt><dd>{sub(r)}</dd>
+        </dl>
+        {r.preview.kind === 'graph' && <><h4>Biggest modules</h4><ul className="exh-list small">{r.preview.nodes.slice(0, 8).map(n => <li key={n.id}><span className="muted">{n.files} files</span> {n.id}</li>)}</ul></>}
+        {r.preview.kind === 'folders' && <><h4>Top folders</h4><ul className="exh-list small">{r.preview.folders.slice(0, 8).map(f => <li key={f.name}><span className="muted">{f.files} files</span> {f.name}</li>)}</ul></>}
+        <button onClick={() => nav.onSection(r.path)}>{r.preview.kind === 'graph' ? 'Open architecture map' : 'Map this repo'}</button>
+      </div>
+    )} />
 }

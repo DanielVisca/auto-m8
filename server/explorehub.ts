@@ -1,6 +1,13 @@
 // Explore's landing data: galleries of canvases and researched products, each linked back to
 // the chats that made or used them. Read-only views over boards.ts and productresearch.ts.
+import { execFile } from 'node:child_process'
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { all, get } from './db.ts'
+import { cachedGraph } from './explorer.ts'
+import { listRepos } from './explorer-runtime.ts'
+import { DATA_DIR } from './settings.ts'
 import { boardChats, boards } from './boards.ts'
 import { product, type ResearchItem } from './productresearch.ts'
 
@@ -19,6 +26,20 @@ const chatRefs = (rows: { conversation_id: string; role: string; at: number }[])
   return [...seen.values()]
 }
 
+// Canvas previews: a screenshot the app takes of each board in a hidden window, kept on disk.
+const THUMBS = join(DATA_DIR, 'board-thumbs')
+const safeId = (id: string) => { if (!/^[\w-]{1,100}$/.test(id)) throw new Error('Bad board id'); return id }
+export const thumbFile = (id: string) => { const f = join(THUMBS, `${safeId(id)}.jpg`); return existsSync(f) ? f : null }
+export function saveThumb(id: string, jpegBase64: string) {
+  if (!get('select 1 from boards where id = ?', id)) throw new Error('No such board')
+  const buf = Buffer.from(String(jpegBase64), 'base64')
+  if (buf.length < 100 || buf.length > 3_000_000 || buf[0] !== 0xff || buf[1] !== 0xd8) throw new Error('Expected a JPEG under 3 MB')
+  mkdirSync(THUMBS, { recursive: true, mode: 0o700 })
+  writeFileSync(join(THUMBS, `${safeId(id)}.jpg`), buf, { mode: 0o600 })
+  return { ok: true }
+}
+const thumbAt = (id: string) => { try { const f = thumbFile(id); return f ? statSync(f).mtimeMs : null } catch { return null } }
+
 export function canvases() {
   const opened = new Map(all<{ id: string; opened_at: number | null }>('select id, opened_at from boards').map(r => [r.id, r.opened_at]))
   return boards().map(b => {
@@ -30,7 +51,7 @@ export function canvases() {
     // Where each tile sits, so the gallery card is a scaled-down picture of the board.
     const at = new Map(all<any>('select id, x, y, w, h from canvas_tiles where folder_id = ?', b.id).map(r => [r.id, r]))
     const layout = b.tiles.map(t => { const r = at.get(t.id); return { ...t, x: r?.x ?? 0, y: r?.y ?? 0, w: r?.w ?? 6, h: r?.h ?? 4 } })
-    return { ...b, tiles: layout, opened_at: opened.get(b.id) ?? null, kinds, errors: b.tiles.filter(t => t.error).length, chats: chatRefs([...boardChats(b.id), ...tileChats]) }
+    return { ...b, tiles: layout, opened_at: opened.get(b.id) ?? null, thumb_at: thumbAt(b.id), kinds, errors: b.tiles.filter(t => t.error).length, chats: chatRefs([...boardChats(b.id), ...tileChats]) }
   })
 }
 
@@ -75,4 +96,44 @@ export function competitor(id: string) {
   const walk = (parent: string | null, depth: number) => { for (const it of kids.get(parent) ?? []) { tree.push({ ...it, depth, evidence: byItem.get(it.id) ?? [] }); walk(it.id, depth + 1) } }
   walk(null, 0)
   return { ...summary(all<any>('select * from research_products where id = ?', p.id)[0]), tree }
+}
+
+// ── Codebases: a small picture of each repo for the gallery ──────────────────────────────────
+// Mapped repos get their biggest modules and the links between them (from the cached scan, never a
+// new one); the rest get their top folders by file count, from git.
+const run$ = promisify(execFile)
+
+export type CodePreview =
+  | { kind: 'graph'; sha: string; concepts: number; nodes: { id: string; name: string; files: number }[]; edges: { from: string; to: string; fk: boolean; weight: number }[] }
+  | { kind: 'folders'; files: number; folders: { name: string; files: number }[] }
+  | { kind: 'none' }
+
+export async function codePreview(repo: string): Promise<CodePreview> {
+  const g = await cachedGraph(repo).catch(() => null)
+  if (g?.concepts?.length) {
+    const top = [...g.concepts].sort((a, b) => b.files - a.files).slice(0, 14)
+    const ids = new Set(top.map(c => c.id))
+    const pairs = new Map<string, { from: string; to: string; fk: boolean; weight: number }>()
+    for (const e of g.edges) {
+      if (!ids.has(e.from) || !ids.has(e.to) || e.from === e.to) continue
+      const k = `${e.from}\0${e.to}`, old = pairs.get(k)
+      pairs.set(k, { from: e.from, to: e.to, fk: (old?.fk ?? false) || e.kind === 'fk', weight: (old?.weight ?? 0) + e.weight })
+    }
+    const edges = [...pairs.values()].sort((a, b) => b.weight - a.weight).slice(0, 40)
+    return { kind: 'graph', sha: g.sha, concepts: g.concepts.length, nodes: top.map(c => ({ id: c.id, name: c.name, files: c.files })), edges }
+  }
+  try {
+    const { stdout } = await run$('git', ['-C', repo, 'ls-files'], { maxBuffer: 1 << 28, timeout: 10_000 })
+    const counts = new Map<string, number>()
+    let files = 0
+    for (const f of stdout.split('\n')) { if (!f) continue; files++; const i = f.indexOf('/'); const top = i < 0 ? '(root files)' : f.slice(0, i); counts.set(top, (counts.get(top) ?? 0) + 1) }
+    return { kind: 'folders', files, folders: [...counts].map(([name, n]) => ({ name, files: n })).sort((a, b) => b.files - a.files).slice(0, 10) }
+  } catch { return { kind: 'none' } }
+}
+
+export async function codebases() {
+  const repos = await listRepos()
+  const out = []
+  for (const r of repos) out.push({ ...r, preview: await codePreview(r.path) })
+  return out
 }

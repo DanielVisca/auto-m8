@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld('perch', {
   tuck: on => ipcRenderer.invoke('tuck', on),
   switchProfile: id => ipcRenderer.invoke('profile-switch', id),
   theme: t => ipcRenderer.invoke('theme', t),
+  boardThumb: url => ipcRenderer.invoke('board-thumb', url),
 })
