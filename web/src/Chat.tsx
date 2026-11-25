@@ -294,10 +294,15 @@ function Collapsed({ summary, body, className }: { summary: React.ReactNode; bod
   </details>
 }
 
+// Self drive's messages say so: 🚗 instead of 🤖, so you can see why something was sent.
+const isSelfDrive = (label?: string) => label === 'auto-m8: self-drive'
+const senderIcon = (label?: string) => isSelfDrive(label) ? '🚗' : '🤖'
+const senderLabel = (label?: string) => isSelfDrive(label) ? 'Self drive' : label
+
 function AgentBubble({ text }: { text: string }) {
   const a = agentSender(text)!
   const open = () => a.id && window.dispatchEvent(new CustomEvent('perch-open', { detail: a.id }))
-  const from = <span className="agent-from" title="An agent sent this, not you">🤖 {a.id ? <a href="#" onClick={e => { e.preventDefault(); e.stopPropagation(); open() }}>{a.label}</a> : a.label}</span>
+  const from = <span className="agent-from" title={isSelfDrive(a.label) ? 'Self drive sent this for you: an agent is driving this chat' : 'An agent sent this, not you'}>{senderIcon(a.label)} {a.id ? <a href="#" onClick={e => { e.preventDefault(); e.stopPropagation(); open() }}>{senderLabel(a.label)}</a> : senderLabel(a.label)}</span>
   const body = a.body.trim()
   // Long agent-sent prompts (event batches, helper reports, delegations) fold to one line.
   if (body.length > 160 || body.includes('\n')) {
@@ -396,7 +401,7 @@ function QueuedLine({ q, renderEntry }: { q: QueuedMessage; renderEntry: (entry:
   const a = agentSender((q.item as { text: string }).text)
   return <div className="work-queued">
     <button className="link-btn" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      🤖 {a?.label ?? 'An agent'} sent a message · <span className="muted">{q.pickedUp ? 'picked up, the agent is on it' : 'queued, the agent picks it up after this step'}</span>
+      {senderIcon(a?.label)} {senderLabel(a?.label) ?? 'An agent'} sent a message · <span className="muted">{q.pickedUp ? 'picked up, the agent is on it' : 'queued, the agent picks it up after this step'}</span>
       <span className={`work-chevron${open ? ' open' : ''}`} aria-hidden="true">›</span>
     </button>
     {open && renderEntry(q)}
