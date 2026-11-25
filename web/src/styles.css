@@ -78,9 +78,12 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .side-group button { flex: none; }
 /* The window's traffic lights sit top-left: keep clear of them on the first row only. */
 .app.electron:not(.compact) .side-actions::before { content: ''; width: 64px; height: 24px; flex: none; }
-.nav { display: flex; border-top: 1px solid var(--line); padding: 4px; gap: 2px; }
-.nav button { flex: 1; min-width: 0; overflow: hidden; background: none; border: none; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 4px; font-size: 12px; }
+/* Tabs size to their content and the spare width goes evenly between them, so the gaps match whatever the label lengths. */
+.nav { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding: 4px; gap: 2px; }
+.nav button { flex: 0 1 auto; min-width: 0; overflow: hidden; background: none; border: none; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 4px; font-size: 12px; }
 .nav button span { overflow: hidden; text-overflow: ellipsis; }
+/* The tab glyphs (▤ ⌬ ◇ ↻ ⚙) have different widths; one box for all keeps icon-to-label spacing the same. */
+.nav-glyph { flex: 0 0 14px; text-align: center; font-style: normal; }
 .nav button.on, .nav button:hover { color: var(--fg); background: var(--bg3); }
 .nav button.nav-icon { flex: 0 0 auto; padding: 5px 8px; }
 .app.medium .nav button span { display: none; }

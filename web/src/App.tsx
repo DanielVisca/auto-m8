@@ -412,7 +412,7 @@ function Nav({ view, setView }: { view: View; setView: (v: View) => void }) {
   return (
     <nav className="nav">
       {items.map(([k, icon, label]) => (
-        <button key={k} className={on(k) ? 'on' : ''} title={label} onClick={() => setView({ kind: k } as View)}>{icon}<span>{label.split('  ')[0]}</span></button>
+        <button key={k} className={on(k) ? 'on' : ''} title={label} onClick={() => setView({ kind: k } as View)}><i className="nav-glyph">{icon}</i><span>{label.split('  ')[0]}</span></button>
       ))}
       {/* One click pauses or resumes everything; the bar across the top shows what's held. */}
       <button className={`nav-icon${paused ? ' on' : ''}`} title={paused ? 'Paused: click to resume all agents and scouts' : 'Pause all agents and scouts'}
