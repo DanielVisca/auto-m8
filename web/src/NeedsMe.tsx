@@ -34,10 +34,17 @@ function NeedRow({ item: n, onOpen, reload }: { item: Item; onOpen: (id: string)
 export function NeedsMe({ onOpen }: { onOpen: (id: string) => void }) {
   const { data, reload, error } = useLive<NeedsData>('/api/needs', ['home', 'conversations'])
   const [tab, setTab] = useState<'needs_you' | 'agents' | 'history'>('needs_you')
-  if (!data) return <section className="card needs-me"><h3>Needs me</h3><div className="muted small">{error ? String(error) : 'Loading…'}</div></section>
+  // Collapsed by default: a one-line count, expanded only when you ask (remembered).
+  const [expanded, setExpandedS] = useState(() => { try { return localStorage.getItem('perch.needs.expanded') === '1' } catch { return false } })
+  const setExpanded = (v: boolean) => { setExpandedS(v); try { localStorage.setItem('perch.needs.expanded', v ? '1' : '0') } catch {} }
+  const head = (summary: string) => <div className="card-head"><h3 className="grow"><button className="link need-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '▾' : '▸'} Needs me</button>{!expanded && summary && <span className="muted small"> · {summary}</span>}</h3><a className="small" href="#needs">Open list ↗</a></div>
+  if (!data) return <section className="card needs-me">{head('')}{expanded && <div className="muted small">{error ? String(error) : 'Loading…'}</div>}</section>
+  const agents = data.counts.checking + data.counts.agent
+  const summary = [data.counts.needs_you ? `${data.counts.needs_you} need you` : 'nothing needs you', agents ? `${agents} with agents` : ''].filter(Boolean).join(' · ')
+  if (!expanded) return <section className="card needs-me needs-collapsed">{head(summary)}</section>
   const rows = tab === 'history' ? data.history : data.items.filter(n => tab === 'needs_you' ? n.status === 'needs_you' : n.status !== 'needs_you')
   return <section className="card needs-me">
-    <div className="card-head"><h3 className="grow">Needs me</h3><a className="small" href="#needs">Open list ↗</a></div>
+    {head(summary)}
     <p className="muted small">Agents check first and move work forward. Only actions that still require you stay here.</p>
     <div className="tabs need-tabs" role="tablist" aria-label="Needs me status">
       {([['needs_you', `Needs you · ${data.counts.needs_you}`], ['agents', `Agents · ${data.counts.checking + data.counts.agent}`], ['history', `Resolved / not needed · ${data.history.length}`]] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}

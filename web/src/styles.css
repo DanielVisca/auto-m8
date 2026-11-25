@@ -1451,3 +1451,5 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 .term-pending { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 8%, var(--bg2)); }
 .term-pending code { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: 4.8em; }
 .term-run { flex: none; padding: 3px 12px; font-weight: 600; }
+.need-toggle { font: inherit; color: inherit; padding: 0; }
+.needs-collapsed { padding-top: 10px; padding-bottom: 10px; }
