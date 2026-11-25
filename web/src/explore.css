@@ -98,3 +98,14 @@
 .ex-node.faded text { opacity: .6; }
 .ex-node, .ex-edge { transition: opacity .15s; }
 .explore-spot { padding: 6px 4px 0; }
+
+.ex-svgwrap { position: relative; flex: 1; min-height: 300px; display: flex; }
+.ex-svgwrap .explore-svg { flex: 1; }
+.ex-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
+.ex-edge { pointer-events: none; }
+.ex-edge.carded { opacity: 1 !important; filter: drop-shadow(0 0 3px currentColor); }
+.ex-edgecard { position: absolute; z-index: 15; max-width: 420px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 8px 24px rgba(0,0,0,.3); pointer-events: none; }
+.ex-edgecard.pinned { pointer-events: auto; border-color: var(--accent); }
+.ex-edgecard-head { display: flex; gap: 6px; align-items: baseline; margin-bottom: 4px; }
+.ex-edgecard-head button { margin-left: auto; }
+.ex-edgecard .ex-evidence { margin: 6px 0 2px; }

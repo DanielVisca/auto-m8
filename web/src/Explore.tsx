@@ -71,6 +71,10 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
   const [playing, setPlaying] = useState(false)
   const [active, setActive] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
+  // The link under the mouse (or pinned by a click), with where to show its card.
+  const [edgeCard, setEdgeCard] = useState<{ e: Edge; x: number; y: number; pinned: boolean } | null>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const cardAt = (ev: React.MouseEvent, e: Edge, pinned: boolean) => { const r = stageRef.current!.getBoundingClientRect(); setEdgeCard(c => c?.pinned && !pinned ? c : { e, x: Math.min(ev.clientX - r.left, r.width - 450), y: Math.min(ev.clientY - r.top, r.height - 220), pinned }) }
   const [selected, setSelected] = useState<string[]>([])
   const [dreaming, setDreaming] = useState(false)
   const [ops, setOps] = useState<Op[]>([])
@@ -239,10 +243,11 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
           <div className="explore-stage">
             <div className="explore-legend small muted">
               {g.focus ? <>Left: what {focusNames.join(', ') || g.focus} is built on · Right: what's built on it · Middle: links both ways</> : <>The {g.nodes.length} most connected of {g.total} modules. Focus on one to see what it's built on.</>}
-              {' · '}<span className="lg-fk" title="A model in one module has a foreign key to a table in another: a database-level link, the hardest kind to undo">━ solid: foreign key (database link)</span> <span className="lg-imp" title="Code in one module imports another module">┅ dashed: code import</span> · arrows point at what it's built on · {shortPath(g.repo)} @ {g.sha.slice(0, 8)}
+              {' · '}<span className="lg-fk" title="A model in one module has a foreign key to a table in another: a database-level link, the hardest kind to undo">●━ thick solid, dot at start: foreign key (database link)</span> <span className="lg-imp" title="Code in one module imports another module">┅ thin dashed: code import</span> · arrows point at what it's built on · hover a link for details · {shortPath(g.repo)} @ {g.sha.slice(0, 8)}
               {loading && <> · <i className="spin" /> mapping…</>}
               {(() => { const me = repos.find(r => r.path === g.repo); return me?.behindOrigin && me.behindOrigin > 50 ? <div className="warn">⚠ This checkout is on branch {me.branch} and {me.behindOrigin.toLocaleString()} commits behind main, so the map shows an older system. Pull or switch to main for today's.</div> : null })()}
             </div>
+            <div className="ex-svgwrap" ref={stageRef}>
             <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="explore-svg"
               onPointerDown={e => { if (e.target === svg.current) { const p = svgPoint(e); drag.current = { x: p.x, y: p.y, x2: p.x, y2: p.y } } }}
               onPointerMove={e => { if (drag.current) { const p = svgPoint(e); drag.current = { ...drag.current, x2: p.x, y2: p.y }; setBox({ ...drag.current }) } }}
@@ -250,13 +255,15 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
                 const b = drag.current; drag.current = null; setBox(null)
                 if (!b) return
                 // Drag a box to put several concepts in the chat's context at once.
-                if (Math.abs(b.x2 - b.x) < 6 && Math.abs(b.y2 - b.y) < 6) { if (!e.shiftKey) { setSelected([]); setActive(null) } return }
+                if (Math.abs(b.x2 - b.x) < 6 && Math.abs(b.y2 - b.y) < 6) { setEdgeCard(null); if (!e.shiftKey) { setSelected([]); setActive(null) } return }
                 const [x1, x2, y1, y2] = [Math.min(b.x, b.x2), Math.max(b.x, b.x2), Math.min(b.y, b.y2), Math.max(b.y, b.y2)]
                 const inside = g.nodes.filter(n => { const p = pos.get(n.id)!; return p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2 && visible(n.id) }).map(n => n.id)
                 setSelected(s => e.shiftKey ? [...new Set([...s, ...inside])] : inside)
               }}>
               <defs>
                 <marker id="ex-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)" /></marker>
+                {PALETTE.map((c, i) => <marker key={`d${c}`} id={`ex-dot-${i}`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5"><circle cx="5" cy="5" r="4" fill={c} /></marker>)}
+                <marker id="ex-dot-fk" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5"><circle cx="5" cy="5" r="4" fill="var(--accent)" /></marker>
                 {PALETTE.map((c, i) => <marker key={c} id={`ex-arrow-${i}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill={c} /></marker>)}
                 <marker id="ex-arrow-fk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" /></marker>
               </defs>
@@ -279,12 +286,20 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
                 const pc = lit ? colorOf.get(e.from) ?? colorOf.get(e.to) : undefined
                 const gone = removed.has(e.from) || removed.has(e.to)
                 const isNew = !e.evidence.length
-                return <path key={i} d={`M${a.x},${a.y} Q${mx},${my} ${ex},${ey}`}
-                  className={`ex-edge ${e.kind} ${hot ? 'hot' : ''} ${spot.size && !lit ? 'faded' : ''} ${gone ? 'gone' : ''} ${isNew ? 'dreamed' : ''} ${fresh(`${e.from}→${e.to}`) ? 'fresh' : ''}`}
-                  style={pc ? { stroke: pc, opacity: 0.9 } : undefined}
-                  strokeWidth={Math.min(6, 0.8 + Math.log2(e.weight + 1))} markerEnd={`url(#${pc ? `ex-arrow-${PALETTE.indexOf(pc)}` : e.kind === 'fk' ? 'ex-arrow-fk' : 'ex-arrow'})`}>
-                  <title>{`${e.from} → ${e.to}\n${e.kind === 'fk' ? 'foreign key' : 'import'} in ${e.weight} file${e.weight === 1 ? '' : 's'}\n${e.evidence.slice(0, 3).map(x => `${x.file}:${x.line}  ${x.text.slice(0, 100)}`).join('\n')}`}</title>
-                </path>
+                const d = `M${a.x},${a.y} Q${mx},${my} ${ex},${ey}`
+                const w = Math.min(6, 0.8 + Math.log2(e.weight + 1)) * (e.kind === 'fk' ? 1.6 : 1)
+                return <g key={i}>
+                  {/* A foreign key stays recognizable in any color: thicker, solid, with a dot where the link starts. */}
+                  <path d={d}
+                    className={`ex-edge ${e.kind} ${hot ? 'hot' : ''} ${spot.size && !lit ? 'faded' : ''} ${gone ? 'gone' : ''} ${isNew ? 'dreamed' : ''} ${fresh(`${e.from}→${e.to}`) ? 'fresh' : ''} ${edgeCard?.e === e ? 'carded' : ''}`}
+                    style={pc ? { stroke: pc, opacity: 0.9 } : undefined}
+                    strokeWidth={w} markerStart={e.kind === 'fk' ? `url(#${pc ? `ex-dot-${PALETTE.indexOf(pc)}` : 'ex-dot-fk'})` : undefined}
+                    markerEnd={`url(#${pc ? `ex-arrow-${PALETTE.indexOf(pc)}` : e.kind === 'fk' ? 'ex-arrow-fk' : 'ex-arrow'})`} />
+                  {/* A wide invisible stroke, so a thin link is easy to hover and click. */}
+                  {!(spot.size && !lit) && <path d={d} className="ex-hit" onPointerDown={ev => ev.stopPropagation()}
+                    onMouseEnter={ev => cardAt(ev, e, false)} onMouseMove={ev => cardAt(ev, e, false)} onMouseLeave={() => setEdgeCard(c => c?.pinned ? c : null)}
+                    onClick={ev => { ev.stopPropagation(); cardAt(ev, e, true) }} />}
+                </g>
               })}
               {g.nodes.map(n => {
                 const p = pos.get(n.id)!
@@ -305,6 +320,8 @@ export function Explore({ initialRepo, onOpenChat }: { initialRepo?: string; onO
               {ops.filter((o): o is Extract<Op, { op: 'add' }> => o.op === 'add').map(o => { const p = pos.get(o.id)!; return <g key={o.id} className="ex-node dreamed" transform={`translate(${p.x},${p.y})`}><circle r={12} /><text y={26} textAnchor="middle">{o.name ?? o.id}</text></g> })}
               {box && <rect className="ex-box" x={Math.min(box.x, box.x2)} y={Math.min(box.y, box.y2)} width={Math.abs(box.x2 - box.x)} height={Math.abs(box.y2 - box.y)} />}
             </svg>
+            {edgeCard && <EdgeCard c={edgeCard} repo={g.repo} onClose={() => setEdgeCard(null)} />}
+            </div>
             {(selected.length > 0 || active) && (
               <div className="small explore-spot">
                 Showing links of {(selected.length ? selected : [active!]).map((id, i) => <span key={id}>{i ? ', ' : ''}<b style={colorOf.has(id) ? { color: colorOf.get(id) } : undefined}>{colorOf.has(id) ? '● ' : ''}{label(id)}</b></span>)} ({near.size ? near.size - spot.size : 0} connected)
@@ -465,6 +482,34 @@ function DreamPanel({ g, ops, setOps, res, active, onSave }: { g: GraphRes; ops:
           <div className="ex-actions"><button className="small" onClick={() => onSave(false)}>Save dream</button><button className="small primary" onClick={() => onSave(true)}>Turn into a plan</button></div>
         </div>
       )}
+    </div>
+  )
+}
+
+// What a link is, in words, with the lines of code that make it. Hover to peek; click the link to pin and use the links.
+function EdgeCard({ c, repo, onClose }: { c: { e: Edge; x: number; y: number; pinned: boolean }; repo: string; onClose: () => void }) {
+  const { e } = c
+  const fk = e.kind === 'fk'
+  const open = (file: string, line?: number) => post('/api/explore/open', { repo, file, line }).catch(err => toast(String(err?.message ?? err), { kind: 'error' }))
+  const left = Math.max(8, c.x + 14), top = Math.max(8, c.y + 14)
+  return (
+    <div className={`ex-edgecard small ${c.pinned ? 'pinned' : ''}`} style={{ left, top }} onPointerDown={ev => ev.stopPropagation()}>
+      <div className="ex-edgecard-head"><b>{label(e.from)}</b> <span className="muted">is built on</span> <b>{label(e.to)}</b>{c.pinned && <button className="link small" onClick={onClose}>×</button>}</div>
+      <div className={fk ? 'ex-kind fk' : 'muted'}>
+        {fk ? `Foreign key: a model in ${label(e.from)} references a table in ${label(e.to)} (${e.weight} relation${e.weight === 1 ? '' : 's'}). A database link: removing it needs a migration.`
+          : `Code import: ${e.weight} file${e.weight === 1 ? '' : 's'} in ${label(e.from)} import from ${label(e.to)}.`}
+      </div>
+      <div className="ex-evidence">
+        {e.evidence.slice(0, c.pinned ? 5 : 3).map((x, i) => (
+          <div key={i}>
+            {c.pinned ? <button className="link" onClick={() => open(x.file, x.line)} title="Open in your editor">{x.file}:{x.line}</button> : <span className="muted">{x.file}:{x.line}</span>}
+            <code>{x.text.slice(0, 220)}</code>
+          </div>
+        ))}
+        {e.weight > e.evidence.length && <div className="muted tiny">+{e.weight - e.evidence.length} more {fk ? 'relations' : 'files'}</div>}
+        {!e.evidence.length && <div className="muted tiny">Added in this dream, so there's no code behind it yet.</div>}
+      </div>
+      {!c.pinned && <div className="muted tiny">Click the link to pin this and open files.</div>}
     </div>
   )
 }
