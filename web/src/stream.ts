@@ -25,7 +25,7 @@ export function apply(s: Live, ev: any): void {
   }
   switch (ev.type) {
     case 'perch_user':
-      s.items.push({ kind: 'user', text: ev.text, uuid: ev.uuid, ts: ev.ts ?? Date.now() })
+      s.items.push({ kind: 'user', text: ev.text, uuid: ev.uuid, ts: ev.ts ?? Date.now(), ...(ev.queued ? { queued: true } : {}) })
       s.cur = null
       return
     case 'perch_state':

@@ -23,7 +23,7 @@ import { PR_URL, PrPill, PrRefs, bareRefs, knownPrs, linkPrRefs, type PrKnown } 
 import { agentSender, userBody } from '../../shared/messageOrigin'
 import { BlockerCard, knownBlocker } from './BlockerCard'
 import { blockerFor, blockerInText } from './blockers.ts'
-import { groupMessages, NEEDS_LOGIN, shortDuration, workPhases, workPulse, workSummary, type Entry, type Phase, type WorkTurn } from './chatActivity'
+import { groupMessages, NEEDS_LOGIN, shortDuration, workPhases, workPulse, workSummary, type Entry, type Phase, type QueuedMessage, type WorkTurn } from './chatActivity'
 export { agentSender } from '../../shared/messageOrigin'
 import { CONV_SCHEME_RE, convIdOf, convLink, isConvLink, ourMcpTool } from '../../shared/brand.ts'
 export { NEEDS_LOGIN } from './chatActivity'
@@ -364,9 +364,24 @@ function WorkingCard({ turn, renderEntry, startedAt }: { turn: WorkTurn; renderE
         <span className={`work-mood mood-${pulse.mood}`} title={pulse.why}>{MOOD_LABEL[pulse.mood]}{pulse.why ? ` · ${pulse.why}` : ''}</span>
       </div>}
     </div>}
+    {turn.running && turn.queued.map(q => <QueuedLine key={q.index} q={q} renderEntry={renderEntry} />)}
     <div id={id} className="work-body" hidden={!open}>
       {open && (turn.work.length ? <WorkPhases turn={turn} renderEntry={renderEntry} /> : <div className="muted small">Waiting for the first update…</div>)}
     </div>
+  </div>
+}
+
+// A message another agent sent while this one works: it doesn't stop the work. Claude Code hands it
+// over when the running step ends, inside this same turn. Shown as one line in the card.
+function QueuedLine({ q, renderEntry }: { q: QueuedMessage; renderEntry: (entry: Entry) => React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const a = agentSender((q.item as { text: string }).text)
+  return <div className="work-queued">
+    <button className="link-btn" aria-expanded={open} onClick={() => setOpen(v => !v)}>
+      🤖 {a?.label ?? 'An agent'} sent a message · <span className="muted">{q.pickedUp ? 'picked up, the agent is on it' : 'queued, the agent picks it up after this step'}</span>
+      <span className={`work-chevron${open ? ' open' : ''}`} aria-hidden="true">›</span>
+    </button>
+    {open && renderEntry(q)}
   </div>
 }
 
@@ -541,6 +556,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
       {(fullFor === threadKey ? groupMessages(items, running) : groupMessages(items, running).slice(-TAIL_ROWS)).map(row => row.kind === 'item' ? renderEntry(row.entry) : <div key={`${convId ?? ''}:turn:${row.index}`} className="chat-turn">
         {(row.running || row.work.length > 0) && <WorkingCard turn={row} renderEntry={renderEntry} startedAt={(items[row.index - 1] as { ts?: number } | undefined)?.ts} />}
         {row.attention.map(renderEntry)}
+        {!row.running && row.queued.map(renderEntry)}
         {row.answer.map(renderEntry)}
         {!row.running && <WaitCard waits={turnWaits([...row.work, ...row.answer])} promises={promises} />}
       </div>)}

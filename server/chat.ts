@@ -529,7 +529,7 @@ export function send(opts: SendOpts): string {
   }
   if (!c.proc) start(c, resume)
   c.lastUsed = Date.now()
-  if (!opts.retry && !opts.resent) emit(c, { type: 'perch_user', text: opts.prompt })
+  if (!opts.retry && !opts.resent) emit(c, { type: 'perch_user', text: opts.prompt, ...(queued ? { queued: true } : {}) })
   startTurn(id, opts.prompt, { turbo: c.turbo && !isLocal(c.engine), model: isLocal(c.engine) ? c.engine : c.tier ?? (c.turbo ? 'opus' : settings.chat.model || undefined) })
   setState(c, 'running')
   // A restore point for the files at the start of every turn (git repos only; invisible).

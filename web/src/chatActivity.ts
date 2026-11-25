@@ -1,12 +1,19 @@
 import { toolLabel } from './stream.ts'
 // A presentation of the existing transcript. Never rewrite messages or change agent input.
 import type { Block, Item } from './api'
+import { agentSender } from '../../shared/messageOrigin.ts'
 
 import { blockerInText, NEEDS_LOGIN } from './blockers.ts'
 import { ourMcpTool } from '../../shared/brand.ts'
 export { NEEDS_LOGIN }
 export type Entry = { item: Item; index: number }
-export type WorkTurn = { kind: 'turn'; index: number; work: Entry[]; answer: Entry[]; attention: Entry[]; running: boolean }
+// queued: messages another agent or an automation sent while this turn ran. They wait until the
+// running step ends and are handed over inside the same turn, so they don't end it.
+export type WorkTurn = { kind: 'turn'; index: number; work: Entry[]; answer: Entry[]; attention: Entry[]; queued: QueuedMessage[]; running: boolean }
+export type QueuedMessage = Entry & { pickedUp: boolean }
+// A message the agent was sent mid-turn by another agent or automation (not one you typed: those
+// are steers and start a new turn).
+export const isQueuedAgentMessage = (it: Item) => it.kind === 'user' && !!it.queued && !!agentSender(it.text)
 export type MessageRow = { kind: 'item'; entry: Entry } | WorkTurn
 
 export function groupMessages(items: Item[], running = false): MessageRow[] {
@@ -19,11 +26,15 @@ export function groupMessages(items: Item[], running = false): MessageRow[] {
       entries = []
       return
     }
-    const turn: WorkTurn = { kind: 'turn', index: start, work: [], answer: [], attention: [], running: active }
+    const turn: WorkTurn = { kind: 'turn', index: start, work: [], answer: [], attention: [], queued: [], running: active }
     const lastAssistant = entries.findLast(e => e.item.kind === 'assistant')
     failed ||= entries.some(e => e.item.kind === 'error')
     for (const entry of entries) {
       const it = entry.item
+      if (isQueuedAgentMessage(it)) {
+        turn.queued.push({ ...entry, pickedUp: entries.some(e => e.index > entry.index && e.item.kind === 'assistant') })
+        continue
+      }
       if (it.kind === 'error') { turn.attention.push(entry); continue }
       if (it.kind !== 'assistant') { turn.work.push(entry); continue }
       // Sign-in actions and prepared Slack drafts must remain reachable without opening work.
@@ -49,7 +60,8 @@ export function groupMessages(items: Item[], running = false): MessageRow[] {
     entries = []
   }
   items.forEach((item, index) => {
-    if (item.kind === 'user' || item.kind === 'result') {
+    if (isQueuedAgentMessage(item)) entries.push({ item, index })
+    else if (item.kind === 'user' || item.kind === 'result') {
       flush(false, item.kind === 'result' && !item.ok)
       rows.push({ kind: 'item', entry: { item, index } })
       start = index + 1

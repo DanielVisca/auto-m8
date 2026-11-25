@@ -15,7 +15,7 @@ export type Block =
   | { type: 'thinking'; text: string }
   | { type: 'tool'; id: string; name: string; input: any; result?: string; isError?: boolean; json?: string; done?: { status: string; summary?: string; at?: number } }
 export type Item =
-  | { kind: 'user'; text: string; ts?: number; uuid?: string }
+  | { kind: 'user'; text: string; ts?: number; uuid?: string; queued?: boolean } // queued: arrived mid-turn, delivered between steps
   | { kind: 'assistant'; blocks: Block[]; ts?: number; mid?: string; uuid?: string; model?: string; activity?: { tools: string[]; omitted?: number } }
   | { kind: 'result'; ok: boolean; text: string; cost?: number; ms?: number; denials?: number; switched?: { tokens: number; cost: number } }
   | { kind: 'error'; text: string }

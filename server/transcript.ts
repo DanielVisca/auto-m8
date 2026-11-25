@@ -63,7 +63,7 @@ export type Block =
 export type Activity = { tools: string[]; omitted?: number }
 
 export type Item =
-  | { kind: 'user'; text: string; ts?: number; uuid?: string }
+  | { kind: 'user'; text: string; ts?: number; uuid?: string; queued?: boolean } // queued: arrived mid-turn, delivered between steps
   | { kind: 'assistant'; blocks: Block[]; ts?: number; uuid?: string; mid?: string; model?: string; activity?: Activity }
 
 export function emptyMeta(): Meta {
@@ -225,6 +225,13 @@ export class ItemsParser {
       if (e.type === 'perch-codex-activity') {
         const answer = this.codexAnswers.get(e.perchTurnId)
         if (answer && Array.isArray(e.tools)) answer.activity = { tools: e.tools.filter((t: unknown): t is string => typeof t === 'string') }
+        continue
+      }
+      // A message that arrived mid-turn: Claude Code holds it until the running step ends, then
+      // hands it over inside the same turn and saves it as an attachment, not a user line.
+      if (e.type === 'attachment' && e.attachment?.type === 'queued_command') {
+        const text = userText(e.attachment.prompt) // background-task notices etc. return null
+        if (text) { this.items.push({ kind: 'user', text, ts: ts(e.timestamp) ?? undefined, uuid: e.uuid, queued: true }); this.last = null }
         continue
       }
       if (e.type === 'user' && !e.isMeta && e.message?.role === 'user') {

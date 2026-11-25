@@ -128,3 +128,37 @@ test('work groups into intents at the agent\'s own updates and thinking notes', 
   const blocks = done.flatMap((p: any) => p.entries.flatMap((e: any) => e.item.blocks))
   assert.equal(blocks.length, work.flatMap(e => e.item.blocks).length)
 })
+
+test('an agent message that arrives mid-turn stays in the running card instead of starting a new one', () => {
+  const sent = { kind: 'user', queued: true, text: '[perch: sent by an agent from perch://abc "Shepherd: posthog#1". Not typed by the user.]\n\nSplit done.' }
+  const items = [user(), assistant(text('Working on it.')), assistant(tool()), sent]
+  let all = turns(items, true)
+  assert.equal(all.length, 1)
+  assert.equal(all[0].running, true)
+  assert.equal(all[0].queued.length, 1)
+  assert.equal(all[0].queued[0].pickedUp, false)
+  assert.equal(all[0].work.length, 2)
+  all = turns([...items, assistant(text('Done. Now the shepherd message.')), { kind: 'result', ok: true, text: '' }])
+  assert.equal(all.length, 1)
+  assert.equal(all[0].queued[0].pickedUp, true)
+  assert.equal(all[0].answer.length, 1)
+})
+
+test('a message you type mid-turn still starts a new turn', () => {
+  const items = [user(), assistant(tool()), { kind: 'user', queued: true, text: 'Actually, stop and check X' }, assistant(text('Checking X.'))]
+  assert.equal(turns(items, true).length, 2)
+})
+
+test('history shows a message that arrived mid-turn (saved as a queued_command attachment)', async () => {
+  const { toItems } = await import('./transcript.ts')
+  const line = (o: any) => JSON.stringify(o)
+  const items = toItems([
+    line({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'Do the thing' } }),
+    line({ type: 'assistant', uuid: 'a1', message: { id: 'm1', role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }),
+    line({ type: 'attachment', uuid: 'q1', attachment: { type: 'queued_command', prompt: '[perch: sent by an agent from perch://abc "Shepherd". Not typed by the user.]\n\nSplit done.' } }),
+    line({ type: 'attachment', uuid: 'q2', attachment: { type: 'queued_command', prompt: '<task-notification><task-id>x</task-id></task-notification>' } }),
+  ].join('\n'))
+  const queued = items.filter((i: any) => i.queued)
+  assert.equal(queued.length, 1)
+  assert.match((queued[0] as any).text, /Split done/)
+})
