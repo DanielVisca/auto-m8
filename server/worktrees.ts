@@ -6,7 +6,7 @@
 // Removal never loses work: a worktree with uncommitted changes is kept (or stashed first when an
 // agent forces it), a branch survives its worktree, and a detached HEAD with commits nowhere else
 // gets a perch-rescue/<name> branch before its checkout goes.
-import { execFile, spawn } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -236,10 +236,20 @@ function deleteInBackground(paths: string[]) {
   if (!paths.length) return
   spawn('nice', ['-n', '19', 'rm', '-rf', ...paths], { detached: true, stdio: 'ignore' }).unref()
 }
+// Paths an `rm -rf` is already deleting. Every restart used to start another rm on the whole of
+// .trash/, so with restarts every few minutes (and a second profile's server) eight rms fought over
+// the same 12 GB on 2026-11-25.
+function beingDeleted(): Set<string> {
+  try {
+    const out = execFileSync('ps', ['-ww', '-Ao', 'args='], { encoding: 'utf8' })
+    return new Set(out.split('\n').filter(l => /(^|\/)rm -rf /.test(l)).flatMap(l => l.split(' ')))
+  } catch { return new Set() }
+}
 function emptyTrash() {
+  const busy = beingDeleted()
   for (const r of roots()) {
     const t = join(r, TRASH)
-    try { deleteInBackground(readdirSync(t).map(n => join(t, n))) } catch {}
+    try { deleteInBackground(readdirSync(t).map(n => join(t, n)).filter(p => !busy.has(p))) } catch {}
   }
 }
 

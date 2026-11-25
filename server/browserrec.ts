@@ -9,7 +9,7 @@
 // rrweb runs in perch's isolated world and perch drains its queue by polling, so the page sees no globals and
 // we never call Runtime.enable (a bot-detection signal). Hosts on the deny list are never recorded, and frames
 // aren't captured while a password or card field has focus.
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { setPriority } from 'node:os'
@@ -224,7 +224,16 @@ export function thinFrames<T>(frames: T[], max = MAX_FRAMES): T[] {
   return out
 }
 
+// One encode at a time: each is ~120% CPU, and several recordings finishing (or being re-adopted
+// after a restart) at once saturated the Mac.
+let encodeChain: Promise<unknown> = Promise.resolve()
+const leftoverQueued = new Set<string>()
 function stitchFrames(runDir: string, dir: string, all: { file: string; t: number }[]): Promise<string | null> {
+  const run = encodeChain.then(() => stitchFramesNow(runDir, dir, all))
+  encodeChain = run.catch(() => {})
+  return run
+}
+function stitchFramesNow(runDir: string, dir: string, all: { file: string; t: number }[]): Promise<string | null> {
   const frames = thinFrames(all)
   const name = nextVideoName(runDir)
   const out = join(runDir, name)
@@ -241,7 +250,7 @@ function stitchFrames(runDir: string, dir: string, all: { file: string; t: numbe
   return new Promise(res => {
     const p = spawn(FFMPEG!, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', listFile,
       '-vf', 'scale=1280:860:force_original_aspect_ratio=decrease,pad=1280:860:(ow-iw)/2:(oh-ih)/2:color=white,format=yuv420p',
-      '-r', '10', '-c:v', 'libvpx', '-b:v', '1M', '-deadline', 'realtime', '-cpu-used', '8', '-an', out], { stdio: ['ignore', 'ignore', 'pipe'] })
+      '-r', '10', '-threads', '2', '-c:v', 'libvpx', '-b:v', '1M', '-deadline', 'realtime', '-cpu-used', '8', '-an', out], { stdio: ['ignore', 'ignore', 'pipe'] })
     try { if (p.pid) setPriority(p.pid, 15) } catch {}
     const timer = setTimeout(() => { err += `timed out after ${STITCH_TIMEOUT_MS / 60_000} min`; p.kill('SIGKILL') }, STITCH_TIMEOUT_MS)
     timer.unref()
@@ -261,6 +270,43 @@ function stitchFrames(runDir: string, dir: string, all: { file: string; t: numbe
   })
 }
 
+// ffmpeg processes encoding recording frames, with their parent pid (1 = its server is gone).
+export function frameEncodes(): { pid: number; ppid: number; runDir: string; name: string }[] {
+  let out = ''
+  try { out = execFileSync('ps', ['-ww', '-Ao', 'pid=,ppid=,args='], { encoding: 'utf8' }) } catch { return [] }
+  return out.split('\n').flatMap(l => {
+    const m = l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)
+    if (!m || !/ffmpeg/.test(m[3])) return []
+    const f = m[3].match(/ -i (.+)\/frames\/list-(video(?:-\d+)?\.webm)\.txt /)
+    return f ? [{ pid: Number(m[1]), ppid: Number(m[2]), runDir: f[1], name: f[2] }] : []
+  })
+}
+export const encodesFor = (runDir: string) => frameEncodes().filter(e => e.runDir === runDir)
+
+// Stop an encode whose server is gone and drop its half-written video; its frames stay on disk.
+function stopOrphan(e: { pid: number; runDir: string; name: string }) {
+  try { process.kill(e.pid, 'SIGKILL') } catch {}
+  rmSync(join(e.runDir, e.name), { force: true }); rmSync(join(e.runDir, e.name + '.pending'), { force: true })
+  console.log(`browserrec: stopped orphaned encode ${e.pid} of ${e.name}`)
+}
+
+// At startup: encodes a previous server left behind are stopped and queued again here, one at a
+// time, from the frames still on disk.
+function adoptOrphanEncodes() {
+  if (!FFMPEG) return
+  const root = resolve(B.REC_DIR) + sep
+  const orphans = frameEncodes().filter(e => e.ppid === 1 && e.runDir.startsWith(root))
+  for (const e of orphans) stopOrphan(e)
+  for (const runDir of new Set(orphans.map(e => e.runDir))) {
+    const fdir = join(runDir, 'frames')
+    if (leftoverQueued.has(runDir) || !existsSync(fdir)) continue
+    const left = readdirSync(fdir).filter(f => f.endsWith('.jpg')).sort()
+    if (!left.length) continue
+    leftoverQueued.add(runDir)
+    track(stitchFrames(runDir, fdir, left.map((file, i) => ({ file, t: i * FRAME_MIN_MS }))).finally(() => leftoverQueued.delete(runDir)))
+  }
+}
+
 // ---------- lifecycle ----------
 function onOpen(s: B.Session) {
   for (const [old, r] of recs) if (old.owner === s.owner && old !== s) { finalize(r, false) }
@@ -272,7 +318,17 @@ function onOpen(s: B.Session) {
   if (existsSync(fdir)) {
     const left = readdirSync(fdir).filter(f => f.endsWith('.jpg')).sort()
     r.frameN = left.length ? Number(left.at(-1)!.slice(0, 6)) || left.length : 0
-    if (left.length && FFMPEG) track(stitchFrames(s.runDir, fdir, left.map((file, i) => ({ file, t: i * FRAME_MIN_MS }))))
+    // A server restart leaves its ffmpeg running with nobody to stop it (ppid 1), and the next server
+    // started a second encode of the same frames: five encodes at ~120% CPU each on 2026-11-25, when
+    // auto-m8 restarted every few minutes. Stop orphaned encodes (their frames are still on disk) and
+    // leave the run alone while another live server is encoding it.
+    const running = encodesFor(s.runDir)
+    for (const e of running.filter(e => e.ppid === 1)) stopOrphan(e)
+    const busy = running.some(e => e.ppid !== 1)
+    if (left.length && FFMPEG && !busy && !leftoverQueued.has(s.runDir)) {
+      leftoverQueued.add(s.runDir)
+      track(stitchFrames(s.runDir, fdir, left.map((file, i) => ({ file, t: i * FRAME_MIN_MS }))).finally(() => leftoverQueued.delete(s.runDir)))
+    }
   }
   noteUrl(r)
   writeMeta(r)
@@ -299,6 +355,7 @@ function finalize(r: Rec, closing: boolean) {
 export function installRecorder() {
   if ((globalThis as any).__perchRecorderInstalled) return
   ;(globalThis as any).__perchRecorderInstalled = true
+  adoptOrphanEncodes()
   B.browserHooks.add(e => {
     const s = e.session
     if (e.type === 'open') return onOpen(s)
