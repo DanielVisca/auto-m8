@@ -1032,6 +1032,10 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
     const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt, cwd: id ? undefined : cwd, mode, context, contextIds: pulled.map(p => p.id), folderId: folder?.id, shared: shared.filter(x => !x.loading && !x.file), attachments: files.map(x => x.file), turbo, engine })
     setPulled([])
     setShared([])
+    // Starting a new chat switches this composer's id in the same render as the clear above, so the
+    // save effect only ever sees the new id: drop the "new" draft's attachments here, or they come
+    // back in the next new chat.
+    try { sessionStorage.removeItem(`perch.compose.shared.${id ?? 'new'}`) } catch {}
     setRelated([])
     if (!id || r.id !== id) onStarted(r.id) // a carried-over conversation continues in a new chat
   }
