@@ -57,6 +57,16 @@ export function helperEngine(e?: string): string {
   throw new Error(`Unknown engine "${e}": use auto, claude, claude:<haiku|sonnet|opus>, codex or codex:<model>.`)
 }
 
+// A helper that may edit works in its parent's permission mode (the user's default, 'auto'), so it can
+// run npm, tests and git like its parent. Forcing 'acceptEdits' looked safe but in headless -p mode it
+// refuses every shell command not on an allowlist, so helpers wrote code they could never build or
+// commit and parked in needs-help (6 such helpers between 2026-11-12 and 2026-11-25). 'plan' stays read-only.
+export function helperMode(asked: string | undefined, parentMode: string | undefined, fallback = settings.chat.permissionMode) {
+  if (asked === 'plan') return 'plan'
+  const m = parentMode && parentMode !== 'plan' ? parentMode : fallback
+  return m && m !== 'plan' && m !== 'default' ? m : 'acceptEdits'
+}
+
 export async function start(input: { parent: string; brief: string; name?: string; cwd?: string; mode?: string; worktree?: boolean; engine?: string }) {
   const parent = convIdOf(String(input.parent || ''))
   if (!parent) throw new Error('delegate needs the parent conversation_id (yours).')
@@ -70,7 +80,7 @@ export async function start(input: { parent: string; brief: string; name?: strin
   const id = randomUUID(), child = randomUUID()
   const wt = input.worktree ? await createHelper(cwd, child) : null
   run('insert into delegations (id, parent, child, name, brief, created_at, worktree, branch) values (?, ?, ?, ?, ?, ?, ?, ?)', id, parent, child, name, brief, Date.now(), wt?.dir ?? null, wt?.branch ?? null)
-  send({ by: 'helper', id: child, originParent: chatSubject(parent), engine: helperEngine(input.engine), cwd: wt?.dir ?? cwd, prompt: kickoff({ brief, name }, parent) + (wt ? worktreeNote(wt) : ''), mode: input.mode ?? 'acceptEdits', context: true, resume: false })
+  send({ by: 'helper', id: child, originParent: chatSubject(parent), engine: helperEngine(input.engine), cwd: wt?.dir ?? cwd, prompt: kickoff({ brief, name }, parent) + (wt ? worktreeNote(wt) : ''), mode: helperMode(input.mode, chats.get(parent)?.mode), context: true, resume: false })
   editLabels([child], ['helper'])
   setTitle(child, `Helper: ${name}`)
   run('insert or ignore into links (a, b, kind, note, created_at) values (?, ?, ?, ?, ?)', parent, child, 'started', 'helper', Date.now())
@@ -122,7 +132,10 @@ export function sendTo(id: string, message: string) {
   if (d.worktree && !existsSync(d.worktree)) throw new Error(`Its worktree ${d.worktree} was cleaned up (branch ${d.branch} is kept). Delegate a new helper with worktree=true and point it at that branch.`)
   run(`update delegations set status = 'running' where id = ?`, id)
   follow(id)
-  send({ id: d.child, prompt: marked(d.parent, String(message)), resume: true })
+  // A helper started before helpers inherited their parent's mode is still in 'acceptEdits' and can't
+  // run commands; resuming it moves it to the parent's mode (a 'plan' helper stays read-only).
+  const mode = chats.get(d.child)?.mode === 'plan' ? undefined : helperMode(undefined, chats.get(d.parent)?.mode)
+  send({ id: d.child, prompt: marked(d.parent, String(message)), resume: true, mode })
   changed()
 }
 
