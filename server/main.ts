@@ -111,12 +111,13 @@ import { forPr as shadowForPr, overview as shadowOverview, pick as shadowPick, s
 import { railyard, startRailyard } from './railyard.ts'
 import { startProof } from './proof.ts'
 import { report as learnReport, startLearn } from './learn.ts'
-import { board as getBoard, boards as listBoards, chatBoard, copyTile, createBoard, deleteBoard, ensurePlanBoard, expireBoards, putTile, requireCanvas, showBoard, updateBoard, useBoard } from './boards.ts'
+import { board as getBoard, boards as listBoards, openedBoard, chatBoard, copyTile, createBoard, deleteBoard, ensurePlanBoard, expireBoards, putTile, requireCanvas, showBoard, updateBoard, useBoard } from './boards.ts'
 import { onPresence, presenceAll, presenceError, refreshPresence } from './presence.ts'
 import { moveToSection, onPrSections, resortSections } from './prsections.ts'
 import { approvals, browserEvents, closeIdleWindows, onBrowserChange, pruneRecordings, resumeBrowser, setOwnerBusy } from './browser.ts'
 import { browserRoutes, browserSocket } from './browserroutes.ts'
 import { researchRoutes } from './productresearchroutes.ts'
+import { canvases as exploreCanvases, competitor as exploreCompetitor, competitors as exploreCompetitors } from './explorehub.ts'
 import { ensureProductBoard } from './productresearchboard.ts'
 import { onResearch } from './productresearch.ts'
 import { restartQueue } from './restartqueue.ts'
@@ -486,7 +487,7 @@ route('GET', '/api/boards', (_m, _r, _s, q) => ({ boards: listBoards(q.get('q') 
 route('POST', '/api/boards', async (_m, req) => { const b = await body(req); return createBoard(b.name, b.about, b.created_by, b) })
 route('GET', '/api/boards/:id', m => getBoard(decodeURIComponent(m[1])) ?? { error: 'No such board' })
 route('POST', '/api/boards/:id', async (m, req) => updateBoard(decodeURIComponent(m[1]), await body(req)))
-route('POST', '/api/boards/:id/activity', m => ({ ok: useBoard(decodeURIComponent(m[1])) }))
+route('POST', '/api/boards/:id/activity', m => { const id = decodeURIComponent(m[1]); const ok = useBoard(id); if (ok) openedBoard(id); return { ok } })
 route('POST', '/api/boards/:id/delete', m => { deleteBoard(decodeURIComponent(m[1])); return { ok: true } })
 route('POST', '/api/boards-tile', async (_m, req) => putTile(await body(req)))
 route('POST', '/api/boards-tile/copy', async (_m, req) => { const b = await body(req); return copyTile(b.tile_id, b.board_id) })
@@ -724,6 +725,9 @@ termEvents.add((owner, id, event, text) => inboxPush(owner, `term:${id}`, event,
 // The agent browser: a held click, a takeover, a crash wake the conversation that owns the window.
 browserRoutes(route, body)
 researchRoutes(route, body)
+route('GET', '/api/explore/canvases', () => ({ boards: exploreCanvases() }))
+route('GET', '/api/explore/competitors', () => ({ products: exploreCompetitors() }))
+route('GET', '/api/explore/competitors/:id', m => { try { return exploreCompetitor(decodeURIComponent(m[1])) } catch (e: any) { return { error: e.message } } })
 browserEvents.add((owner, event, text) => inboxPush(owner, `browser:${owner}`, event, text))
 setInterval(pruneRecordings, 6 * 3600_000).unref()
 // after startup's busy first seconds (indexing), and once more in case Chrome was slow to answer

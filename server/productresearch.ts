@@ -6,7 +6,7 @@ import { all, db, get, run } from './db.ts'
 import { DATA_DIR } from './settings.ts'
 
 export type ResearchStatus = 'queued' | 'documented' | 'observed' | 'tested' | 'blocked' | 'not_found'
-export type ResearchProduct = { id: string; name: string; url: string; docs_url: string; trial_url: string; scope: string; context: string; sandbox: number; created_at: number }
+export type ResearchProduct = { id: string; name: string; url: string; docs_url: string; trial_url: string; scope: string; context: string; sandbox: number; created_at: number; data_scale: string; method: string }
 export type ResearchItem = { id: string; product_id: string; key: string; title: string; kind: 'page' | 'feature' | 'workflow'; url: string; parent_id: string | null; capability: string; status: ResearchStatus; notes: string; updated_at: number }
 export type ResearchEvidence = { id: string; item_id: string; source: 'docs' | 'product' | 'sandbox'; summary: string; url: string; captured_at: number; screenshot: string | null; data: any }
 export const onResearch = new Set<() => void>()
@@ -31,6 +31,8 @@ create table if not exists research_evidence (
 );
 create index if not exists research_evidence_item on research_evidence(item_id, captured_at);
 `)
+// What we sent to a trial and at what scale, and how it was explored (skill, scout or manual), for Explore.
+for (const c of ['data_scale', 'method']) if (!all<any>('pragma table_info(research_products)').some(x => x.name === c)) db.exec(`alter table research_products add column ${c} text not null default ''`)
 
 export function required(value: unknown, name: string, max = 8000): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`${name} must be a nonempty string (at most ${max} characters).`)
@@ -71,9 +73,11 @@ export function saveProduct(a: any) {
   const name = required(p.name, 'name', 200), url = cleanUrl(required(p.url, 'url'))
   const docs = p.docs_url ? cleanUrl(p.docs_url) : '', trial = p.trial_url ? cleanUrl(p.trial_url) : ''
   const scope = required(p.scope, 'scope'), context = required(p.context ?? 'Tier, role, region and workload not yet recorded.', 'context')
-  run(`insert into research_products values (?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(id) do update set
-    name=excluded.name, url=excluded.url, docs_url=excluded.docs_url, trial_url=excluded.trial_url, scope=excluded.scope, context=excluded.context, sandbox=excluded.sandbox`,
-  id, name, url, docs, trial, scope, context, p.sandbox ? 1 : 0, old?.created_at ?? Date.now())
+  const dataScale = String(p.data_scale ?? '').slice(0, 2000), method = String(p.method ?? '').slice(0, 2000)
+  run(`insert into research_products (id, name, url, docs_url, trial_url, scope, context, sandbox, created_at, data_scale, method) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(id) do update set
+    name=excluded.name, url=excluded.url, docs_url=excluded.docs_url, trial_url=excluded.trial_url, scope=excluded.scope, context=excluded.context, sandbox=excluded.sandbox,
+    data_scale=excluded.data_scale, method=excluded.method`,
+  id, name, url, docs, trial, scope, context, p.sandbox ? 1 : 0, old?.created_at ?? Date.now(), dataScale, method)
   changed(); return product(id)
 }
 export function saveItem(a: any) {

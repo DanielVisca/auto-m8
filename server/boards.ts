@@ -16,10 +16,26 @@ db.exec(`create table if not exists chat_boards (conversation_id text primary ke
 const columns = new Set(all<any>('pragma table_info(boards)').map(c => c.name))
 if (!columns.has('ttl_seconds')) db.exec('alter table boards add column ttl_seconds integer')
 if (!columns.has('last_used_at')) db.exec('alter table boards add column last_used_at integer')
+// When you last had it open (the UI reports activity). last_used_at also moves for agent edits.
+if (!columns.has('opened_at')) db.exec('alter table boards add column opened_at integer')
+// Every chat that made, showed or edited a board, so Explore can link back to them.
+db.exec(`create table if not exists board_chats (board_id text not null, conversation_id text not null, role text not null, at integer not null, primary key (board_id, conversation_id, role))`)
+export function linkChat(boardId: string, conversationId: string | null | undefined, role: 'created' | 'shown' | 'edited') {
+  if (!conversationId || conversationId === 'perch') return
+  run('insert into board_chats (board_id, conversation_id, role, at) values (?, ?, ?, ?) on conflict do update set at = excluded.at', boardId, conversationId, role, Date.now())
+}
+export const boardChats = (id: string) => all<{ conversation_id: string; role: string; at: number }>('select conversation_id, role, at from board_chats where board_id = ? order by at desc', id)
+export function openedBoard(id: string) { run('update boards set opened_at = ? where id = ?', Date.now(), id) }
 
 // Canvases made before boards existed (one per folder) become boards named after their folder.
 for (const r of all<any>(`select distinct t.folder_id id, f.name from canvas_tiles t left join folders f on f.id = t.folder_id where t.folder_id not in (select id from boards)`))
   run('insert into boards (id, name, updated_at) values (?, ?, ?)', r.id, r.name ?? 'Board', Date.now())
+
+// Backfill links from what was already recorded: the creator, chats showing it, chat tiles on it.
+if (!get('select 1 from board_chats limit 1')) {
+  for (const b of all<any>('select id, created_by, updated_at from boards where created_by is not null')) linkChat(b.id, b.created_by, 'created')
+  for (const c of all<any>('select conversation_id, board_id from chat_boards')) linkChat(c.board_id, c.conversation_id, 'shown')
+}
 
 export const PIN_LIMIT = 3
 export const DEFAULT_BOARD_TTL = 24 * 60 * 60
@@ -48,6 +64,7 @@ export function expireBoards(now = Date.now()): number {
     for (const { id } of expired) {
       run('delete from canvas_tiles where folder_id = ?', id)
       run('delete from chat_boards where board_id = ?', id)
+      run('delete from board_chats where board_id = ?', id)
       run('delete from boards where id = ?', id)
     }
     db.exec('commit')
@@ -86,6 +103,7 @@ export function createBoard(name: string, about?: string, by?: string, options: 
   const ttl = lifetime(options)
   const id = randomUUID()
   run('insert into boards (id, name, about, created_by, updated_at, ttl_seconds, last_used_at) values (?, ?, ?, ?, ?, ?, ?)', id, name || 'Board', about ?? null, by ?? null, Date.now(), ttl, Date.now())
+  linkChat(id, by, 'created')
   changed()
   return board(id)!
 }
@@ -107,17 +125,19 @@ export function deleteBoard(id: string) {
   for (const t of tiles(id)) removeTile(t.id)
   run('delete from boards where id = ?', id)
   run('delete from chat_boards where board_id = ?', id)
+  run('delete from board_chats where board_id = ?', id)
   changed()
 }
 
 // Tiles, as agents see them. A tile with `ask` is built (or rebuilt) by Claude; html/text/url set it directly.
-export async function putTile(a: { board_id?: string; tile_id?: string; kind?: Tile['kind']; title?: string; ask?: string; html?: string; text?: string; url?: string; refresh?: number; conversation_id?: string; w?: number; h?: number }) {
+export async function putTile(a: { board_id?: string; tile_id?: string; kind?: Tile['kind']; title?: string; ask?: string; html?: string; text?: string; url?: string; refresh?: number; conversation_id?: string; w?: number; h?: number; by?: string }) {
   expireBoards()
   const old = a.tile_id ? get<any>('select * from canvas_tiles where id = ?', a.tile_id) : null
   if (a.tile_id && !old) throw new Error(`No tile ${a.tile_id}`)
   const boardId = old?.folder_id ?? a.board_id
   if (!boardId || !get<any>('select 1 from boards where id = ?', boardId)) throw new Error('Give a board_id (from action=list) or a tile_id')
   useBoard(boardId)
+  linkChat(boardId, a.by, 'edited')
   const cfg = old ? JSON.parse(old.config) : {}
   if (a.ask && (old?.kind ?? a.kind ?? 'code') === 'code') {
     const t = await makeTile({ folder_id: boardId, tile_id: a.tile_id, ask: a.ask, html: cfg.html, error: old?.error ?? undefined }, () => { if (!board(boardId)) throw new Error('This board expired or was removed while the tile was being built') })
@@ -172,6 +192,7 @@ export function showBoard(conversationId: string, boardId: string | null, layout
   else {
     if (!useBoard(boardId)) throw new Error(`No board ${boardId}`)
     run(`insert into chat_boards (conversation_id, board_id, layout) values (?, ?, ?) on conflict(conversation_id) do update set board_id = excluded.board_id, layout = excluded.layout`, conversationId, boardId, layout)
+    linkChat(boardId, conversationId, 'shown')
   }
   changed()
 }

@@ -1,0 +1,82 @@
+.exh { max-width: 1400px; }
+.exh-back { display: block; margin: 0 auto 4px 0; text-align: left; }
+.exh-thumb { height: 96px; background: var(--bg3); border-radius: 6px; padding: 4px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.exh-thumb svg { width: 100%; height: 100%; }
+.exh-thumb rect { fill: var(--bg); stroke: var(--line); stroke-width: .06; }
+.exh-thumb text { fill: var(--muted); }
+.exh-thumb .k-code rect { stroke: var(--accent); } .exh-thumb .k-web rect, .exh-thumb .k-browser rect { stroke: var(--ok); } .exh-thumb .k-chat rect, .exh-thumb .k-plan rect { stroke: var(--warn); }
+.exh-head { align-items: center; gap: 8px; flex-wrap: wrap; }
+.exh-head h2 { margin: 0; }
+.exh-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+.exh-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); cursor: pointer; font: inherit; color: inherit; transition: border-color .15s, transform .15s; }
+.exh-tile:hover { border-color: var(--accent); transform: translateY(-1px); }
+.exh-tile b { font-size: 16px; }
+.exh-tile-art { width: 100%; height: 120px; border-radius: 8px; background: var(--bg3); overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; }
+.exh-art-canvas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 6px; box-sizing: border-box; align-items: stretch; }
+.exh-art-canvas span { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; font-size: 10px; padding: 3px; overflow: hidden; color: var(--muted); }
+.exh-art-shots { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.exh-art-shots img { width: 100%; height: 59px; object-fit: cover; object-position: top left; }
+.exh-art-code svg { width: 70%; height: 100%; color: var(--muted); }
+.exh-bar { gap: 8px; margin: 10px 0; flex-wrap: wrap; align-items: center; }
+.exh-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 6px 0; }
+.exh-seg button { border: 0; border-radius: 0; background: transparent; }
+.exh-seg button.on { background: var(--bg3); color: var(--fg); font-weight: 600; }
+.exh-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.exh-body.with-info { grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); }
+.exh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; align-content: start; }
+.exh-card { position: relative; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); transition: border-color .15s; min-width: 0; }
+.exh-card:hover, .exh-card.sel { border-color: var(--accent); }
+.exh-card-main { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; background: none; border: 0; padding: 10px; cursor: pointer; font: inherit; color: inherit; min-width: 0; }
+.exh-i { position: absolute; top: 6px; right: 6px; border: 1px solid var(--line); background: var(--bg); border-radius: 50%; width: 24px; height: 24px; padding: 0; cursor: pointer; color: var(--muted); }
+.exh-i:hover { color: var(--accent); border-color: var(--accent); }
+.exh-mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; height: 84px; background: var(--bg3); border-radius: 6px; padding: 4px; box-sizing: border-box; overflow: hidden; }
+.exh-mini span { font-size: 9px; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 2px 3px; overflow: hidden; color: var(--muted); line-height: 1.2; }
+.exh-mini .k-code { border-left: 3px solid var(--accent); }
+.exh-mini .k-web, .exh-mini .k-browser { border-left: 3px solid var(--ok); }
+.exh-mini .k-chat { border-left: 3px solid var(--warn); }
+.exh-cover { height: 130px; background: var(--bg3); border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.exh-cover img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.exh-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.exh-tags i { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--bg3); color: var(--muted); max-width: 100%; }
+.exh-tags i.warn { color: var(--warn); }
+.exh-cov { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bg3); min-width: 80px; flex: 0 0 auto; width: 100%; }
+.exh-sum .exh-cov { width: 120px; }
+.exh-cov .c-ok { background: var(--ok); } .exh-cov .c-accent { background: var(--accent); } .exh-cov .c-doc { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.exh-cov .c-bad { background: var(--bad); } .exh-cov .c-q { background: var(--line); }
+.exh-info { position: sticky; top: 8px; align-self: start; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); padding: 12px; max-height: calc(100vh - 120px); overflow: auto; }
+.exh-close { float: right; }
+.exh-info h3 { margin: 0 0 6px; }
+.exh-info h4 { margin: 12px 0 4px; }
+.exh-info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 8px 0; font-size: 13px; }
+.exh-info dt { color: var(--muted); }
+.exh-info dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.exh-chats, .exh-list { list-style: none; padding: 0; margin: 0 0 10px; }
+.exh-chats li { padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exh-links { display: inline-flex; gap: 10px; }
+.exh-sum { gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+.exh-map { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 12px; margin-top: 6px; }
+.exh-tree { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; max-height: calc(100vh - 240px); overflow: auto; }
+.exh-tree li button { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; background: none; border: 0; padding: 5px 6px; cursor: pointer; font: inherit; color: inherit; min-width: 0; }
+.exh-tree li.sel button { background: var(--bg3); }
+.exh-tree li button:hover { background: var(--bg2); }
+.exh-tree .ellipsis { flex: 1; }
+.st { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg3); color: var(--muted); white-space: nowrap; text-transform: uppercase; letter-spacing: .03em; }
+.st-tested { background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ok); }
+.st-observed { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.st-documented { color: var(--accent); }
+.st-blocked, .st-not_found { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.exh-item { min-width: 0; }
+.exh-item h3 { margin: 0 0 4px; }
+.exh-ev { margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.exh-ev img { display: block; width: 100%; max-height: 520px; object-fit: contain; object-position: top; background: var(--bg3); }
+.exh-ev figcaption { padding: 8px; overflow-wrap: anywhere; }
+.exh-tour { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.exh-stage { background: var(--bg3); border-radius: 8px; overflow: hidden; display: flex; justify-content: center; height: min(62vh, 720px); }
+.exh-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.exh-tour-bar { gap: 8px; align-items: center; }
+.exh-caption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exh-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.exh-strip button { flex: 0 0 auto; width: 96px; height: 60px; padding: 0; border: 2px solid transparent; border-radius: 4px; overflow: hidden; cursor: pointer; background: var(--bg3); }
+.exh-strip button.on { border-color: var(--accent); }
+.exh-strip img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+@media (max-width: 800px) { .exh-body.with-info, .exh-map { grid-template-columns: minmax(0, 1fr); } .exh-info { position: static; max-height: none; } }

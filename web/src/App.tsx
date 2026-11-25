@@ -27,6 +27,7 @@ import { BrowserFlag } from './BrowserView'
 import { Resources } from './Resources'
 import { Insights } from './Insights'
 import { Explore } from './Explore'
+import { CanvasGallery, CompetitorGallery, CompetitorPage, ExploreHub } from './ExploreHub'
 import { Library } from './Library'
 import { List } from './List'
 import { Settings } from './Settings'
@@ -238,7 +239,16 @@ export function App() {
       {view.kind === 'paused' && <div className="scroll"><Paused onOpen={openById} /></div>}
       {view.kind === 'doc' && <Suspense fallback={<div className="pad muted">Opening the editor…</div>}><DocEditor key={view.id} id={view.id} onOpenChat={openById} settings={settings} zen={zen} /></Suspense>}
       {view.kind === 'writing' && <div className="scroll"><WritingPage onOpen={id => setView({ kind: 'doc', id })} /></div>}
-      {view.kind === 'explore' && <div className="scroll"><Explore key={view.id ?? ''} initialRepo={view.id ?? undefined} onOpenChat={openById} /></div>}
+      {view.kind === 'explore' && <div className="scroll">{(() => {
+        // Explore's landing picks a section; any other id is a repo for the code map (old links keep working).
+        const nav = { onSection: (id: string | null) => setView({ kind: 'explore', id }), onOpenChat: openById, onOpenBoard: (id: string) => setView({ kind: 'board', id: id || null }), onStart: startChat }
+        const id = view.id
+        if (!id) return <ExploreHub {...nav} />
+        if (id === 'canvases') return <CanvasGallery {...nav} />
+        if (id === 'competitors') return <CompetitorGallery {...nav} />
+        if (id.startsWith('competitor:')) { const [, pid, t] = id.split(':'); return <CompetitorPage key={id} id={pid} tour={t === 'tour'} {...nav} /> }
+        return <><button className="link small exh-back" style={{ margin: '6px 12px 0' }} onClick={() => nav.onSection(null)}>← Explore</button><Explore key={id} initialRepo={id === 'code' ? undefined : id} onOpenChat={openById} /></>
+      })()}</div>}
       {view.kind === 'pr' && <div className="scroll"><PrPage key={view.id} url={view.id} onOpen={openById} sideConversations={mode === 'wide' && detailsOpen && !zen} /></div>}
       {(view.kind === 'library' || view.kind === 'evolve') && <div className="scroll"><Library key={view.kind} initial={view.kind === 'evolve' ? 'learned' : undefined} onOpen={openById} /></div>}
       {view.kind === 'automations' && <div className="scroll"><Automations draft={routineDraft} onOpen={openById} settings={settings} /></div>}
