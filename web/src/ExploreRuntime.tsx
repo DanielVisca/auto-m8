@@ -212,7 +212,7 @@ type TfHit = { key: string; value: string; file: string; line: number; context: 
 type DataTable = { db: string; table: string; engine: string; cluster?: string | null; how: string[]; ds: string; host: string; bytes?: number | null; rows?: number | null; parts?: number | null; sizeScope?: string; query?: string; link?: string }
 type DataCluster = { name: string; ds: string | null; shards: number | null; replicas: number | null; hosts: string[]; aws: string[]; terraform: TfHit[]
   disk: { nodes: number; max?: number; median?: number; fullest?: { instance: string; disk: string; used: number; role: string | null }[]; query?: string; link?: string; source?: string; note?: string } }
-export type DataRes = { concept: string; tokens: string[]; grafana: string | null; clusters: DataCluster[]; tables: DataTable[]; problems: { source: string; error: string; fix?: string }[]
+export type DataRes = { concept: string; tokens: string[]; grafana: string | null; clusters: DataCluster[]; tables: DataTable[]; problems: { source: string; error: string; fix?: string }[]; noClickHouse?: string
   datasources?: { name: string; host: string; tables: number; link: string }[]; infra: { path: string; behind: number | null; lastFetch: string | null; sha: string; files: number; types: number } | null; code: { files: number; names: number }; matchedBy?: string }
 
 const bytes = (n: number | null | undefined) => n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${(n / 1e6).toFixed(0)} MB`
@@ -230,7 +230,7 @@ export function DataSection({ concept, repos, bare, onSummary }: { concept: stri
     return () => { gone = true }
   }, [url])
   useEffect(() => {
-    onSummary?.(!r ? 'asking ClickHouse…' : 'error' in r ? 'error' : !r.tables.length ? 'no ClickHouse tables'
+    onSummary?.(!r ? 'asking ClickHouse…' : 'error' in r ? 'error' : r.noClickHouse ? 'not in ClickHouse' : !r.tables.length ? 'no ClickHouse tables'
       : (() => {
         // Lead with the cluster that holds most of its own tables (named like it), not the first one found.
         const ownT = r.tables.filter((t: any) => t.how.some((h: string) => /^table name|db_table/.test(h)))
@@ -243,6 +243,7 @@ export function DataSection({ concept, repos, bare, onSummary }: { concept: stri
   }, [r]) // eslint-disable-line
   if (!r) return <div className="ex-sec small muted">{!bare && <h5>Data</h5>}<i className="spin" /> Asking ClickHouse (system tables) and Prometheus…</div>
   if ('error' in r) return <div className="ex-sec small">{!bare && <h5>Data</h5>}<span className="bad">{r.error}</span></div>
+  if (r.noClickHouse) return <div className="ex-sec small">{!bare && <h5>Data</h5>}<span className="muted">{r.noClickHouse}</span></div>
   // Strongest evidence first (named in the concept's code), then the biggest: that's where its data really lives.
   const named = (t: any) => t.how.some((h: string) => h.startsWith('named in code'))
   // Its own tables are named like it (or are its models' db_table); a table its code merely mentions (the shared

@@ -5,8 +5,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-const run = (cmd: string, args: string[], timeout = 15_000) => new Promise<{ ok: boolean; out: string; err: string }>(res =>
-  execFile(cmd, args, { timeout, maxBuffer: 64 << 20 }, (e, out, err) => res({ ok: !e, out: String(out), err: String(err || (e as any)?.message || '') })))
+const run = (cmd: string, args: string[], timeout = 15_000) => new Promise<{ ok: boolean; out: string; err: string; code: number | null }>(res =>
+  execFile(cmd, args, { timeout, maxBuffer: 64 << 20 }, (e, out, err) => res({ ok: !e, out: String(out), err: String(err || (e as any)?.message || ''), code: e ? (typeof (e as any).code === 'number' ? (e as any).code : null) : 0 })))
 const memo = new Map<string, { at: number; v: Promise<any> }>()
 function cached<T>(key: string, ttl: number, f: () => Promise<T>): Promise<T> {
   const m = memo.get(key)
@@ -335,6 +335,18 @@ async function chQuery(g: Grafana, ds: Ds, sql: string, timeout = 20_000): Promi
   return (cols[0] ?? []).map((_: any, i: number) => Object.fromEntries(names.map((n, k) => [n, cols[k]?.[i]])))
 }
 
+// Whether a repo talks to ClickHouse itself: a client library, PostHog's sync_execute, or MergeTree DDL.
+// The [x] classes keep this line from matching itself when the explorer looks at its own repo.
+export const CLICKHOUSE_CLIENT = /clickhouse[_]driver|clickhouse[_]connect|@clickhouse[/]client|clickhouse[:]:Client|ClickHouse[/]clickhouse-go|sync[_]execute\(|ENGINE\s*=\s*\w*MergeTree/
+async function usesClickHouse(repo: string): Promise<boolean> {
+  return cached(`usesch:${repo}`, 600_000, async () => {
+    const r = await run('git', ['-C', repo, 'grep', '-qE', CLICKHOUSE_CLIENT.source, '--', '*.py', '*.ts', '*.tsx', '*.rs', '*.go', '*.sql', 'go.mod', 'Cargo.toml', 'package.json', 'pyproject.toml', 'requirements*.txt', ':(exclude)*.test.ts', ':(exclude)**/tests/**', ':(exclude)**/test_*.py'], 15_000)
+    // git grep exits 1 when nothing matches; any other failure (not a git repo, timeout) shouldn't hide the section.
+    if (r.code !== 0 && r.code !== 1) console.warn(`[explorer] ClickHouse check failed in ${repo}: ${r.err.slice(0, 200)}`)
+    return r.code !== 1
+  })
+}
+
 // The concept's code: table names it mentions, with the first file:line for each.
 async function codeTableNames(repo: string | undefined, path: string): Promise<{ names: Map<string, string>; dbTables: string[]; files: number; error?: string }> {
   const names = new Map<string, string>(), dbTables: string[] = []
@@ -390,6 +402,9 @@ async function dataForNow(concept: string, repos: string[]) {
   const toks = [...new Set(concept.split('/').pop()!.toLowerCase().split(/[_\-\s]+/).map(t => t.replace(/s$/, '')).filter(t => t.length >= 3))]
   const problems: { source: string; error: string; fix?: string }[] = []
   const g = grafanas()[0]
+  // A repo that never opens a ClickHouse connection (auto-m8, say, which sends HogQL to the PostHog API) has no
+  // tables in these clusters: its `FROM events` names PostHog's API, not a table it holds or reads directly.
+  if (repos[0] && !(await usesClickHouse(repos[0]))) return { concept, tokens: toks, grafana: null, clusters: [], tables: [], problems, terraform: [], infra: null, code: { files: 0, names: 0 }, noClickHouse: `${repos[0].split('/').pop()} has no ClickHouse client or table DDL, so it holds no data in ClickHouse. Table names in its queries (events, groups…) go through an API such as PostHog's HogQL.` }
   const code = await codeTableNames(repos[0], concept)
   if (code.error) problems.push({ source: 'code', error: code.error })
   const allRepos = await listRepos().catch(() => [] as RepoInfo[])
@@ -451,7 +466,10 @@ async function dataForNow(concept: string, repos: string[]) {
       const sql = sizeSql(`clusterAllReplicas('${esc(cl)}', system.parts)`, ts)
       try {
         const rows = await chQuery(g, s!.ds, sql, 25_000)
-        apply(rows, `all replicas of ${cl} (counts each replica's copy)`, sql, t => {
+        const info = clusterNames.get(cl), copies = info && info.shards ? Math.max(1, Math.round(info.replicas / info.shards)) : 1
+        // clusterAllReplicas sums every replica's copy; divide by copies per shard so the size is the data, once.
+        for (const r of rows) { r.bytes = Number(r.bytes) / copies; r.rows = Number(r.rows) / copies }
+        apply(rows, `${cl}: summed over every replica, divided by ${copies} cop${copies === 1 ? 'y' : 'ies'} per shard`, sql, t => {
           if (t.engine !== 'Distributed' || t.cluster !== cl) return null
           const a = /^Distributed\(\s*'[^']+'\s*,\s*'?([\w{}]+)'?\s*,\s*'?(\w+)'?/.exec(String(s!.tables.find(x => x.db === t.db && x.table === t.table)?.engine_full ?? ''))
           return a ? { db: a[1] === 'currentDatabase()' ? t.db : a[1], table: a[2], engine: '' } : null

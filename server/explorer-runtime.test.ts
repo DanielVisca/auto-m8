@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { distributedCluster, matchTables, nodeKey, originOf, sqlTableNames, tfInstanceTypes } from './explorer-runtime.ts'
+import { CLICKHOUSE_CLIENT, distributedCluster, matchTables, nodeKey, originOf, sqlTableNames, tfInstanceTypes } from './explorer-runtime.ts'
 
 const code = [{ image: 'x', sha: 'a'.repeat(40), repo: '/r', behind: 0, ahead: 0, github: null }]
 test('an image tagged with a commit in your repos is your code', () => {
@@ -76,4 +76,12 @@ test('Distributed engines name the cluster; node names line up across Prometheus
   assert.equal(distributedCluster('ReplicatedMergeTree()'), null)
   assert.equal(nodeKey('prod-us-iad-ch-2c'), 'ch-2c')
   assert.equal(nodeKey('ch-2c.prod-us.internal'), 'ch-2c')
+})
+
+test('only repos that talk to ClickHouse themselves count as holding its data', () => {
+  for (const yes of ['from clickhouse_driver import Client', 'sync_execute(QUERY)', 'github.com/ClickHouse/clickhouse-go/v2 v2.30.0', "import { createClient } from '@clickhouse/client'", 'ENGINE = ReplicatedReplacingMergeTree'])
+    assert.ok(CLICKHOUSE_CLIENT.test(yes), yes)
+  // HogQL through PostHog's API, and the explorer's own Distributed( parser, are not ClickHouse access.
+  for (const no of ["SELECT count() FROM events WHERE event = '$pageview'", "/^Distributed\\(\\s*'([^']+)'/"])
+    assert.ok(!CLICKHOUSE_CLIENT.test(no), no)
 })
