@@ -6,7 +6,7 @@ import { ago, post, useLive } from './api'
 import { AgentRun } from './Search'
 import { PrBadge } from './List'
 import { AgentStack, usePrAgents } from './Agents'
-import { HOLDER, RailLine, STN, type Train } from './RailLine'
+import { FOCUS, HOLDER, RailLine, STN, type LinePick, type Train } from './RailLine'
 
 type P = { areaKey?: string; url: string; number: number; title: string; repo: string; area: string; review: Review; outcome: Outcome; why: string; last: number; checks: string | null; created: number; merged: number | null; draft: boolean; conversation: string | null; reason?: string }
 type Review = 'draft' | 'waiting' | 'changes' | 'approved' | 'none'
@@ -55,7 +55,10 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
   const [summary, setSummary] = useState<{ id: string; key: string } | null>(null)
   const [hover, setHover] = useState<Sel>(null)
   // A station picked on the line view: its PRs fill the list and the summary, like a flow selection.
-  const [line, setLine] = useState<{ station: string; trains: Train[] } | null>(null)
+  const [line, setLine] = useState<(LinePick & { trains: Train[] }) | null>(null)
+  // A legend filter on the line ("needs you", a holder, stuck…). Remembered, so the line can open filtered.
+  const [focus, setFocusS] = useState<string | null>(() => { try { const v = localStorage.getItem('perch.line.focus'); return v && FOCUS[v] ? v : null } catch { return null } })
+  const setFocus = (f: string | null) => { setFocusS(f); try { localStorage.setItem('perch.line.focus', f ?? '') } catch {} }
   // Which picture the chart card shows: the flow (where PRs end up) or the Railyard's line (where open PRs sit now).
   const [viz, setViz] = useState<'flow' | 'line'>(() => { try { return localStorage.getItem('perch.prflow.viz') === 'line' ? 'line' : 'flow' } catch { return 'flow' } })
   const save = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch {} }
@@ -72,6 +75,7 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
   if (!data) return <div className="pad muted">Reading your PRs from GitHub… the first time takes about a minute.</div>
   if ((data as any).error) return <div className="pad muted">{(data as any).error}</div>
 
+  const needsUrls = new Set(prs.filter(p => p.outcome === 'needs-you').map(p => p.url))
   const n = (o: Outcome) => prs.filter(p => p.outcome === o).length
   const shown = prs.filter(p => matches(p, sel))
   const byUrl = new Map(prs.map(p => [p.url, p]))
@@ -88,7 +92,7 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
   const order: Outcome[] = ['needs-you', 'stalled', 'moving', 'stale', 'merged', 'abandoned']
   if (!lineOn) attention.sort((a, b) => order.indexOf(a.outcome) - order.indexOf(b.outcome) || a.last - b.last)
   const h = data.medianMergeHours
-  const label = lineOn ? `The line → ${STN[line.station] ?? line.station}` : sel ? [sel.area, OUTCOMES.find(o => o.id === sel.outcome)?.label].filter(Boolean).join(' → ') : 'Needs your attention'
+  const label = lineOn ? ['The line', line.station ? STN[line.station] ?? line.station : '', line.focus ? FOCUS[line.focus] : ''].filter(Boolean).join(' → ') : sel ? [sel.area, OUTCOMES.find(o => o.id === sel.outcome)?.label].filter(Boolean).join(' → ') : 'Needs your attention'
   const summarize = async () => {
     // What shipped in the same areas, so the agent can say what sets this selection apart.
     const areas = new Set(attention.map(p => p.areaKey))
@@ -122,7 +126,7 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
           <span className="grow muted small">{viz === 'flow' ? 'Where PRs opened in this range ended up' : 'The line, now: every open PR at its station · colour = who holds it'}</span>
           <div className="seg">{([['flow', 'Flow'], ['line', 'The line']] as const).map(([k, l]) => <button key={k} className={viz === k ? 'on' : ''} onClick={() => { setViz(k); save('perch.prflow.viz', k); setLine(null); setSel(null) }}>{l}</button>)}</div>
         </div>
-        {viz === 'line' ? <RailLine picked={line?.station ?? null} onPick={(station, trains) => setLine(station ? { station, trains } : null)} /> : <>
+        {viz === 'line' ? <RailLine picked={line?.station ?? null} focus={focus} onFocus={setFocus} needs={needsUrls} onPick={(pk, trains) => setLine(pk ? { ...pk, trains } : null)} /> : <>
         <Sankey prs={prs} sel={sel} hover={hover} setHover={setHover} onPick={s => setSel(cur => JSON.stringify(cur) === JSON.stringify(s) ? null : s)} />
         <div className="flow-legend small">
           {OUTCOMES.map(o => <span key={o.id} title={o.hint}><i className={`sw o-${o.id}`} />{o.icon} {o.label}</span>)}
@@ -133,7 +137,7 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
         <div className="row-flex">
           <h3 className="grow">{label}</h3>
           {attention.length > 0 && summary?.key !== label && <button className="link small" onClick={summarize} title="A short read of these PRs: what got done, what was dropped, and the patterns">✦ Summarize</button>}
-          {(lineOn || sel) && <button className="link small" onClick={() => lineOn ? setLine(null) : setSel(null)}>show what needs you</button>}
+          {(lineOn || sel) && line?.focus !== 'needs' && <button className="link small" onClick={() => { if (lineOn) { setLine(null); setFocus(viz === 'line' ? 'needs' : null) } else setSel(null) }}>show what needs you</button>}
         </div>
         {summary?.key === label && <div className="pr-summary"><button className="icon pr-summary-x" onClick={() => setSummary(null)} title="Close the summary">×</button><AgentRun id={summary.id} onOpen={onOpen} /></div>}
         {!attention.length && <div className="muted small">Nothing here.</div>}

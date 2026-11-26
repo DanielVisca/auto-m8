@@ -1595,3 +1595,10 @@ button.icon.drive-btn.warn { box-shadow: inset 0 0 0 1px color-mix(in srgb, #e5a
 .drive-next { margin-left: auto; min-width: 0; max-width: 45%; display: inline-flex; font-size: 11px; color: var(--muted); opacity: .8; white-space: nowrap; }
 .drive-next-text { overflow: hidden; text-overflow: ellipsis; }
 .drive-next:hover { opacity: 1; }
+/* The line's legend doubles as its filter: click an item to show only those PRs. */
+.flow-legend .legend-btn { all: unset; cursor: pointer; padding: 1px 6px; margin: 0 -6px; border-radius: 6px; border: 1px solid transparent; }
+.flow-legend .legend-btn:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.flow-legend .legend-btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--fg); }
+.flow-legend .legend-btn:focus-visible { outline: 2px solid var(--accent); }
+button.rail-cross { font: inherit; color: inherit; cursor: pointer; }
+button.rail-cross:hover, button.rail-cross.on { background: color-mix(in srgb, #f59e0b 32%, transparent); }
