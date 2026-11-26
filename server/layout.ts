@@ -33,6 +33,7 @@ export type LayoutNode = {
 export type Layout = LayoutNode & {
   theme?: 'system' | 'light' | 'dark'
   colors?: Record<string, string>
+  css?: string
   cloned_from?: string
 }
 
@@ -84,6 +85,7 @@ export function problemWith(raw: unknown): string | null {
       if (typeof v !== 'string' || !/^#[0-9a-f]{3,8}$/i.test(v)) return `colors.${k} must be #rgb, #rrggbb or #rrggbbaa`
     }
   }
+  if (root.css !== undefined && cssPath(root.css) === null) return 'css must be a .css file inside the layouts folder, such as "slack.css"'
   const ids = new Set<string>()
   const views: string[] = []
   const walk = (n: any, path: string): string | null => {
@@ -135,6 +137,25 @@ export function tilePath(p: unknown): string | null {
   if (typeof p !== 'string' || !p.endsWith('.html') || p.includes('\0')) return null
   const full = resolve(LAYOUT_DIR, normalize(p))
   return full.startsWith(resolve(LAYOUT_DIR) + '/') ? full : null
+}
+
+// A layout's stylesheet, resolved inside the layouts folder, or null if it points anywhere else.
+export function cssPath(p: unknown): string | null {
+  if (typeof p !== 'string' || !p.endsWith('.css') || p.includes('\0')) return null
+  const full = resolve(LAYOUT_DIR, normalize(p))
+  return full.startsWith(resolve(LAYOUT_DIR) + '/') ? full : null
+}
+
+// The CSS a layout adds to the window. Nothing it loads may come from outside: @import and remote url()
+// are dropped, so a stylesheet can't fetch anything or phone home.
+export function readLayoutCss(l: Layout): string | null {
+  const f = l.css ? cssPath(l.css) : null
+  if (!f || !existsSync(f)) return null
+  try {
+    return readFileSync(f, 'utf8').slice(0, 200_000)
+      .replace(/@import[^;]*;?/gi, '/* @import removed */')
+      .replace(/url\(\s*['"]?\s*(https?:|\/\/)[^)]*\)/gi, 'none')
+  } catch { return null }
 }
 
 const lastGood = new Map<string, Layout>()
@@ -211,7 +232,7 @@ function ownFiles(dir = LAYOUT_DIR): string[] {
     if (f.startsWith('.') || f.endsWith('.error') || f === 'AGENTS.md' || f === 'AGENTS.local.md') continue
     const full = join(dir, f)
     if (statSync(full).isDirectory()) { if (relative(LAYOUT_DIR, full) === 'tiles' || full.startsWith(join(LAYOUT_DIR, 'tiles') + '/')) out.push(...ownFiles(full)) }
-    else if (f.endsWith('.json') || f.endsWith('.html')) out.push(relative(LAYOUT_DIR, full))
+    else if (f.endsWith('.json') || f.endsWith('.html') || f.endsWith('.css')) out.push(relative(LAYOUT_DIR, full))
   }
   return out.sort()
 }
@@ -351,8 +372,16 @@ Three node types. Every node has a unique \`id\`.
 Any node: \`size\` (\`{"px": 240}\` or \`{"weight": 2}\`, a share of what fixed
 siblings leave), \`min\` / \`max\` (px), \`hidden\`, \`divider\` (a line after it).
 
-Root only: \`theme\` (\`system\`, \`light\`, \`dark\`; beats Settings) and
-\`colors\` overriding any of ${COLORS.map(c => '`' + c + '`').join(', ')} with \`#rrggbb[aa]\`.
+Root only: \`theme\` (\`system\`, \`light\`, \`dark\`; beats Settings),
+\`colors\` overriding any of ${COLORS.map(c => '`' + c + '`').join(', ')} with \`#rrggbb[aa]\`, and
+\`css\`: a stylesheet in this folder (\`"css": "slack.css"\`) added to the window while the
+layout shows. Use it to change things inside the built-in views (hide a row, restyle a header,
+bigger text). Keep selectors specific to what the person pointed at, and prefer hiding or
+restyling over moving things around. Never hide \`.main\` or the chat box. \`@import\` and remote
+\`url()\` are removed. ⌘⌥⇧Escape goes back to the default, which has no stylesheet.
+
+When a request names "the part the person pointed at", it comes with a CSS selector, the text
+there and a snippet of its HTML: change that part, and nothing else.
 
 The default:
 

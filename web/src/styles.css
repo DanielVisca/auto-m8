@@ -1523,6 +1523,15 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 .ui-ask-scrim { position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: center; align-items: flex-start; padding-top: 18vh; background: color-mix(in srgb, var(--bg) 35%, transparent); }
 .ui-ask { width: min(560px, 90vw); background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 12px 40px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 6px; }
 .ui-ask input { width: 100%; font-size: 15px; padding: 8px 10px; }
+.ui-ask-target { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
+.ui-ask-target > span { flex: 1; min-width: 0; }
+.ui-ask-mode { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ui-ask-mode label { display: inline-flex; align-items: center; gap: 4px; }
+.ui-ask .ui-ask-mode input[type=radio] { width: auto; padding: 0; }
+.ui-ask .ui-ask-name { width: 160px; font-size: 12.5px; padding: 3px 6px; }
+/* What's being customized: outlined above everything, never in the way of a click. */
+.ui-highlight { position: fixed; z-index: 1001; pointer-events: none; border: 2px solid var(--accent); border-radius: 6px; background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: 0 0 0 9999px color-mix(in srgb, var(--bg) 25%, transparent); transition: all .08s; }
+.ui-pick-hint { position: fixed; z-index: 1002; top: 8px; left: 50%; transform: translateX(-50%); background: var(--bg2); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; pointer-events: none; }
 .ui-draft-bar { position: fixed; top: 6px; left: 50%; -webkit-app-region: no-drag; transform: translateX(-50%); z-index: 900; display: flex; gap: 8px; align-items: center; background: var(--bg2); border: 1px solid var(--accent); border-radius: 999px; padding: 6px 8px 6px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.3); max-width: 80vw; }
 .ui-draft-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50vw; }
 

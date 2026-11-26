@@ -73,7 +73,7 @@ import { summaryFor as exploreSummary, warmSummaries } from './explorer-summary.
 import { usageFor as exploreUsage } from './explorer-usage.ts'
 import { setSwrDir, swr } from './swr.ts'
 import { checkRepo, exploreDream, exploreGraph, exploreNode, exploreTimeline, openLocal as exploreOpen, saveDream, setDataDir as setExploreDir } from './explorer.ts'
-import { cloneLayout, LAYOUT_DIR, listLayouts, listVersions as listLayoutVersions, loadLayout, readTile, restoreVersion as restoreLayoutVersion, sharedLayouts, snapshot as snapshotLayouts, watchLayouts, writeGuide } from './layout.ts'
+import { cloneLayout, LAYOUT_DIR, listLayouts, listVersions as listLayoutVersions, loadLayout, readLayoutCss, readTile, restoreVersion as restoreLayoutVersion, sharedLayouts, snapshot as snapshotLayouts, watchLayouts, writeGuide } from './layout.ts'
 import { refreshBasics, refreshMcp, status } from './status.ts'
 import { markFirstOpen, recent as telemetryRecent, secondsSinceFirstOpen, startTelemetry, telemetryState, track } from './telemetry.ts'
 import { briefPrompt, detect as detectSetup } from './onboarding.ts'
@@ -913,7 +913,7 @@ const keepVersion = (label?: string) => {
 }
 try { keepVersion('When auto-m8 started') } catch {}
 watchLayouts(() => { try { keepVersion() } catch {} broadcast('layouts') })
-route('GET', '/api/layouts', () => ({ ...loadLayout(activeLayout()), active: activeLayout(), layouts: listLayouts(), dir: LAYOUT_DIR, draft: layoutDraft }))
+route('GET', '/api/layouts', () => { const l = loadLayout(activeLayout()); return { ...l, css: readLayoutCss(l.layout), active: activeLayout(), layouts: listLayouts(), dir: LAYOUT_DIR, draft: layoutDraft } })
 // Every layout's tree, for the previews in Settings → Layout and Explore → Layouts.
 route('GET', '/api/layouts/all', () => ({ layouts: listLayouts().map(x => { const l = loadLayout(x.name); return { ...x, layout: l.layout, error: l.error } }), favourites: settings.ui.favourites ?? [] }))
 // Favourites go on ⌘⌥1-9 in the order they were starred, and ⌘⇧L cycles through them.

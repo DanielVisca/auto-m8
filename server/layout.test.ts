@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { cloneLayout, LAYOUT_DIR, listLayouts, listVersions, loadLayout, problemWith, readTile, restoreVersion, SHIPPED, snapshot, tilePath } from './layout.ts'
+import { cloneLayout, LAYOUT_DIR, listLayouts, listVersions, loadLayout, problemWith, readLayoutCss, readTile, restoreVersion, SHIPPED, snapshot, tilePath } from './layout.ts'
 
 const main = { id: 'main', type: 'block', content: { view: 'main' } }
 const row = (...children: any[]) => ({ id: 'root', type: 'row', children })
@@ -91,4 +91,18 @@ test('versions: a change is kept once, and restoring brings the files and active
 test('focus ships with no details column', () => {
   assert.ok(listLayouts().some(l => l.name === 'focus' && l.shipped))
   assert.equal(JSON.stringify(SHIPPED.focus).includes('"details"'), false)
+})
+
+test('a layout stylesheet stays in the folder and can\'t load anything from outside', () => {
+  const base = { id: 'root', type: 'row', children: [{ id: 'main', type: 'block', content: { view: 'main' } }] }
+  assert.equal(problemWith({ ...base, css: 'mine.css' }), null)
+  assert.match(problemWith({ ...base, css: '../evil.css' }) ?? '', /inside the layouts folder/)
+  assert.match(problemWith({ ...base, css: 'mine.js' }) ?? '', /\.css file/)
+  mkdirSync(LAYOUT_DIR, { recursive: true })
+  writeFileSync(join(LAYOUT_DIR, 'mine.css'), '@import url("https://x.test/a.css");\n.side-head { display: none; background: url(https://x.test/p.png) }\n.a { background: url(data:image/png;base64,AA) }')
+  const css = readLayoutCss({ ...base, css: 'mine.css' } as any) ?? ''
+  assert.ok(!css.includes('x.test'), css)
+  assert.ok(css.includes('.side-head { display: none'))
+  assert.ok(css.includes('data:image/png'))
+  assert.equal(readLayoutCss(base as any), null)
 })

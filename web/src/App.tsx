@@ -39,7 +39,7 @@ if (typeof window !== 'undefined') ((window as any).requestIdleCallback ?? ((f: 
 import { Paused, PauseBar, PauseButton } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'
-import { LayoutTree, topLeftOf, UiAsk, UiButton, UiDraftBar, useLayout, useLayoutColors, useLayoutCycle, useLayoutEscape, type Run } from './Layout'
+import { LayoutTree, topLeftOf, UiAsk, UiButton, UiCustomizeMenu, UiDraftBar, useLayout, useLayoutColors, useLayoutCss, useLayoutCycle, useLayoutEscape, type Run } from './Layout'
 
 type View =
   | { kind: 'chat'; id: string | null }
@@ -133,6 +133,7 @@ export function App() {
   // The window's layout file (server/layout.ts): its tree, and a look that beats Settings.
   const layout = useLayout()
   useLayoutColors(layout?.layout.colors)
+  useLayoutCss(layout?.css)
   useLayoutEscape()
   useLayoutCycle()
   // Theme: system, light or dark, on the page and on the window chrome.
@@ -310,7 +311,7 @@ export function App() {
           <div className="body"><main className="main">{main}</main></div>
         </> : <SimpleHome onOpen={openById} onAdvanced={() => setSimple(false)} />}
         <Handoff current={hashFor(view)} onGo={goHash} />
-        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar />
+        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiCustomizeMenu /><UiDraftBar />
       </div>
     )
   }
@@ -331,7 +332,7 @@ export function App() {
         <Handoff current={hashFor(view)} onGo={goHash} />
         <div className="body">{listOpen ? sidebar : <main className="main">{main}</main>}</div>
         {menu.target && <ContextMenu target={menu.target} onClose={menu.close} onOpenTerminal={openInClaude} />}
-        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar /><CarryDialog />
+        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiCustomizeMenu /><UiDraftBar /><CarryDialog />
       </div>
     )
   }
@@ -385,7 +386,7 @@ export function App() {
         <Handoff current={hashFor(view)} onGo={goHash} />
         <div className="body"><LayoutTree node={layout.layout} slots={slots} run={run} corner={corner} /></div>
         {menu.target && <ContextMenu target={menu.target} onClose={menu.close} onOpenTerminal={openInClaude} />}
-        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar /><CarryDialog />
+        <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiCustomizeMenu /><UiDraftBar /><CarryDialog />
       </div>
     )
   }
@@ -414,7 +415,7 @@ export function App() {
         {showPrSide && <aside className="detail-col" style={{ width: details.width }}><PrSide url={view.id!} onOpen={openById} /></aside>}
       </div>
       {menu.target && <ContextMenu target={menu.target} onClose={menu.close} onOpenTerminal={openInClaude} />}
-      <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiDraftBar /><CarryDialog />
+      <Toasts zen={zen} /><AskCard /><FileViewer /><UiAsk /><UiCustomizeMenu /><UiDraftBar /><CarryDialog />
     </div>
   )
 }
