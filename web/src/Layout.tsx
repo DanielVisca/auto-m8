@@ -33,8 +33,8 @@ export async function askForUi(text: string, l: LayoutState, brief?: string): Pr
   return c?.id ?? null
 }
 
-// ⌘⇧U: a small box to ask for a UI change. Type, press Enter, keep working; the Keep/Undo bar
-// below shows up when the window has changed.
+// ⌘⇧U: a small box to ask for a UI change. Type, press Enter, keep working; the Keep/Undo bar at the
+// top shows up when the window has changed.
 export function UiAsk() {
   const l = useLayout()
   const [open, setOpen] = useState(false)

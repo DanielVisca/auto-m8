@@ -734,7 +734,7 @@ function LayoutPicker() {
   }
   const ask = async () => {
     if (!change.trim()) return
-    try { await askForUi(change.trim(), l); setChange(''); setMsg('Asked an agent. Keep or Undo it from the bar at the bottom of the window.') } catch (e: any) { setMsg(String(e?.message ?? e)) }
+    try { await askForUi(change.trim(), l); setChange(''); setMsg('Asked an agent. Keep or Undo it from the bar at the top of the window.') } catch (e: any) { setMsg(String(e?.message ?? e)) }
   }
   return <>
     <div className="field">Ask for a change
@@ -769,7 +769,7 @@ function LayoutGallery() {
   const tryIt = async (x: Shared) => {
     try {
       await askForUi(`Add the shared layout ${x.repo}`, l, `Add the layout shared at ${x.url} (GitHub repo ${x.repo}) and switch to it, following "Layouts other people made" in AGENTS.md. Read its RECIPE.md and every file first.`)
-      setMsg(`Asked an agent to add ${x.repo}. Keep or Undo it from the bar at the bottom.`)
+      setMsg(`Asked an agent to add ${x.repo}. Keep or Undo it from the bar at the top.`)
     } catch (e: any) { setMsg(String(e?.message ?? e)) }
   }
   return <div className="field" style={{ alignItems: 'flex-start' }}>Gallery
