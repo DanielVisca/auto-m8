@@ -234,6 +234,10 @@ function analytics(days: number) {
                   from tool_calls where ts > ? group by 1 order by calls desc`, since),
     tools: all(`select replace(replace(name, 'mcp__perch__', 'mcp__auto-m8__'), 'mcp__auto_m8__', 'mcp__auto-m8__') name, case when server in ('perch', 'auto_m8') then 'auto-m8' else server end server, count(*) calls, sum(is_error) errors
                 from tool_calls where ts > ? group by 1 order by calls desc limit 40`, since),
+    // auto-m8's own tools as its MCP process saw them (mcp_events): per tool and action, timing and outcomes.
+    mcp: all(`select tool, coalesce(action, '') action, count(*) calls, sum(is_error) errors, cast(avg(duration_ms) as integer) avg_ms, max(duration_ms) max_ms,
+                sum(json_extract(props, '$.refused') is not null) refused, sum(json_extract(props, '$.no_app') is not null) no_app, count(distinct conversation_id) conversations
+              from mcp_events where ts > ? group by tool, action order by calls desc limit 40`, since),
     daily: all(`select date(ts / 1000, 'unixepoch', 'localtime') day, count(*) calls, sum(server is not null) mcp_calls
                 from tool_calls where ts > ? group by day order by day`, since),
     sources: all(`select date(started_at / 1000, 'unixepoch', 'localtime') day, source, count(*) n from conversations where started_at > ? group by day, source order by day`, since),

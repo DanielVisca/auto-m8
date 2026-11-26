@@ -56,6 +56,19 @@ create table if not exists tool_calls (
 );
 create index if not exists tool_calls_ts on tool_calls(ts);
 
+-- auto-m8's own MCP tools as its MCP process saw them: timing, client, and look's action detail (mcpanalytics.ts). Local only.
+create table if not exists mcp_events (
+  ts integer not null,
+  conversation_id text,
+  tool text not null,
+  action text,
+  client text,
+  duration_ms integer,
+  is_error integer,
+  props text                     -- JSON, structure only (look: target, step kinds, failed/refused)
+);
+create index if not exists mcp_events_ts on mcp_events(ts);
+
 -- Derived: PRs mentioned or created in a conversation; status refreshed from GitHub.
 create table if not exists conversation_prs (
   conversation_id text not null,

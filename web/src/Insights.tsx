@@ -14,6 +14,7 @@ type A = {
   projects: { cwd: string; n: number; messages: number }[]
   skills: { name: string; calls: number }[]
   agents: { name: string; calls: number }[]
+  mcp?: { tool: string; action: string; calls: number; errors: number; avg_ms: number; max_ms: number; refused: number; no_app: number; conversations: number }[]
 }
 
 function Bars({ rows, label, value, extra }: { rows: any[]; label: (r: any) => string; value: (r: any) => number; extra?: (r: any) => React.ReactNode }) {
@@ -73,6 +74,14 @@ function Usage({ onOpen }: { onOpen: (id: string) => void }) {
         <section className="card"><h3>MCP servers</h3><Bars rows={data.servers} label={r => r.server} value={r => r.calls} extra={err} /></section>
         <section className="card"><h3>Top tools</h3><Bars rows={data.tools.slice(0, 15)} label={r => toolLabel(r.name)} value={r => r.calls} extra={err} /></section>
       </div>
+      {!!data.mcp?.length && (
+        <section className="card">
+          <h3>auto-m8 tools: what agents did</h3>
+          <Bars rows={data.mcp.slice(0, 20)} label={r => r.action ? `${r.tool} · ${r.action}` : r.tool} value={r => r.calls}
+            extra={r => <span className="muted small"> · {r.avg_ms < 1000 ? `${r.avg_ms}ms` : `${(r.avg_ms / 1000).toFixed(1)}s`} avg{err(r)}{r.refused ? <span className="warn"> · {r.refused} refused</span> : null}{r.no_app ? <span className="warn"> · {r.no_app} app not running</span> : null}</span>} />
+          <div className="muted small">From auto-m8's own MCP process, kept on this Mac. Recorded since Nov 26.</div>
+        </section>
+      )}
       {(data.skills.length > 0 || data.agents.length > 0) && (
         <div className="two">
           <section className="card"><h3>Skills you used</h3>{data.skills.length ? <Bars rows={data.skills} label={r => r.name} value={r => r.calls} /> : <div className="muted small">None in this window.</div>}</section>
