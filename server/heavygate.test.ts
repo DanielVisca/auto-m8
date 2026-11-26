@@ -4,7 +4,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 process.env.PERCH_HEAVY_DIR = mkdtempSync(join(tmpdir(), 'heavy-'))
-const { classify, hook } = await import('./heavygate.ts')
+import { writeFileSync } from 'node:fs'
+const { classify, hook, ORPHAN_AFTER_MS } = await import('./heavygate.ts')
 const W = '/Users/x/Development/.perch-worktrees/posthog-pr1'
 
 test('classifies heavy commands in big repos only', () => {
@@ -36,4 +37,15 @@ test('a slot held by a process that is gone is free', () => {
   hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'b', tool_input: {} })
   assert.equal(pre('dead', 999999), null)
   assert.equal(pre('next', process.pid), null) // 999999 isn't alive, so its slot was cleared
+})
+
+test('a slot left by a refused command frees when the same agent asks again', () => {
+  const dir = process.env.PERCH_HEAVY_DIR!
+  // agent's earlier push was refused after this hook took the slot: no PostToolUse ever came
+  writeFileSync(join(dir, 'build-0'), JSON.stringify({ kind: 'build', tool: 'refused', pid: process.pid, bg: false, at: Date.now() - ORPHAN_AFTER_MS - 1000, cwd: W, cmd: 'git push --force-with-lease' }))
+  const pre = (id: string) => hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: id, cwd: W, tool_input: { command: 'git push origin HEAD:x' } }, process.pid)
+  assert.equal(pre('retry'), null) // the orphan is freed and the retry gets the slot
+  // a different agent still can't take it while the retry runs
+  assert.equal((hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'other', cwd: W, tool_input: { command: 'git push' } }, 999999) as any).hookSpecificOutput.permissionDecision, 'deny')
+  hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'retry', tool_input: {} })
 })

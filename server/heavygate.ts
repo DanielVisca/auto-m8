@@ -9,7 +9,8 @@
 //     two for test runs). If they're all taken, the command is blocked with a note naming who has
 //     them, so the agent can wait and try again. Nothing is ever auto-approved here.
 //   PostToolUse on Bash: the command finished, its slot is free. A background command keeps its slot
-//     until it ages out. A slot also frees when the agent holding it exits, or after MAX_AGE.
+//     until it ages out. A slot also frees when the agent holding it exits, after MAX_AGE, or when
+//     the same agent asks for another heavy command (releaseOrphans: its last one was refused).
 import { execFileSync } from 'node:child_process'
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -69,6 +70,17 @@ export function release(tool: string) {
   for (const h of held()) if (h.tool === tool && !h.bg) rmSync(h.file, { force: true })
 }
 
+// A command this hook let through can still be refused by a later PreToolUse check (auto mode's
+// safety classifier, a permission rule). Claude Code then sends no PostToolUse, so its slot stayed
+// held until MAX_AGE: a refused force-push blocked every push on the machine for 15 minutes
+// (2026-11-26). The agent that took it is the one that next asks for a heavy command, so free its
+// own older foreground slots then. 30 s keeps parallel tool calls from one message apart.
+export const ORPHAN_AFTER_MS = 30_000
+export function releaseOrphans(pid: number, tool: string, now = Date.now()) {
+  if (!pid) return
+  for (const h of held(undefined, now)) if (h.pid === pid && !h.bg && h.tool !== tool && now - h.at > ORPHAN_AFTER_MS) rmSync(h.file, { force: true })
+}
+
 const describe = (h: Slot) => `${basename(h.cwd)}: ${h.cmd.replace(/\s+/g, ' ').slice(0, 80)} (${Math.round((Date.now() - h.at) / 60_000)} min)`
 
 // The claude process running this hook (hook → sh → claude): the slot is free once it exits.
@@ -93,6 +105,7 @@ export function hook(payload: any, pid = 0): object | null {
   const cwd = String(payload.cwd ?? '')
   const kind = classify(cmd, cwd)
   if (!kind) return null
+  releaseOrphans(pid, tool)
   if (take(kind, { tool, pid, bg: !!ti.run_in_background, cwd, cmd: cmd.split('\n')[0].slice(0, 200) })) return null
   const reason = `auto-m8: ${kind === 'build' ? 'a typecheck/build/push' : 'test runs'} already running in another checkout (${held(kind).map(describe).join('; ')}). ` +
     `Heavy checks run ${SLOTS[kind]} at a time machine-wide so the Mac doesn't run out of memory. Do other work and try again in a few minutes; don't work around this.`
