@@ -93,7 +93,7 @@ export function nextUp(id: string, r = row(id), now = deps.now()): NextUp[] {
   try {
     for (const p of all<{ due_at: number | null; text: string; until: string | null; pr_url: string | null }>(
       `select due_at, text, until, pr_url from promises where conversation_id = ? and status in ('open', 'waiting') order by coalesce(due_at, created_at) limit 3`, id))
-      out.push({ at: p.due_at, kind: 'follow-up', text: p.text.split('\n').find(l => l.trim())?.trim().slice(0, 120) ?? 'follow-up', detail: p.text,
+      out.push({ at: p.due_at, kind: 'follow-up', text: p.text.replace(/\s*\n\s*-?\s*/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'follow-up', detail: p.text,
         when: p.due_at ? undefined : p.until ? `when ${p.until}${p.pr_url ? ` on ${p.pr_url}` : ''}` : undefined })
   } catch {} // promises.ts not loaded (tests)
   return out.sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
