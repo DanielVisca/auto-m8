@@ -1165,7 +1165,14 @@ a.button { display: inline-block; background: var(--bg2); border: 1px solid var(
 .tuck-tab.done .tuck-bar { background: #3fb950; opacity: 1; box-shadow: 0 0 8px #3fb950; animation: tuck-glow 2s ease-in-out infinite; }
 @keyframes tuck-glow { 50% { box-shadow: 0 0 2px #3fb950; } }
 
-.menu.family { min-width: 320px; max-width: 460px; max-height: 60vh; overflow: auto; }
+.menu.family { min-width: 320px; max-width: 520px; }
+.family-pulls { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 2px; }
+.pull-row { padding: 2px 8px; }
+.pull-head { display: flex; align-items: center; gap: 6px; }
+.pull-head .link { text-align: left; background: none; border: 0; padding: 0; color: var(--fg); cursor: pointer; min-width: 0; }
+.pull-head .link:hover { color: var(--accent); }
+.pull-chip { color: var(--accent); }
+.pull-peek { margin: 4px 0 6px 4px; padding: 6px 8px; border-left: 2px solid var(--line); color: var(--muted); white-space: pre-wrap; max-height: 160px; overflow: auto; }
 .family-row { display: flex; align-items: center; gap: 6px; text-align: left; }
 .family-row.on { opacity: 1; font-weight: 600; }
 .family-btn { white-space: nowrap; }

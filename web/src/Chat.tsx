@@ -1496,31 +1496,69 @@ const textOf = (it: Item) => it.kind === 'assistant' ? it.blocks.filter(b => b.t
 type FamilyMember = { id: string; title: string; parent: string | null; depth: number; kind: string | null; updated_at: number | null }
 const FAMILY_KIND: Record<string, string> = { branch: 'branch', rewound: 'rewind', context: 'pulled in' }
 
-// The chat this one branched from and every branch off it, as one small tree. Hidden when a
-// chat has no family, so it adds nothing to the header most of the time.
+// The chat this one branched from and every branch off it, as one small tree, plus what this
+// chat actually pulled in from other conversations (briefs, reads, searches): how much, when,
+// and a jump to the spot in the thread. Hidden when there's neither, so it adds nothing most of the time.
+type Pull = { source: string | null; title: string | null; how: 'brief' | 'read' | 'search'; chars: number; ts: number | null; uuid?: string; tool?: string; preview: string; query?: string }
+type Pulls = { pulls: Pull[]; total: { briefs: number; reads: number; searches: number; chars: number } }
+const kchars = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`
+const PULL_HOW: Record<Pull['how'], string> = { brief: 'brief', read: 'read', search: 'search' }
 function Family({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   const { data } = useLive<{ root: string; members: FamilyMember[] }>(`/api/conversations/${encodeURIComponent(id)}/family`, ['conversations'])
   const [open, setOpen] = useState(false)
+  const { data: pd } = useLive<Pulls>(open ? `/api/conversations/${encodeURIComponent(id)}/pulls` : null, ['conversations'])
+  const [peek, setPeek] = useState<number | null>(null)
   const ref = useRef<HTMLButtonElement>(null)
   const m = data?.members ?? []
   if (m.length < 2) return null
   const self = m.find(x => x.id === id)
   const parent = self?.parent ? m.find(x => x.id === self.parent) : null
+  const ps = pd?.pulls ?? []
+  const bySource = new Map<string, { n: number; chars: number }>()
+  for (const p of ps) if (p.source) { const s = bySource.get(p.source) ?? { n: 0, chars: 0 }; s.n++; s.chars += p.chars; bySource.set(p.source, s) }
+  const jump = (p: Pull) => { setOpen(false); focusInChat(id, p.tool ? { tool: p.tool } : { uuid: p.uuid, ts: p.ts ?? undefined }) }
+  const t = pd?.total
   return (
     <>
       <button ref={ref} className="icon family-btn" title={`${parent ? `Branched from: ${parent.title}\n` : ''}${m.length} chats in this family`} onClick={() => setOpen(!open)}>⑂ {m.length}</button>
       <Popover anchor={ref} open={open} onClose={() => setOpen(false)}>
         <div className="menu family">
           <div className="muted small pad-s">This chat's family: where it branched from and every branch off it</div>
-          {m.map(x => (
-            <button key={x.id} className={`family-row ${x.id === id ? 'on' : ''}`} style={{ paddingLeft: 8 + x.depth * 14 }} disabled={x.id === id}
-              onClick={() => { setOpen(false); onOpen(x.id) }} title={x.title}>
-              <span className="muted">{x.depth ? '└' : '●'}</span>
-              <span className="ellipsis grow">{x.title}</span>
-              {x.kind && <span className="chip">{FAMILY_KIND[x.kind] ?? x.kind}</span>}
-              {x.id === id && <span className="chip">you are here</span>}
-            </button>
-          ))}
+          {m.map(x => {
+            const s = bySource.get(x.id)
+            return (
+              <button key={x.id} className={`family-row ${x.id === id ? 'on' : ''}`} style={{ paddingLeft: 8 + x.depth * 14 }} disabled={x.id === id}
+                onClick={() => { setOpen(false); onOpen(x.id) }} title={x.title}>
+                <span className="muted">{x.depth ? '└' : '●'}</span>
+                <span className="ellipsis grow">{x.title}</span>
+                {s && <span className="chip pull-chip" title={`This chat took ${s.chars.toLocaleString()} characters from it in ${s.n} pull${s.n === 1 ? '' : 's'}`}>↙ {s.n}× · {kchars(s.chars)}</span>}
+                {x.kind && <span className="chip">{FAMILY_KIND[x.kind] ?? x.kind}</span>}
+                {x.id === id && <span className="chip">you are here</span>}
+              </button>
+            )
+          })}
+          <div className="family-pulls">
+            <div className="muted small pad-s">
+              {!pd ? 'Reading what this chat pulled in…'
+                : !ps.length ? "This chat hasn't pulled anything in from other conversations."
+                : <>What this chat pulled in: {[t!.briefs && `${t!.briefs} brief${t!.briefs === 1 ? '' : 's'}`, t!.reads && `${t!.reads} read${t!.reads === 1 ? '' : 's'}`, t!.searches && `${t!.searches} search${t!.searches === 1 ? '' : 'es'}`].filter(Boolean).join(', ')} · {kchars(t!.chars)} chars</>}
+            </div>
+            {ps.map((p, i) => (
+              <div key={i} className="pull-row">
+                <div className="pull-head">
+                  <span className="chip">{PULL_HOW[p.how]}</span>
+                  <button className="link ellipsis grow" title={p.source ? `Open ${p.title ?? p.source}` : 'Show what came back'} onClick={() => p.source ? (setOpen(false), onOpen(p.source)) : setPeek(peek === i ? null : i)}>
+                    {p.how === 'search' ? `"${p.query ?? ''}"` : p.title ?? p.source}
+                  </button>
+                  <span className="muted small">{kchars(p.chars)}</span>
+                  {p.ts && <span className="muted small" title={new Date(p.ts).toLocaleString()}>{new Date(p.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+                  <button className="icon small" title="Show what it got" onClick={() => setPeek(peek === i ? null : i)}>{peek === i ? '▾' : '▸'}</button>
+                  <button className="icon small" title="Jump to where it happened in this chat" onClick={() => jump(p)}>↧</button>
+                </div>
+                {peek === i && <div className="pull-peek small">{p.preview || '(empty)'}{p.chars > p.preview.length ? ' …' : ''}</div>}
+              </div>
+            ))}
+          </div>
         </div>
       </Popover>
     </>

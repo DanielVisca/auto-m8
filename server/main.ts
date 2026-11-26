@@ -54,6 +54,7 @@ import { originChain, searchOrigins } from './origin.ts'
 import { originSyncStatus } from './originsync.ts'
 import { sweepTitles } from './titles.ts'
 import { family } from './family.ts'
+import { pulls } from './pulls.ts'
 import { allLabels, applyRules, markSeen, setTitle, deleteRule, detail, editLabels, list, listRules, saveRule, setStates, siblings } from './conversations.ts'
 import { ask, briefing, generateBrief, home, today } from './brief.ts'
 import { indexStatus, onChange, onTick, posthogStatus, scanAll, startIndexer, syncMyPrs, syncPrs, syncTasks } from './indexer.ts'
@@ -427,6 +428,7 @@ route('DELETE', '/api/conversations/:id/links/:other', m => {
 })
 route('GET', '/api/related', (_m, _r, _s, q) => ({ related: related(q.get('q') ?? '', { exclude: q.get('exclude') ?? undefined, limit: 5 }) }))
 route('GET', '/api/conversations/:id/family', m => family(decodeURIComponent(m[1])))
+route('GET', '/api/conversations/:id/pulls', m => pulls(decodeURIComponent(m[1])))
 route('GET', '/api/conversations/:id/siblings', m => ({ siblings: siblings(decodeURIComponent(m[1])) }))
 route('GET', '/api/graph', () => ({
   links: all('select a, b, kind, note from links'),

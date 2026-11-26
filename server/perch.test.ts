@@ -1042,3 +1042,32 @@ test('a GitHub hiccup on a follow-up GraphQL call is retried, real errors are no
   assert.equal(friendly(new Error('gh api graphql: empty reply'), 'Reading all checks').status, 'retrying')
   assert.equal(friendly(new Error('gh api graphql: gh: Something went wrong while executing your query on 2026-11-24'), 'x').transient, true)
 })
+
+test('pulls: briefs in the first message and get_conversation reads, with where and how much', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { db } = await import('./db.ts')
+  const { pulls } = await import('./pulls.ts')
+  const dir = mkdtempSync(join(tmpdir(), 'perch-pulls-'))
+  const path = join(dir, 'pull.jsonl')
+  const L = (o: object) => JSON.stringify({ sessionId: 'pull', ...o })
+  const brief = '<earlier-conversations>\nintro\n\n## Older (conversation src-a)\nSource: claude\nIt started with: hi\n</earlier-conversations>\n\nnew ask'
+  writeFileSync(path, [
+    L({ type: 'user', uuid: 'u1', timestamp: '2026-11-25T10:00:00Z', message: { role: 'user', content: brief } }),
+    L({ type: 'assistant', uuid: 'a1', message: { id: 'm1', role: 'assistant', content: [{ type: 'tool_use', id: 'tr', name: 'mcp__auto-m8__get_conversation', input: { id: 'src-b' } }] } }),
+    L({ type: 'user', uuid: 'r1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tr', content: 'x'.repeat(1234) }] } }),
+    L({ type: 'assistant', uuid: 'a2', message: { id: 'm2', role: 'assistant', content: [{ type: 'tool_use', id: 'ts', name: 'mcp__perch__search_conversations', input: { query: 'dash' } }] } }),
+    L({ type: 'user', uuid: 'r2', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'ts', content: 'hits' }] } }),
+  ].join('\n'))
+  db.prepare(`insert into conversations (id, source, path, title, started_at, updated_at) values ('pull', 'claude', ?, 'Puller', 1, 1)`).run(path)
+  db.prepare(`insert into conversations (id, source, title, started_at, updated_at) values ('src-b', 'claude', 'Read me', 1, 1)`).run()
+  const r = pulls('pull')
+  assert.deepEqual(r.pulls.map(p => [p.how, p.source, p.chars > 0]), [['brief', 'src-a', true], ['read', 'src-b', true], ['search', null, true]])
+  assert.equal(r.pulls[0].uuid, 'u1')
+  assert.equal(r.pulls[1].tool, 'tr')
+  assert.equal(r.pulls[1].chars, 1234)
+  assert.equal(r.pulls[1].title, 'Read me')
+  assert.equal(r.pulls[2].query, 'dash')
+  assert.deepEqual({ ...r.total, chars: undefined }, { briefs: 1, reads: 1, searches: 1, chars: undefined })
+})
