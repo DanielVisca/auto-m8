@@ -323,9 +323,9 @@ export function App() {
           <ProdAlert />
           <BrowserFlag onOpen={openById} />
           {showDecisions && <DecisionFlag onOpen={openById} />}
+          <Resources />
           <UiButton />
           <PinButton />
-          <Resources />
           {canSimple && <button className="s-mode no-drag" onClick={() => { setSimple(true); setView({ kind: 'home' }) }}>Simple</button>}
         </header>
         <Handoff current={hashFor(view)} onGo={goHash} />
@@ -370,9 +370,9 @@ export function App() {
             <span className="grow" />
             <BrowserFlag onOpen={openById} />
             {showDecisions && <DecisionFlag onOpen={openById} />}
+            <Resources />
             <UiButton />
             <PinButton />
-            <Resources />
           </div>
           {main}
         </main>
@@ -402,9 +402,9 @@ export function App() {
             <span className="grow" />
             <BrowserFlag onOpen={openById} />
             {showDecisions && <DecisionFlag onOpen={openById} />}
+            <Resources />
             <UiButton />
             <PinButton />
-            <Resources />
           </div>
           {main}
         </main>
