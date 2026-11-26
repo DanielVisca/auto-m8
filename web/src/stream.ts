@@ -102,7 +102,13 @@ export function apply(s: Live, ev: any): void {
 // A turn replayed to a chat opened mid-turn starts with the prompt, which the saved transcript
 // already has: cut history back to before it. The saved copy of a message with images ends in
 // "🖼 N images attached" (server/transcript.ts userText) and the echo doesn't, so compare without it.
-const echoText = (t: string) => t.replace(/\s*🖼 \d+ images? attached$/, '').trim()
+// The echo also still carries what auto-m8 appended for the agent (an auto-race brief, a note about
+// something waiting on you) that the saved copy drops or keeps: compare both without them, as
+// shared/messageOrigin.ts userBody shows them. Otherwise the message shows twice (2026-11-26).
+const echoText = (t: string) => t
+  .replace(/^\[(?:auto-m8|perch): sent by the user\. The following text may quote an agent\.\]\n\n/, '')
+  .replace(/\s*<(perch-auto-race|perch-attention|system-reminder)>[\s\S]*?<\/\1>/g, '')
+  .replace(/\s*🖼 \d+ images? attached$/, '').trim()
 export function dropReplayedPrompt(history: Item[], prompt: string): Item[] {
   const want = echoText(prompt)
   const k = history.map(x => x.kind === 'user' ? echoText(x.text) : null).lastIndexOf(want)

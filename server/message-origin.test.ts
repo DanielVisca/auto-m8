@@ -69,3 +69,12 @@ test('a chat opened mid-turn shows a message with an image once, not twice', () 
   assert.deepEqual(dropReplayedPrompt(saved, prompt), [])
   assert.equal(dropReplayedPrompt(saved, 'something else').length, 1)
 })
+
+test('a chat opened mid-turn shows a message with an auto-race or attention note once, not twice', () => {
+  const { dropReplayedPrompt } = streamMod
+  const prompt = 'build it. double check the json\n\n<perch-auto-race>\nrace this, candidate abc\n</perch-auto-race>\n\n<perch-attention>\none thing waits on you\n</perch-attention>'
+  const saved = toItems(JSON.stringify({ type: 'user', uuid: 'u1', message: { role: 'user', content: prompt } }))
+  assert.equal(saved.length, 1)
+  assert.deepEqual(dropReplayedPrompt(saved, prompt), [])
+  assert.equal(dropReplayedPrompt(saved, 'build it.').length, 1)
+})
