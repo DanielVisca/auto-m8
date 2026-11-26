@@ -12,7 +12,7 @@ import { GitExplorer } from './GitExplorer'
 type Evidence = { file: string; line: number; text: string; github?: string | null; local?: string }
 type Edge = { from: string; to: string; kind: 'fk' | 'import'; weight: number; evidence: Evidence[] }
 type Node = { id: string; name: string; path: string; files: number; models: string[]; role: 'focus' | 'dependency' | 'dependent' | 'both' | 'second'; score: number; hub: boolean }
-type GraphRes = { repo: string; sha: string; focus: string | null; nodes: Node[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; alsoIn?: { concept: string; folders: string[]; models: string[] }[]; names: string[]; remote: { owner: string; name: string } | null }
+type GraphRes = { repo: string; sha: string; focus: string | null; drill?: { path: string; crumbs: string[]; owner: string | null; hidden: number }; nodes: Node[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; alsoIn?: { concept: string; folders: string[]; models: string[] }[]; names: string[]; remote: { owner: string; name: string } | null }
 type Commit = { sha: string; date: string; author: string; subject: string; pr: number | null; url: string | null }
 type Ev = { date: string; kind: 'concept' | 'edge'; id: string; from?: string; to?: string; approx: boolean; source: string; commit: Commit }
 type Timeline = { status: 'running' | 'done'; done: number; total: number; source: string; shallow: boolean; since: string | null; events: Ev[]; milestones: Record<string, Commit[]>; error?: string }
@@ -26,6 +26,7 @@ const PALETTE = ['#4f9cf9', '#e5484d', '#30a46c', '#a970ff', '#e93d82', '#12a594
 const qs = (o: Record<string, string | null | undefined>) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join('&')
 const recentRepos = (): string[] => { try { return JSON.parse(localStorage.getItem('perch.explore.repos') ?? '[]') } catch { return [] } }
 const label = (id: string) => id.split('/').pop() ?? id
+const INSIDE = 'inside:'
 const radius = (files: number) => Math.min(26, 7 + 2.6 * Math.log2(files + 1))
 
 // Left: what the focus is built on. Right: what's built on it. Middle: the focus, and links both ways.
@@ -45,6 +46,15 @@ function layout(nodes: Node[]) {
     // No focus: a circle, biggest first.
     nodes.forEach((n, i) => { const a = (i / nodes.length) * Math.PI * 2 - Math.PI / 2; pos.set(n.id, { x: W / 2 + Math.cos(a) * 380, y: H / 2 + Math.sin(a) * 260 }) })
     return pos
+  }
+  // Drilled into a folder: its parts fill the middle as a grid, what they use on the left, what uses them on the right.
+  const parts = cols.center.filter(n => n.role === 'focus')
+  if (parts.length > 7) {
+    for (const n of [...cols.bothL, ...cols.bothR]) cols.dependency.push(n)
+    cols.bothL = []; cols.bothR = []
+    const per = Math.ceil(Math.sqrt(parts.length * 0.8)), rows = Math.ceil(parts.length / per)
+    parts.forEach((n, i) => { const c = i % per, r = Math.floor(i / per); pos.set(n.id, { x: 290 + (420 / Math.max(1, per - 1)) * (per === 1 ? 0.5 : c) + (r % 2 ? 18 : 0), y: (H / (rows + 1)) * (r + 1) }) })
+    cols.center = cols.center.filter(n => n.role !== 'focus')
   }
   for (const [k, list] of Object.entries(cols)) list.forEach((n, i) => pos.set(n.id, { x: xs[k] + (list.length > 7 ? (i % 2 ? 28 : -28) : 0), y: (H / (list.length + 1)) * (i + 1) }))
   return pos
@@ -240,6 +250,8 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
   }, [g, ops])
   const removed = new Set(dreamRes?.removed ?? []), broken = new Set(dreamRes?.broken.map(b => b.id) ?? []), affected = new Set(dreamRes?.affected.map(a => a.id) ?? [])
 
+  // Open a module or folder up: its parts become the nodes. Back (and the breadcrumb) climbs out again.
+  const drill = (id: string) => { const f = INSIDE + id; setFocus(f); setFocusInput(f); setActive(null); setSelected([]) }
   const pick = (id: string, multi: boolean) => {
     setActive(id)
     setSelected(s => multi ? (s.includes(id) ? s.filter(x => x !== id) : [...s, id]) : [id])
@@ -334,9 +346,13 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
         <div className="explore-main" style={{ '--ex-side': `${sideW}px` } as React.CSSProperties}>
           <div className="explore-stage">
             <div className="explore-legend small muted">
-              {g.focus ? <>Left: what {focusNames.join(', ') || g.focus} is built on · Right: what's built on it · Middle: links both ways</> : <>The {g.nodes.length} most connected of {g.total} modules. Focus on one to see what it's built on.</>}
+              {g.drill ? <div className="ex-crumbs">
+                <button className="link small" onClick={() => { const t = g.drill!.owner ?? ''; setFocus(t); setFocusInput(t); setActive(null); setSelected([]) }} title="Back to the module map, focused here">⤴ map</button>
+                {g.drill.crumbs.map((c, i) => <span key={c}> › {i === g.drill!.crumbs.length - 1 ? <b>{label(c)}</b> : <button className="link small" onClick={() => drill(c)} title={`Open ${c}`}>{label(c)}</button>}</span>)}
+                <span className="muted"> · Inside {g.drill.path}: middle, its parts; left, what they use outside it; right, what outside uses them. Double-click a part to open it.{g.drill.hidden ? ` ${g.drill.hidden} small parts not drawn.` : ''}</span>
+              </div> : g.focus ? <>Left: what {focusNames.join(', ') || g.focus} is built on · Right: what's built on it · Middle: links both ways</> : <>The {g.nodes.length} most connected of {g.total} modules. Focus on one to see what it's built on.</>}
               {' · '}<span className="lg-fk" title="A model in one module has a foreign key to a table in another: a database-level link, the hardest kind to undo">●━ thick solid, dot at start: foreign key (database link)</span> <span className="lg-imp" title="Code in one module imports another module">┅ thin dashed: code import</span> · arrows point at what it's built on · hover a link for details · {shortPath(g.repo)} @ {g.sha.slice(0, 8)}
-              {loading && <> · <i className="spin" /> mapping…</>}
+              {loading && <> · <i className="spin" /> {focus.startsWith(INSIDE) ? 'opening it up (reading its files and the modules that use it)…' : 'mapping…'}</>}
               {(() => { const me = repos.find(r => r.path === g.repo); return me?.behindOrigin && me.behindOrigin > 50 ? <div className="warn">⚠ This checkout is on branch {me.branch} and {me.behindOrigin.toLocaleString()} commits behind main, so the map shows an older system. Pull or switch to main for today's.</div> : null })()}
             </div>
             <div className="ex-svgwrap" ref={stageRef}>
@@ -422,7 +438,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 const cls = ['ex-node', n.role, n.hub ? 'hub' : '', active === n.id ? 'active' : '', selected.includes(n.id) ? 'sel' : '', removed.has(n.id) ? 'gone' : '', broken.has(n.id) ? 'broken' : '', affected.has(n.id) ? 'affected' : '', fresh(n.id) ? 'fresh' : '', T && !intro.has(n.id) ? 'undated' : '', spot.size && !spot.has(n.id) && !near.has(n.id) ? 'faded' : ''].join(' ')
                 return (
                   <g key={n.id} className={cls} transform={`translate(${p.x},${p.y})`} onPointerDown={e => e.stopPropagation()}
-                    onClick={e => pick(n.id, e.shiftKey || e.metaKey)} onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(h => h === n.id ? null : h)}
+                    onClick={e => pick(n.id, e.shiftKey || e.metaKey)} onDoubleClick={e => { e.stopPropagation(); drill(n.id) }} onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(h => h === n.id ? null : h)}
                     onContextMenu={e => { e.preventDefault(); if (dreaming) setOps(o => o.some(x => x.op === 'remove' && x.id === n.id) ? o.filter(x => !(x.op === 'remove' && x.id === n.id)) : [...o, { op: 'remove', id: n.id }]) }}>
                     <circle r={r} style={colorOf.has(n.id) ? { stroke: colorOf.get(n.id), strokeWidth: 3.5, strokeDasharray: 'none' } : undefined} />
                     <text y={r + 13} textAnchor="middle">{label(n.id)}</text>
@@ -467,7 +483,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
             {sources && <SourcesPanel onClose={() => setSources(false)} onOpenTerm={id => { location.hash = `#term/${encodeURIComponent(id)}` }} />}
             {dreaming && <DreamPanel g={g} ops={ops} setOps={setOps} res={dreamRes} active={active} onSave={saveDream} />}
             {active ? <NodePanel repo={g.repo} id={active} workspace={[g.repo, ...ws]} org={g.remote?.owner ?? null} onRuntime={setRuntime} milestones={tl?.milestones[active]} introduced={events.find(e => e.kind === 'concept' && e.id === active)}
-              onFocus={id => { setFocus(id); setFocusInput(id); setActive(null); setSelected([]) }}
+              onFocus={id => { if (g.drill && id.startsWith(g.drill.path + '/')) return drill(id); setFocus(id); setFocusInput(id); setActive(null); setSelected([]) }} onDrill={drill}
               onAsk={() => send(`Explain ${active}: what it is responsible for, how its data is stored, and why it depends on the modules it does. Start from the docs and models listed.`)}
               onRemove={() => { setDreaming(true); setOps(o => [...o, { op: 'remove', id: active }]) }} />
               : !dreaming && <div className="card muted small">Click a concept to see what it is, what it's built on, what's built on it, and where that's written. Shift-click or drag a box to select several, then ask about them below. Press play on the timeline to watch the system grow.</div>}
@@ -542,7 +558,7 @@ function Section({ id, title, summary, hint, children }: { id: string; title: st
   )
 }
 
-function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced, onFocus, onAsk, onRemove }: { repo: string; id: string; workspace: string[]; org: string | null; onRuntime: (r: Runtime | null) => void; milestones?: Commit[]; introduced?: Ev; onFocus: (id: string) => void; onAsk: () => void; onRemove: () => void }) {
+function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced, onFocus, onDrill, onAsk, onRemove }: { repo: string; id: string; workspace: string[]; org: string | null; onRuntime: (r: Runtime | null) => void; milestones?: Commit[]; introduced?: Ev; onFocus: (id: string) => void; onDrill: (id: string) => void; onAsk: () => void; onRemove: () => void }) {
   const [d, setD] = useState<any>(() => keep(`/api/explore/node?${qs({ repo, id })}`).v ?? null)
   const [more, setMore] = useState<Record<string, boolean>>({})
   const [open, setOpen] = useState<string | null>(null)
@@ -617,14 +633,18 @@ function NodePanel({ repo, id, workspace, org, onRuntime, milestones, introduced
       {use?.applies && <UsageLine u={use} />}
       <div className="ex-actions small">
         <button className="small" onClick={onAsk} title="Ask the chat about this concept; it gets the map's evidence and is told to cite files">Ask</button>
-        <button className="small" onClick={() => onFocus(d.concept.id)} title="Re-center the map on this concept">Focus</button>
+        {d.parent ? <button className="small" onClick={() => onFocus(d.parent)} title={`Re-center the module map on ${d.parent}, the module this folder is in`}>Focus {label(d.parent)}</button>
+          : <button className="small" onClick={() => onFocus(d.concept.id)} title="Re-center the map on this concept">Focus</button>}
+        <button className="small" onClick={() => onDrill(d.concept.id)} title="Open it up: its subfolders become the map (or double-click it on the map)">Open up</button>
         <button className="small" onClick={onRemove} title="Dream mode: see what would break if this were removed">What if removed?</button>
       </div>
       <Section id="runs" title="Where it runs" summary={runs} hint="Argo CD apps with the concept's name in theirs. Only “runs your code” is proven (the image is tagged with a commit in your repo); others just share the name. A module inside a bigger app (a Django product in the web app) has no app of its own.">
-        <WhereItRuns concept={d.concept.id} repos={workspace} org={org} onLoaded={onRuntime} bare onSummary={setRuns} />
+        {d.parent && <div className="tiny muted">For <b>{d.parent}</b>, the module this folder is in: deployments and tables belong to the whole module.</div>}
+        <WhereItRuns concept={d.parent ?? d.concept.id} repos={workspace} org={org} onLoaded={onRuntime} bare onSummary={setRuns} />
       </Section>
       <Section id="data" title="Data" summary={data} hint="ClickHouse tables its code names (or named like it), read from system tables via Grafana; disk fullness from Prometheus; instance types from terraform. Click any number for its query.">
-        <DataSection concept={d.concept.id} repos={workspace} bare onSummary={setData} />
+        {d.parent && <div className="tiny muted">For <b>{d.parent}</b>, the module this folder is in. Tables its own files name are under Code.</div>}
+        <DataSection concept={d.parent ?? d.concept.id} repos={workspace} bare onSummary={setData} />
       </Section>
       <Section id="builton" title="Built on" summary={`${specificCount(d.dependsOn)} specific${allCount(d.dependsOn) > specificCount(d.dependsOn) ? ` + ${allCount(d.dependsOn) - specificCount(d.dependsOn)} shared` : ''}`} hint="Modules this one imports or has foreign keys to. ▸ shows the lines of code; click a name to focus the map there.">
         <Edges title="Built on" list={d.dependsOn} other="to" />

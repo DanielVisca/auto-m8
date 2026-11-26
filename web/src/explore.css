@@ -162,3 +162,5 @@ a.ex-chip { cursor: pointer; }
 .ex-find-more button { text-align: left; overflow-wrap: anywhere; }
 .ex-find-btn { width: 28px; height: 28px; border-radius: 14px; padding: 0; font-size: 16px; line-height: 1; opacity: .75; }
 .ex-find-btn:hover { opacity: 1; }
+
+.ex-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }

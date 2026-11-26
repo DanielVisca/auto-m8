@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ephemeral } from './chat.ts'
 import { DATA_DIR, settings } from './settings.ts'
-import { checkRepo, graphFor } from './explorer.ts'
+import { checkRepo, drillEdges, findConcept, graphFor } from './explorer.ts'
 
 const DIR = join(DATA_DIR, 'explorer', 'summaries')
 mkdirSync(DIR, { recursive: true })
@@ -63,7 +63,7 @@ async function generate(repo: string, id: string, key: string) {
   await slot()
   try {
     const g = await graphFor(repo)
-    const c = g.concepts.find(x => x.id === id)
+    const c = findConcept(g, id)
     if (!c) throw new Error(`No concept ${id}`)
     const files = (await git(repo, ['ls-files', '--', c.path])).split('\n').filter(Boolean)
     const docs = files.filter(f => /(^|\/)(README|AGENTS|CLAUDE|ARCHITECTURE)[^/]*\.md$|product\.ya?ml$/i.test(f) && f.split('/').length <= c.path.split('/').length + 2).slice(0, 3)
@@ -75,8 +75,8 @@ async function generate(repo: string, id: string, key: string) {
       `Module: ${c.path} (${c.files} files)`,
       c.models.length ? `Models: ${c.models.slice(0, 20).join(', ')}` : '',
       c.relations.length ? `Foreign keys: ${c.relations.slice(0, 12).map(r => `${r.model}→${r.target}`).join(', ')}` : '',
-      `Built on: ${out(g.edges.filter(e => e.from === c.id), 'to')}`,
-      `Used by: ${out(g.edges.filter(e => e.to === c.id), 'from')}`,
+      `Built on: ${out((drillEdges(g, c.id) ?? g.edges).filter(e => e.from === c.id), 'to')}`,
+      `Used by: ${out((drillEdges(g, c.id) ?? g.edges).filter(e => e.to === c.id), 'from')}`,
       `Top-level entries: ${[...new Set(files.map(f => f.slice(c.path.length + 1).split('/')[0]))].slice(0, 30).join(', ')}`,
       ...docs.map(f => `--- ${f}\n${read(join(repo, f), 2500)}`),
       ...sized.map(f => `--- ${f} (first lines)\n${read(join(repo, f), 1800)}`),
@@ -107,7 +107,7 @@ async function keyOf(repo: string, path: string) {
 export async function summaryFor(repoPath: string, id: string, generateIfThin = true): Promise<Summary> {
   const repo = await checkRepo(repoPath)
   const g = await graphFor(repo)
-  const c = g.concepts.find(x => x.id === id)
+  const c = findConcept(g, id)
   if (!c) throw new Error(`No concept ${id}`)
   const o = await own(repo, c.path)
   const key = await keyOf(repo, c.path)

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { buildTimeline, checkRepo, conceptOf, dream, focusGraph, ghMemo, grouping, importsOf, MECHANICAL, namesIt, prOf, rootsOf, scan } from './explorer.ts'
+import { buildTimeline, checkRepo, conceptOf, drillGraph, dream, focusGraph, ghMemo, grouping, importsOf, MECHANICAL, namesIt, prOf, rootsOf, scan } from './explorer.ts'
 
 // A tiny product repo: dashboards are built on insights, alerts on insights, everything on core.
 function fixture() {
@@ -178,4 +178,34 @@ test('a word search lists where the thing also lives inside other modules', () =
     { concept: 'products/logs', folders: [], models: ['LogsAlertConfiguration'] },
   ])
   assert.equal(focusGraph(g, 'billing', 25, false, g.folders).alsoIn, undefined)
+})
+
+test('drilling into a module shows its parts, their links, and outside modules collapsed', async () => {
+  const g = await scan(repo)
+  const d = await drillGraph(g, 'products/dashboards')
+  assert.deepEqual(d.drill?.crumbs, ['products', 'products/dashboards'])
+  assert.equal(d.drill?.owner, 'products/dashboards')
+  const parts = d.nodes.filter(n => n.role === 'focus').map(n => n.id).sort()
+  assert.deepEqual(parts, ['products/dashboards', 'products/dashboards/ui'])
+  assert.deepEqual(d.nodes.find(n => n.id === 'products/dashboards')?.models, ['Dashboard', 'DashboardTile'])
+  const e = (from: string, to: string, kind: string) => d.edges.find(x => x.from === from && x.to === to && x.kind === kind)
+  assert.ok(e('products/dashboards/ui', 'products/insights', 'import'), 'a part links to the outside module')
+  assert.ok(e('products/dashboards', 'products/insights', 'fk'), 'foreign keys land on the part that holds the model')
+  assert.ok(d.nodes.some(n => n.id === 'products/insights' && n.role !== 'focus'))
+})
+
+test('drilling into a flat folder makes its files the parts, linked by their imports', async () => {
+  const r = mkdtempSync(join(tmpdir(), 'explorer-flat-'))
+  const sh = (args: string[]) => execFileSync('git', ['-C', r, ...args])
+  sh(['init', '-q', '-b', 'main'])
+  const w = (f: string, s: string) => { mkdirSync(dirname(join(r, f)), { recursive: true }); writeFileSync(join(r, f), s) }
+  for (const n of ['chat', 'db', 'git', 'main', 'mcp', 'ui']) w(`server/${n}.ts`, n === 'main' ? "import { a } from './chat.ts'\nimport { b } from './db'\n" : n === 'chat' ? "import { b } from './db.ts'\n" : 'export const x = 1\n')
+  w('web/app.ts', "import { x } from '../server/mcp'\n")
+  sh(['add', '-A']); sh(['-c', 'user.name=A', '-c', 'user.email=a@example.com', 'commit', '-q', '-m', 'init'])
+  const g = await scan(r)
+  const d = await drillGraph(g, 'server')
+  assert.deepEqual(d.nodes.filter(n => n.role === 'focus').map(n => n.id).sort(), ['server/chat.ts', 'server/db.ts', 'server/git.ts', 'server/main.ts', 'server/mcp.ts', 'server/ui.ts'])
+  const has = (from: string, to: string) => d.edges.some(e => e.from === from && e.to === to)
+  assert.ok(has('server/main.ts', 'server/chat.ts') && has('server/main.ts', 'server/db.ts') && has('server/chat.ts', 'server/db.ts'))
+  assert.ok(has('web', 'server/mcp.ts'), 'an outside module lands on the file it imports')
 })

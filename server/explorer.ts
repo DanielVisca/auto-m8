@@ -16,8 +16,10 @@ export type Concept = { id: string; name: string; path: string; files: number; m
 export type Edge = { from: string; to: string; kind: 'fk' | 'import'; weight: number; evidence: Evidence[] }
 export type Graph = { repo: string; sha: string; concepts: Concept[]; edges: Edge[]; models: Record<string, { concept: string; file: string; line: number }>; folders?: string[] }
 export type FocusNode = Concept & { role: 'focus' | 'dependency' | 'dependent' | 'both' | 'second'; score: number; hub: boolean }
-export type FocusGraph = { repo: string; sha: string; focus: string | null; nodes: FocusNode[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; alsoIn?: AlsoIn[] }
+export type FocusGraph = { repo: string; sha: string; focus: string | null; drill?: Drill; nodes: FocusNode[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; alsoIn?: AlsoIn[] }
 // Where a searched-for thing also lives inside other modules: a subfolder named for it, or models with it in their name.
+// Drilled into a folder: its parts are the nodes, everything outside is collapsed to the module (or sibling folder) it's in.
+export type Drill = { path: string; crumbs: string[]; owner: string | null; hidden: number }
 export type AlsoIn = { concept: string; folders: string[]; models: string[] }
 
 // Folders whose children are the modules of a codebase. Deepest match wins, so posthog/models/x beats posthog/x.
@@ -388,6 +390,144 @@ export function alsoInside(g: Graph, q: string, skip: Set<string>, folders: stri
   return [...out.values()].map(a => ({ ...a, folders: a.folders.sort().slice(0, 6), models: a.models.sort().slice(0, 6) })).sort((a, b) => size(b) - size(a) || a.concept.localeCompare(b.concept)).slice(0, 12)
 }
 
+// ---------- drill: open a module (or any folder) up into its parts ----------
+
+export const INSIDE = 'inside:'
+// The part of `path` a file belongs to: its first subfolder, passing through folders that only wrap one subfolder.
+export function partsOf(path: string, files: string[]) {
+  const pre = path ? path + '/' : ''
+  const kids = new Map<string, string[]>()
+  for (const f of files) { if (!f.startsWith(pre)) continue; const rest = f.slice(pre.length); const k = rest.includes('/') ? pre + rest.split('/')[0] : path; (kids.get(k) ?? kids.set(k, []).get(k)!).push(f) }
+  // backend/ → backend/src/ when backend holds nothing else: show the folder that has the parts.
+  for (const [k, list] of [...kids]) {
+    if (k === path) continue
+    let id = k, l = list
+    for (;;) { const sub = new Set(l.map(f => f.slice(id.length + 1)).map(r => r.includes('/') ? r.split('/')[0] : '')); if (sub.size !== 1 || sub.has('')) break; id = `${id}/${[...sub][0]}` }
+    if (id !== k) { kids.delete(k); kids.set(id, l) }
+  }
+  // A flat folder (a layer of files, like server/ or handlers/): its source files are the parts.
+  const direct = kids.get(path) ?? []
+  const byFile = new Map<string, string>()
+  if (direct.filter(f => SRC.test(f) && !SKIP.test(f)).length >= 6 && [...kids.keys()].filter(k => k !== path && !NOISE.test(k)).length < 4) {
+    for (const f of direct) if (SRC.test(f) && !SKIP.test(f)) { kids.set(f, [f]); byFile.set(f.replace(SRC, ''), f) }
+    const rest = direct.filter(f => !kids.has(f)); if (rest.length) kids.set(path, rest); else kids.delete(path)
+  }
+  const ids = [...kids.keys()].filter(k => !byFile.has(k.replace(SRC, '')) || !SRC.test(k)).sort((a, b) => b.length - a.length)
+  return { kids, of: (f: string) => {
+    // A file part answers for itself, and for an import path that names it without its extension (./chat, pkg.chat).
+    if (byFile.size) { const b = f.replace(/\/_$/, ''); const hit = kids.has(b) && byFile.get(b.replace(SRC, '')) === b ? b : byFile.get(b.replace(SRC, '')); if (hit) return hit }
+    return ids.find(id => id === path ? false : f.startsWith(id + '/')) ?? (f.startsWith(pre) ? path : null)
+  } }
+}
+
+const drills = new Map<string, FocusGraph & { all: Edge[] }>()
+// Parts of a drilled folder, so a click on one can show its links and models like a module.
+const drilledParts = new Map<string, Concept>()
+export function findConcept(g: Graph, id: string): Concept | undefined {
+  return g.concepts.find(x => x.id === id) ?? drilledParts.get(`${g.repo}\0${id}`)
+}
+export function drillEdges(g: Graph, id: string): Edge[] | null {
+  for (const d of drills.values()) if (d.repo === g.repo && d.sha === g.sha && d.nodes.some(n => n.id === id && n.role === 'focus')) return d.all.filter(e => e.from === id || e.to === id)
+  return null
+}
+// The module a folder lives in (for data, where it runs, usage): the deepest one that contains it.
+export const ownerOf = (g: Graph, path: string) => g.concepts.filter(c => path === c.id || path.startsWith(c.id + '/')).sort((a, b) => b.id.length - a.id.length)[0]?.id ?? null
+
+export async function drillGraph(g: Graph, path: string, showHubs = false, cap = 30): Promise<FocusGraph> {
+  path = path.replace(/^\/+|\/+$/g, '')
+  const key = keyOf('drill-v1', g.repo, g.sha, path, showHubs ? 'hubs' : '')
+  const have = drills.get(key); if (have) { const { all, ...f } = have; return f }
+  const files = (await git(g.repo, ['ls-files', '-z'])).split('\0').filter(Boolean)
+  const containers = containersFor(g.repo)
+  const grp = grouping(files, containers)
+  const inner = partsOf(path, files)
+  if (!inner.kids.size) throw new Error(`No files under ${path}`)
+  const depth = path.split('/').length
+  // Outside the folder: the module it's in, except the drilled module's own other folders, which show as siblings.
+  const of = (f: string) => {
+    const i = inner.of(f); if (i) return i
+    const c = grp.of(f)
+    if (path.startsWith(c + '/') && f.startsWith(c + '/')) return f.split('/').slice(0, depth).join('/')
+    return c
+  }
+  const src = files.filter(f => SRC.test(f) && !SKIP.test(f))
+  const ids = new Set(files.map(of))
+  const tops = new Set(files.filter(f => f.includes('/')).map(f => f.split('/')[0]))
+  const roots = rootsOf(files, f => { try { return readFileSync(join(g.repo, f), 'utf8').slice(0, 20_000) } catch { return '' } })
+  const resolve = makeResolver(ids, tops, containers, of, roots)
+  const isIn = (id: string) => id === path || id.startsWith(path + '/')
+  // Read the folder's own files, and the files of every module that links to it (from the map), not the whole repo.
+  const owners = new Set(g.concepts.filter(c => isIn(c.id) || path.startsWith(c.id + '/')).map(c => c.id))
+  const users = new Set(g.edges.filter(e => owners.has(e.to)).map(e => e.from))
+  const toRead = src.filter(f => { const c = grp.of(f); return isIn(f) || owners.has(c) || users.has(c) })
+  const edges = new Map<string, Edge>()
+  const add = (from: string, to: string, kind: Edge['kind'], ev: Evidence) => {
+    if (from === to || !(isIn(from) || isIn(to))) return
+    const k = `${from}\t${to}\t${kind}`
+    const e = edges.get(k) ?? edges.set(k, { from, to, kind, weight: 0, evidence: [] }).get(k)!
+    e.weight++; if (e.evidence.length < MAX_EVIDENCE) e.evidence.push(ev)
+  }
+  const modelAt = (n: string) => g.models[n] ? of(g.models[n].file) : null
+  const read = async (f: string) => { try { const st = await stat(join(g.repo, f)); return st.size > 400_000 ? '' : await readFile(join(g.repo, f), 'utf8') } catch { return '' } }
+  let i = 0
+  await Promise.all(Array.from({ length: 64 }, async () => { while (i < toRead.length) {
+    const f = toRead[i++]; const text = await read(f); if (!text) continue
+    const from = of(f), seen = new Set<string>()
+    for (const ref of importsOf(f, text)) {
+      let targets = [resolve(f, ref)]
+      if (ref.names?.length) { const m = ref.names.map(modelAt).filter(Boolean) as string[]; if (m.length) targets = m }
+      for (const to of targets) { if (!to || to === from || seen.has(to)) continue; seen.add(to); add(from, to, 'import', { file: f, line: ref.line, text: ref.text }) }
+    }
+  } }))
+  const rels = new Map<string, Relation[]>()
+  for (const c of g.concepts) for (const r of c.relations) {
+    const from = of(r.file), to = modelAt(r.target); if (!to) continue
+    if (isIn(from)) rels.set(from, [...(rels.get(from) ?? []), r])
+    add(from, to, 'fk', { file: r.file, line: r.line, text: `${r.model} → ${r.target}` })
+  }
+  const modelsBy = new Map<string, string[]>()
+  for (const [n, m] of Object.entries(g.models)) { const at = of(m.file); if (isIn(at)) modelsBy.set(at, [...(modelsBy.get(at) ?? []), n]) }
+  const all = [...edges.values()]
+  const parts: Concept[] = [...inner.kids].map(([id, l]) => ({ id, name: id === path ? `${id.split('/').pop()} (files here)` : id.slice(path.length + 1), path: id, files: l.length, models: (modelsBy.get(id) ?? []).sort(), relations: rels.get(id) ?? [] }))
+  for (const c of parts) drilledParts.set(`${g.repo}\0${c.id}`, c)
+  // Biggest parts first; the rest are counted, not drawn.
+  // Folders by size; single files (a flat folder) by how many links they carry, so main.ts beats a leaf helper.
+  const degree = new Map<string, number>(); for (const e of all) for (const x of [e.from, e.to]) degree.set(x, (degree.get(x) ?? 0) + e.weight)
+  const rankPart = (c: Concept) => SRC.test(c.id) && c.files === 1 ? (degree.get(c.id) ?? 0) : 1e6 + c.files
+  // Tests, migrations and vendored code are parts of the folder but not of its design: counted, not drawn.
+  const shown = parts.filter(c => c.id === path || !(NOISE.test(c.id) || /(^|\/)(migrations|__mocks__|__snapshots__|generated)$/.test(c.id))).sort((a, b) => rankPart(b) - rankPart(a)).slice(0, cap)
+  const S = new Set(shown.map(c => c.id))
+  const out = new Map<string, number>(), inn = new Map<string, number>()
+  // Shared foundations (UI kit, utils, the Team model) are named, not drawn, as on the module map.
+  const deps = new Map<string, number>(); for (const e of g.edges) deps.set(e.to, (deps.get(e.to) ?? 0) + 1)
+  const N = g.concepts.length, hubs = new Set<string>()
+  const isHub = (id: string) => (deps.get(id) ?? 0) > Math.max(8, Math.min(N * 0.15, 12 + N * 0.03))
+  for (const e of all) {
+    const o = isIn(e.from) ? e.to : e.from
+    if (!isIn(o) && isHub(o) && !showHubs) { hubs.add(o); continue }
+    if (S.has(e.from) && !isIn(e.to)) out.set(e.to, (out.get(e.to) ?? 0) + e.weight * (e.kind === 'fk' ? 5 : 1))
+    if (S.has(e.to) && !isIn(e.from)) inn.set(e.from, (inn.get(e.from) ?? 0) + e.weight * (e.kind === 'fk' ? 5 : 1))
+  }
+  // Outside, only the strongest few each way: the rest of the repo is context here, not the subject.
+  const room = 8
+  const top = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1]).slice(0, room)
+  const byId = new Map(g.concepts.map(c => [c.id, c]))
+  const outside = (id: string): Concept => byId.get(id) ?? { id, name: id.split('/').pop()!, path: id, files: files.filter(f => f.startsWith(id + '/')).length, models: [], relations: [] }
+  const nodes: FocusNode[] = shown.map(c => ({ ...c, role: 'focus', score: c.files, hub: false }))
+  const placed = new Set(S)
+  for (const [id, sc] of top(out)) { placed.add(id); nodes.push({ ...outside(id), role: inn.has(id) ? 'both' : 'dependency', score: sc, hub: false }) }
+  for (const [id, sc] of top(inn)) if (!placed.has(id)) { placed.add(id); nodes.push({ ...outside(id), role: out.has(id) ? 'both' : 'dependent', score: sc, hub: false }) }
+  const segs = path.split('/')
+  const f: FocusGraph = {
+    repo: g.repo, sha: g.sha, focus: INSIDE + path, nodes, edges: all.filter(e => placed.has(e.from) && placed.has(e.to)),
+    hidden: { dependencies: Math.max(0, out.size - room), dependents: Math.max(0, inn.size - room), second: 0, hubs: [...hubs].sort() }, total: g.concepts.length,
+    drill: { path, crumbs: segs.map((_, k) => segs.slice(0, k + 1).join('/')), owner: ownerOf(g, path), hidden: parts.length - shown.length },
+  }
+  if (drills.size > 40) drills.delete(drills.keys().next().value!)
+  drills.set(key, { ...f, all })
+  return f
+}
+
 // ---------- dream: what if we removed X, or added Y attached to a, b ----------
 
 export type DreamOp = { op: 'remove'; id: string } | { op: 'add'; id: string; name?: string; dependsOn?: string[]; usedBy?: string[] }
@@ -709,12 +849,14 @@ export async function cachedGraph(repoPath: string): Promise<Graph | null> {
 
 export async function exploreGraph(repo: string, focus?: string | null, hubs = false) {
   const g = await graphFor(repo)
-  const f = focusGraph(g, focus, 25, hubs, g.folders)
+  const f = focus?.startsWith(INSIDE) ? await drillGraph(g, focus.slice(INSIDE.length), hubs) : focusGraph(g, focus, 25, hubs, g.folders)
   return { ...f, concepts: g.concepts.length, remote: await remoteOf(g.repo), names: g.concepts.map(c => c.id).concat(Object.keys(g.models)).sort() }
 }
 
 export async function exploreTimeline(repo: string, focus?: string | null, onUpdate?: () => void) {
   const g = await graphFor(repo)
+  // Inside a module the story is the module's history, not new modules arriving: not built yet, so say so.
+  if (focus?.startsWith(INSIDE)) return { status: 'done', done: 0, total: 0, source: 'The timeline is off while drilled into a folder.', shallow: false, since: null, events: [], milestones: {} } satisfies Timeline
   const f = focusGraph(g, focus)
   const key = keyOf('timeline-v4-migrations', g.repo, g.sha, focus ?? '', f.nodes.map(n => n.id).join(',')) // bump when dating changes, so saved timelines are rebuilt
   const file = DIR && join(DIR, `timeline-${key}.json`)
@@ -731,8 +873,12 @@ export async function exploreTimeline(repo: string, focus?: string | null, onUpd
 
 export async function exploreNode(repo: string, id: string) {
   const g = await graphFor(repo)
-  const c = g.concepts.find(x => x.id === id) ?? g.concepts.find(x => x.id === g.models[id]?.concept)
+  const c = findConcept(g, id) ?? g.concepts.find(x => x.id === g.models[id]?.concept)
   if (!c) throw new Error(`No concept ${id}`)
+  // A part of a drilled module: its own links come from the drill; data and hosting belong to the module it's in.
+  const own = g.concepts.some(x => x.id === c.id)
+  const parent = own ? null : ownerOf(g, c.id)
+  const links = own ? g.edges : drillEdges(g, c.id) ?? []
   const r = await remoteOf(g.repo)
   const files = (await git(g.repo, ['ls-files', '--', c.path])).split('\n').filter(Boolean)
   // What to read first: the team's own notes, then the entry points and the models.
@@ -748,9 +894,9 @@ export async function exploreNode(repo: string, id: string) {
   const hub = (x: string) => (users.get(x) ?? 0) > Math.max(8, Math.min(g.concepts.length * 0.15, 12 + g.concepts.length * 0.03))
   const ev = (e: Edge) => ({ ...e, hub: hub(e.from === c.id ? e.to : e.from), evidence: e.evidence.map(x => ({ ...x, ...link(x.file, x.line) })) })
   return {
-    concept: c, sha: g.sha, repo: g.repo, tree: ghUrl(r, 'tree', g.sha, c.path),
-    dependsOn: g.edges.filter(e => e.from === c.id).sort((a, b) => b.weight - a.weight).map(ev),
-    usedBy: g.edges.filter(e => e.to === c.id).sort((a, b) => b.weight - a.weight).map(ev),
+    concept: c, parent, sha: g.sha, repo: g.repo, tree: ghUrl(r, 'tree', g.sha, c.path),
+    dependsOn: links.filter(e => e.from === c.id).sort((a, b) => b.weight - a.weight).map(ev),
+    usedBy: links.filter(e => e.to === c.id).sort((a, b) => b.weight - a.weight).map(ev),
     models: c.models.map(m => ({ name: m, ...link(g.models[m].file, g.models[m].line) })),
     relations: c.relations.map(x => ({ ...x, ...link(x.file, x.line) })),
     docs: docs.map(f => link(f)), largest: largest.map(x => ({ ...x, ...link(x.file) })), modelFiles: modelFiles.map(f => link(f)), recent,
