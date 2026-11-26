@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { post, toast, useLive, type Conversation } from './api'
 import { Canvas } from './Canvas'
 import { Splitter, useColumnWidth } from './Splitter'
-import { ShareStatus } from './Share'
+import { ShareButton, ShareStatus } from './Share'
 
 export type BoardSummary = { id: string; name: string; about: string | null; pinned: number; updated_at: number; ttl_seconds: number | null; expires_at: number | null; tiles: { id: string; kind: string; title: string; error: string | null }[] }
 export const useBoards = () => useLive<{ boards: BoardSummary[] }>('/api/boards', ['canvas'])
@@ -126,6 +126,7 @@ export function WithBoard({ conversationId, chat, onOpen }: { conversationId: st
       <b className="grow ellipsis">▦ {b.name}</b>
       {b.ttl_seconds != null && <span className="muted small" title="Expires after this long without use">{duration(b.ttl_seconds)} idle</span>}
       <KeepBoard b={b} />
+      <ShareButton boardId={b.id} compact />
       {cb.layout === 'full'
         ? <><button className="small" onClick={() => setPeek(!peek)}>{peek ? 'Hide chat' : 'Show chat'}</button><button className="small" onClick={() => set({ layout: 'side' })}>Beside chat</button></>
         : <button className="small" onClick={() => set({ layout: 'full' })}>Instead of chat</button>}

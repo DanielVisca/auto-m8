@@ -9,7 +9,7 @@ type Target = { id: string; label: string; about: string; ok: boolean; why?: str
 type Audience = { id: string; label: string; kind?: 'private' | 'project' | 'members'; hint?: string; group?: string; private?: boolean }
 type Share = { target: string; url: string | null; audience: string | null; audience_label: string | null; shared_at: number; notes: string[]; conflict?: boolean }
 
-export function ShareButton({ boardId }: { boardId: string }) {
+export function ShareButton({ boardId, compact }: { boardId: string; compact?: boolean }) {
   const btn = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const [targets, setTargets] = useState<Target[] | null>(null)
@@ -49,7 +49,9 @@ export function ShareButton({ boardId }: { boardId: string }) {
   const chosen = audiences?.find(a => a.id === audience)
   return (
     <>
-      <button ref={btn} onClick={() => setOpen(o => !o)} title="Share this board so others can open it">{shares.length ? '⇪ Shared' : '⇪ Share'}</button>
+      {compact
+        ? <button ref={btn} className={`icon ${shares.length ? 'on' : ''}`} onClick={() => setOpen(o => !o)} title={shares.length ? 'Shared' : 'Share'} aria-label="Share">⇪</button>
+        : <button ref={btn} onClick={() => setOpen(o => !o)} title="Share this board so others can open it">{shares.length ? '⇪ Shared' : '⇪ Share'}</button>}
       <Popover anchor={btn} open={open} onClose={() => setOpen(false)} width={380}>
         <div className="pad share-panel" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <b>Share this board</b>
