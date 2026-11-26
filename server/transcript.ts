@@ -16,6 +16,7 @@ export type Meta = {
   text: string[] // user and assistant text for search, never tool output
   tools: { id: string; name: string; ts: number | null; detail?: string }[] // calls since the last flush
   errors: string[] // tool_use ids whose result was an error, since the last flush
+  results: { id: string; ts: number }[] // when each result came back, for the call's duration
   prs: Map<string, boolean> // url -> created by this conversation
   creating: Set<string> // tool_use ids whose call creates a PR
   listing: Set<string> // tool_use ids whose call lists PRs (open_prs, gh pr list): reading them doesn't link
@@ -24,6 +25,8 @@ export type Meta = {
   pending: Set<string> // tool calls with no result yet
   rootUuid: string | null // the first message's id: copies of a conversation (resumed, imported, branched) share it
   lastKind: 'text' | 'tool' | 'result' | 'error' | 'interrupt' | 'user' | null // what the transcript ends on
+  entrypoint: string | null // how the session was started: cli (a terminal), claude-desktop, sdk-cli/sdk-ts (auto-m8 or a script)
+  youAt: number | null // when a person last typed into it (a real message, not a tool result or harness text)
 }
 
 // The work stopped without finishing: the agent died mid-tool, never answered your last
@@ -67,7 +70,7 @@ export type Item =
   | { kind: 'assistant'; blocks: Block[]; ts?: number; uuid?: string; mid?: string; model?: string; activity?: Activity }
 
 export function emptyMeta(): Meta {
-  return { title: null, firstPrompt: null, cwd: null, branch: null, startedAt: null, updatedAt: null, messages: 0, text: [], tools: [], errors: [], prs: new Map(), creating: new Set(), listing: new Set(), lastRole: null, lastAssistant: '', pending: new Set(), lastKind: null, rootUuid: null }
+  return { title: null, firstPrompt: null, cwd: null, branch: null, startedAt: null, updatedAt: null, messages: 0, text: [], tools: [], errors: [], results: [], prs: new Map(), creating: new Set(), listing: new Set(), lastRole: null, lastAssistant: '', pending: new Set(), lastKind: null, rootUuid: null, entrypoint: null, youAt: null }
 }
 
 // Slash commands are stored as <command-name>/x</command-name><command-args>y</command-args>.
@@ -162,6 +165,7 @@ export function applyLine(meta: Meta, line: string): boolean {
   const t = ts(e.timestamp)
   if (t) { meta.startedAt ??= t; meta.updatedAt = t }
   if (e.cwd) meta.cwd ??= e.cwd
+  if (e.entrypoint) meta.entrypoint ??= e.entrypoint
   if (e.gitBranch) meta.branch = e.gitBranch
   if (e.type === 'user' && !e.isMeta && e.message?.role === 'user') {
     const content = e.message.content
@@ -172,12 +176,14 @@ export function applyLine(meta: Meta, line: string): boolean {
       const created = meta.creating.has(b.tool_use_id)
       addPrs(meta, resultText(b.content), created, true, meta.listing.has(b.tool_use_id))
       if (b.is_error) meta.errors.push(b.tool_use_id)
+      if (t && b.tool_use_id) meta.results.push({ id: b.tool_use_id, ts: t })
     }
     const text = userText(content)
     const raw = typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: any) => b?.text ?? '').join('') : ''
     if (/^\[Request interrupted/.test(raw)) meta.lastKind = 'interrupt'
     else if (text) meta.lastKind = 'user'
     if (text) {
+      if (t) meta.youAt = t
       meta.lastRole = 'user'
       meta.messages++
       // A slash command makes a poor title; prefer the first real request.
@@ -192,8 +198,8 @@ export function applyLine(meta: Meta, line: string): boolean {
       if (b?.type === 'tool_use') { meta.pending.add(b.id); meta.lastKind = 'tool' }
       if (b?.type === 'text' && b.text) { meta.text.push(b.text); addPrs(meta, b.text, false); meta.lastRole = 'assistant'; meta.lastAssistant = b.text.slice(-600) }
       if (b?.type === 'tool_use') {
-        // Which skill or subagent was used is worth counting; other inputs aren't stored.
-        const detail = b.name === 'Skill' ? b.input?.skill : b.name === 'Agent' || b.name === 'Task' ? b.input?.subagent_type : undefined
+        // Which skill or subagent was used, and which action of an auto-m8 tool, are worth counting; other inputs aren't stored.
+        const detail = b.name === 'Skill' ? b.input?.skill : b.name === 'Agent' || b.name === 'Task' ? b.input?.subagent_type : ownToolDetail(b.name, b.input)
         meta.tools.push({ id: b.id, name: b.name, ts: t, detail })
         if (CREATES_PR.test(b.name + ' ' + JSON.stringify(b.input ?? ''))) meta.creating.add(b.id)
         if (LISTS_PRS.test(b.name + ' ' + JSON.stringify(b.input ?? ''))) meta.listing.add(b.id)
@@ -201,6 +207,20 @@ export function applyLine(meta: Meta, line: string): boolean {
     }
   }
   return true
+}
+
+// auto-m8's own tools (mcp__auto-m8__*, and the older perch/auto_m8 names): the action argument, and for
+// look its shape (picture of a board or text, a page area, the step kinds). Never values or ids.
+export function ownToolDetail(name: string, input: any): string | undefined {
+  if (!/^mcp__(auto-m8|auto_m8|perch)__/.test(name) || !input || typeof input !== 'object') return undefined
+  const tool = name.split('__')[2]
+  const action = typeof input.action === 'string' ? input.action.slice(0, 30) : undefined
+  if (tool !== 'look') return action
+  const a = action ?? 'picture'
+  if (a === 'picture') return `picture ${input.board_id ? 'board' : 'text'}`
+  if (a === 'open') return `open ${String(input.path ?? '').match(/#([a-z-]+)/i)?.[1] ?? 'home'}`
+  if (a === 'act' && Array.isArray(input.steps)) return `act ${[...new Set(input.steps.map((s: any) => String(s?.do ?? '?').slice(0, 10)))].join(',')}`.slice(0, 60)
+  return a
 }
 
 function resultText(content: unknown): string {

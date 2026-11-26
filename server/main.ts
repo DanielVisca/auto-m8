@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { check as checkFile, conversationFiles, fileAction, fileRaw } from './files.ts'
 import { dismissDraft, draftInSlack, draftsFor, editDraft, getDraft, refreshContext, sendDraft } from './slack.ts'
-import { recentPage, sidebar } from './sidebar.ts'
+import { recentPage, scopeOf, sidebar } from './sidebar.ts'
 import { evidence } from './evidence.ts'
 import { journey, mergePlan, queue as queuePr } from './journey.ts'
 import { shipProfile } from './shipprofile.ts'
@@ -234,10 +234,10 @@ function analytics(days: number) {
                   from tool_calls where ts > ? group by 1 order by calls desc`, since),
     tools: all(`select replace(replace(name, 'mcp__perch__', 'mcp__auto-m8__'), 'mcp__auto_m8__', 'mcp__auto-m8__') name, case when server in ('perch', 'auto_m8') then 'auto-m8' else server end server, count(*) calls, sum(is_error) errors
                 from tool_calls where ts > ? group by 1 order by calls desc limit 40`, since),
-    // auto-m8's own tools as its MCP process saw them (mcp_events): per tool and action, timing and outcomes.
-    mcp: all(`select tool, coalesce(action, '') action, count(*) calls, sum(is_error) errors, cast(avg(duration_ms) as integer) avg_ms, max(duration_ms) max_ms,
-                sum(json_extract(props, '$.refused') is not null) refused, sum(json_extract(props, '$.no_app') is not null) no_app, count(distinct conversation_id) conversations
-              from mcp_events where ts > ? group by tool, action order by calls desc limit 40`, since),
+    // auto-m8's own tools per action (tool_calls.detail), with time to result (ms) and errors, from the transcripts.
+    mcp: all(`select replace(replace(replace(name, 'mcp__auto-m8__', ''), 'mcp__auto_m8__', ''), 'mcp__perch__', '') tool, coalesce(detail, '') action, count(*) calls, sum(is_error) errors,
+                cast(avg(ms) as integer) avg_ms, max(ms) max_ms, count(distinct conversation_id) conversations
+              from tool_calls where ts > ? and server in ('auto-m8', 'auto_m8', 'perch') group by 1, 2 order by calls desc limit 40`, since),
     daily: all(`select date(ts / 1000, 'unixepoch', 'localtime') day, count(*) calls, sum(server is not null) mcp_calls
                 from tool_calls where ts > ? group by day order by day`, since),
     sources: all(`select date(started_at / 1000, 'unixepoch', 'localtime') day, source, count(*) n from conversations where started_at > ? group by day, source order by day`, since),
@@ -639,8 +639,8 @@ route('POST', '/api/slack/drafts/:id/open', async (m, req) => { const r = await 
 route('POST', '/api/slack/drafts/:id/edit', async (m, req) => { editDraft(decodeURIComponent(m[1]), String((await body(req)).text ?? '')); return { ok: true } })
 route('POST', '/api/slack/drafts/:id/dismiss', m => { dismissDraft(decodeURIComponent(m[1])); broadcast('conversations'); return { ok: true } })
 route('POST', '/api/slack/drafts/:id/refresh', async m => refreshContext(decodeURIComponent(m[1])))
-route('GET', '/api/sidebar', () => sidebar())
-route('GET', '/api/sidebar/recent', (_m, _r, _s, q) => recentPage(Number(q.get('offset') ?? 0), Number(q.get('limit') ?? 15)))
+route('GET', '/api/sidebar', (_m, _r, _s, q) => sidebar(scopeOf(q.get('scope'))))
+route('GET', '/api/sidebar/recent', (_m, _r, _s, q) => recentPage(Number(q.get('offset') ?? 0), Number(q.get('limit') ?? 15), scopeOf(q.get('scope'))))
 route('GET', '/api/conversations/:id/evidence', m => ({ evidence: evidence(decodeURIComponent(m[1])) }))
 route('GET', '/api/conversations/:id/files', m => ({ files: conversationFiles(decodeURIComponent(m[1])) }))
 route('GET', '/api/task-output', (_m, _r, _s, q) => taskOutput(String(q.get('path') ?? ''), q.get('summary') === '1'))

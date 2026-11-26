@@ -57,15 +57,15 @@ function advance(path: string, source: Source, size: number) {
   for (const line of chunk.slice(0, end).split('\n')) if (line) applyLine(c.meta, line)
   const fresh = c.offset === 0
   c.offset += Buffer.byteLength(chunk.slice(0, end))
-  const added = { fresh, text: c.meta.text, tools: c.meta.tools, errors: c.meta.errors }
+  const added = { fresh, text: c.meta.text, tools: c.meta.tools, errors: c.meta.errors, results: c.meta.results }
   // The database holds these from here; keep only counters and titles in memory.
-  c.meta.text = []; c.meta.tools = []; c.meta.errors = []
+  c.meta.text = []; c.meta.tools = []; c.meta.errors = []; c.meta.results = []
   return { c, added }
 }
 
 const BODY_LIMIT = 400_000
 
-type Added = { fresh: boolean; text: string[]; tools: Meta['tools']; errors: string[] }
+type Added = { fresh: boolean; text: string[]; tools: Meta['tools']; errors: string[]; results: Meta['results'] }
 
 function persist(path: string, c: Cached, added: Added) {
   const id = basename(path, '.jsonl')
@@ -77,6 +77,7 @@ function persist(path: string, c: Cached, added: Added) {
          on conflict(id) do update set title = coalesce(excluded.title, (select title from auto_titles a where a.id = conversations.id)), first_prompt = excluded.first_prompt, cwd = excluded.cwd,
            branch = excluded.branch, path = excluded.path, updated_at = excluded.updated_at, messages = excluded.messages, asks = excluded.asks, stall = excluded.stall`,
       id, c.source.id, m.title, m.firstPrompt, m.cwd, m.branch, path, m.startedAt, m.updatedAt, m.messages, asksUser(m) ? 1 : 0, stallOf(m))
+    run('update conversations set entrypoint = coalesce(?, entrypoint), you_at = coalesce(?, you_at) where id = ?', m.entrypoint, m.youAt, id)
     indexLocalOrigin(id, c.source.id, m.title ?? undefined)
     updateSearch([{ id, title: [m.title, m.firstPrompt].filter(Boolean).join(' — '), body: old => {
       const body = (added.fresh ? '' : old) + (added.text.length ? '\n' + added.text.join('\n') : '')
@@ -89,6 +90,7 @@ function persist(path: string, c: Cached, added: Added) {
         id, t.id, t.name, server, t.ts, t.detail ?? null)
     }
     for (const e of added.errors) run('update tool_calls set is_error = 1 where tool_use_id = ?', e)
+    for (const r of added.results) run('update tool_calls set ms = ? - ts where tool_use_id = ? and ts is not null and ms is null', r.ts, r.id)
     for (const [url, created] of m.prs) {
       run(`insert into conversation_prs (conversation_id, url, created) values (?, ?, ?)
            on conflict do update set created = max(created, excluded.created)`, id, url, created ? 1 : 0)
@@ -342,12 +344,36 @@ export function renameAttachmentTitled() {
   return rows.length
 }
 
+// Transcripts indexed before entrypoint/you_at existed are only re-read when they change. Fill in
+// the last 60 days once, in the background, a few files per tick so a big backlog never blocks the server.
+export function backfillYouAt(days = 60) {
+  const rows = all<{ id: string; path: string }>(`select id, path from conversations where entrypoint is null and you_at is null and path is not null
+    and source in ('claude', 'posthog-code', 'claude-code') and updated_at > ? order by updated_at desc`, Date.now() - days * 86400_000)
+  let i = 0
+  const step = () => {
+    for (const end = Math.min(rows.length, i + 5); i < end; i++) {
+      const r = rows[i]
+      try {
+        if (!existsSync(r.path)) continue
+        const m = emptyMeta()
+        for (const line of readFileSync(r.path, 'utf8').split('\n')) if (line) applyLine(m, line)
+        run('update conversations set entrypoint = ?, you_at = ? where id = ?', m.entrypoint ?? '', m.youAt, r.id) // '' = read, none recorded
+      } catch {}
+    }
+    if (i < rows.length) setTimeout(step, 50)
+    else if (rows.length) { console.log(`[index] you_at backfilled for ${rows.length} transcripts`); emit('conversations') }
+  }
+  setTimeout(step, 5_000)
+  return rows.length
+}
+
 export function startIndexer() {
   const t0 = Date.now()
   const renamed = renameAttachmentTitled()
   if (renamed) console.log(`[index] re-read ${renamed} chats named after an attachment path`)
   const n = scanAll()
   console.log(`[index] ${n} transcripts updated in ${Date.now() - t0}ms`)
+  backfillYouAt()
   watchSources()
   let syncing = false
   const tick = async () => {

@@ -14,7 +14,7 @@ type A = {
   projects: { cwd: string; n: number; messages: number }[]
   skills: { name: string; calls: number }[]
   agents: { name: string; calls: number }[]
-  mcp?: { tool: string; action: string; calls: number; errors: number; avg_ms: number; max_ms: number; refused: number; no_app: number; conversations: number }[]
+  mcp?: { tool: string; action: string; calls: number; errors: number; avg_ms: number | null; max_ms: number | null; conversations: number }[]
 }
 
 function Bars({ rows, label, value, extra }: { rows: any[]; label: (r: any) => string; value: (r: any) => number; extra?: (r: any) => React.ReactNode }) {
@@ -78,8 +78,8 @@ function Usage({ onOpen }: { onOpen: (id: string) => void }) {
         <section className="card">
           <h3>auto-m8 tools: what agents did</h3>
           <Bars rows={data.mcp.slice(0, 20)} label={r => r.action ? `${r.tool} · ${r.action}` : r.tool} value={r => r.calls}
-            extra={r => <span className="muted small"> · {r.avg_ms < 1000 ? `${r.avg_ms}ms` : `${(r.avg_ms / 1000).toFixed(1)}s`} avg{err(r)}{r.refused ? <span className="warn"> · {r.refused} refused</span> : null}{r.no_app ? <span className="warn"> · {r.no_app} app not running</span> : null}</span>} />
-          <div className="muted small">From auto-m8's own MCP process, kept on this Mac. Recorded since Nov 26.</div>
+            extra={r => <span className="muted small">{r.avg_ms != null ? ` · ${r.avg_ms < 1000 ? `${r.avg_ms}ms` : `${(r.avg_ms / 1000).toFixed(1)}s`} avg` : ''}{err(r)}</span>} />
+          <div className="muted small">From the transcripts, like every tool count here. Actions and times recorded since Nov 26.</div>
         </section>
       )}
       {(data.skills.length > 0 || data.agents.length > 0) && (

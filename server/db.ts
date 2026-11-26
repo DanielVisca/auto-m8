@@ -56,18 +56,6 @@ create table if not exists tool_calls (
 );
 create index if not exists tool_calls_ts on tool_calls(ts);
 
--- auto-m8's own MCP tools as its MCP process saw them: timing, client, and look's action detail (mcpanalytics.ts). Local only.
-create table if not exists mcp_events (
-  ts integer not null,
-  conversation_id text,
-  tool text not null,
-  action text,
-  client text,
-  duration_ms integer,
-  is_error integer,
-  props text                     -- JSON, structure only (look: target, step kinds, failed/refused)
-);
-create index if not exists mcp_events_ts on mcp_events(ts);
 
 -- Derived: PRs mentioned or created in a conversation; status refreshed from GitHub.
 create table if not exists conversation_prs (
@@ -175,6 +163,8 @@ for (const sql of [
   'alter table prs add column base text',
   'alter table prs add column head text',
   'alter table tool_calls add column detail text',
+  'alter table tool_calls add column ms integer', // tool_use to tool_result, from the transcript
+  'drop table if exists mcp_events', // briefly duplicated tool_calls (Nov 26); folded into detail + ms
   'alter table conversations add column asks integer default 0',
   'alter table user_state add column seen_at integer',
   'alter table conversations add column stall text',
@@ -184,6 +174,8 @@ for (const sql of [
   'alter table conversations add column summary text', // a PostHog task run's own summary of what it did
   'alter table user_state add column title text', // a display title perch sets (branches, autoresearch runs)
   'alter table capability_wishes add column kind text', // data | skill | tool
+  'alter table conversations add column entrypoint text', // cli, claude-desktop, sdk-cli...: how a transcript's session was started
+  'alter table conversations add column you_at integer', // when a person last typed into it, wherever that was
 ]) { try { db.exec(sql) } catch {} }
 
 // Rebuilds one conversation's meta_search row from its labels, note, branch and PR titles.

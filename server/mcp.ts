@@ -2,7 +2,6 @@
 // conversations itself. Read-only over the perch database and transcript files.
 // Newline-delimited JSON-RPC: initialize, tools/list, tools/call.
 import { readFileSync } from 'node:fs'
-import { setClient as setMcpClient, recordToolCall } from './mcpanalytics.ts'
 import { createInterface } from 'node:readline'
 import { get, run } from './db.ts'
 import { list } from './conversations.ts'
@@ -873,19 +872,12 @@ if (import.meta.main) {
     try { m = JSON.parse(line) } catch { return }
     if (m.id === undefined) return // notifications
     try {
-      if (m.method === 'initialize') { setMcpClient(m.params?.clientInfo) } // which client calls us, for mcp_events
       if (m.method === 'initialize') out({ id: m.id, result: { protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: MCP_SERVER, version: '0.1.0' } } })
       else if (m.method === 'tools/list') out({ id: m.id, result: { tools: tools.map(t => READ_ONLY.has(t.name) ? { ...t, annotations: { readOnlyHint: true } } : t) } })
-      else if (m.method === 'tools/call') {
-        pending++
-        const name = m.params.name, args = m.params.arguments ?? {}, t0 = performance.now()
-        // Recorded locally after the agent has its answer (mcpanalytics.ts, mcp_events).
-        const done = (result: any) => { out({ id: m.id, result }); const text = (result.content ?? []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'); recordToolCall(name, args, performance.now() - t0, !!result.isError, text) }
-        call(name, args)
-          .then(r => done(typeof r === 'string' ? { content: [{ type: 'text', text: r }] } : r))
-          .catch(e => done({ content: [{ type: 'text', text: String(e.message) }], isError: true }))
-          .finally(() => { pending-- })
-      }
+      else if (m.method === 'tools/call') { pending++; call(m.params.name, m.params.arguments ?? {})
+        .then(r => out({ id: m.id, result: typeof r === 'string' ? { content: [{ type: 'text', text: r }] } : r }))
+        .catch(e => out({ id: m.id, result: { content: [{ type: 'text', text: String(e.message) }], isError: true } }))
+        .finally(() => { pending-- }) }
       else out({ id: m.id, error: { code: -32601, message: 'Method not found' } })
     } catch (e: any) {
       out({ id: m.id, result: { content: [{ type: 'text', text: String(e.message) }], isError: true } })
