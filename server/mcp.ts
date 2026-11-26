@@ -2,6 +2,7 @@
 // conversations itself. Read-only over the perch database and transcript files.
 // Newline-delimited JSON-RPC: initialize, tools/list, tools/call.
 import { readFileSync } from 'node:fs'
+import { setClient as setMcpClient, trackToolCall } from './mcpanalytics.ts'
 import { createInterface } from 'node:readline'
 import { get, run } from './db.ts'
 import { list } from './conversations.ts'
@@ -395,7 +396,7 @@ export function condensed(items: Item[], max: number) {
 }
 
 const FEATURE_OF: Record<string, string> = { search_conversations: 'search', needs_me: 'needs_me', shepherd: 'shepherd', delegate: 'delegate', race: 'race', browser: 'browser', canvas: 'boards', board: 'boards' }
-async function call(name: string, args: any): Promise<string | { content: any[] }> {
+async function call(name: string, args: any): Promise<string | { content: any[]; isError?: boolean }> {
   // Agents copy conversation links into id arguments: accept auto-m8://<id> and the old perch://<id>.
   if (args && typeof args === 'object') {
     for (const k of ['conversation_id', 'from', 'to', 'owner', ...(name === 'get_conversation' ? ['id'] : [])]) if (typeof args[k] === 'string') args[k] = convIdOf(args[k])
@@ -435,7 +436,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     const r: any = await (await fetch(`http://127.0.0.1:${port}/api/look`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify({ ...args, owner: process.env.PERCH_CONVERSATION_ID || 'default' }), signal: AbortSignal.timeout(170_000) })).json()
     const content: any[] = [{ type: 'text', text: r.text ?? r.error ?? 'no reply' }]
     if (r.image) content.push({ type: 'image', data: r.image, mimeType: 'image/jpeg' })
-    return { content }
+    return r.error ? { content, isError: true } : { content }
   }
   if (name === 'browser') {
     const port = process.env.PERCH_PORT ?? 4777
@@ -872,12 +873,19 @@ if (import.meta.main) {
     try { m = JSON.parse(line) } catch { return }
     if (m.id === undefined) return // notifications
     try {
+      if (m.method === 'initialize') { setMcpClient(m.params?.clientInfo) } // for MCP analytics ($mcp_client_name)
       if (m.method === 'initialize') out({ id: m.id, result: { protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: MCP_SERVER, version: '0.1.0' } } })
       else if (m.method === 'tools/list') out({ id: m.id, result: { tools: tools.map(t => READ_ONLY.has(t.name) ? { ...t, annotations: { readOnlyHint: true } } : t) } })
-      else if (m.method === 'tools/call') { pending++; call(m.params.name, m.params.arguments ?? {})
-        .then(r => out({ id: m.id, result: typeof r === 'string' ? { content: [{ type: 'text', text: r }] } : r }))
-        .catch(e => out({ id: m.id, result: { content: [{ type: 'text', text: String(e.message) }], isError: true } }))
-        .finally(() => { pending-- }) }
+      else if (m.method === 'tools/call') {
+        pending++
+        const name = m.params.name, args = m.params.arguments ?? {}, t0 = performance.now()
+        // MCP analytics (mcpanalytics.ts): sent after the agent has its answer; pending keeps the process alive until it's out.
+        const done = (result: any) => { out({ id: m.id, result }); const text = (result.content ?? []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'); return trackToolCall(name, args, performance.now() - t0, !!result.isError, text) }
+        call(name, args)
+          .then(r => done(typeof r === 'string' ? { content: [{ type: 'text', text: r }] } : r))
+          .catch(e => done({ content: [{ type: 'text', text: String(e.message) }], isError: true }))
+          .finally(() => { pending-- })
+      }
       else out({ id: m.id, error: { code: -32601, message: 'Method not found' } })
     } catch (e: any) {
       out({ id: m.id, result: { content: [{ type: 'text', text: String(e.message) }], isError: true } })
