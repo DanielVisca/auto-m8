@@ -20,7 +20,7 @@ import { posthogFetch } from './indexer.ts'
 import { localRepos } from './search.ts'
 import { codeRoots, settings } from './settings.ts'
 import { randomUUID } from 'node:crypto'
-import { checkContextFields, checkContexts, summarizeChecks, ghExec, notePr, onPrChanged, prKey } from './gh.ts'
+import { checkContextFields, checkContexts, summarizeChecks, ghExec } from './gh.ts'
 import { deployFor } from './deploys.ts'
 
 const exec = promisify(execFile)
@@ -168,8 +168,6 @@ const previewCache = new Map<string, { at: number; data: any }>()
 // Stale-while-revalidate lives in the browser (it paints its last copy, then swaps in this answer).
 // Here: answers younger than maxAge are reused, and concurrent views of one PR share one GitHub call.
 const previewInflight = new Map<string, Promise<any>>()
-// Another module saw the PR move: the next open of its preview reads GitHub (the card paints the old copy meanwhile).
-onPrChanged.add((key, source) => { if (source !== 'pr') for (const u of previewCache.keys()) if (prKey(u) === key) previewCache.delete(u) })
 export async function preview(url: string, maxAge = 300_000) {
   const hit = previewCache.get(url)
   if (hit && Date.now() - hit.at < maxAge) return withConversations(hit.data)
@@ -189,7 +187,6 @@ async function readPreview(url: string) {
     comments(last:30){nodes{author{login} body}}}}}`
   const { stdout } = await ghExec(['api', 'graphql', '-f', `query=${query}`, '-F', `o=${pr.owner}`, '-F', `r=${pr.repo}`, '-F', `n=${pr.number}`], { maxBuffer: 10e6, timeout: 20_000 })
   const p = JSON.parse(stdout).data.repository.pullRequest
-  notePr(url, p)
   const rollup = p.commits.nodes[0]?.commit?.statusCheckRollup
   const contexts = await checkContexts(rollup, pr.number)
   const { failing } = summarizeChecks(rollup?.state, contexts)

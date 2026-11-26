@@ -2,7 +2,7 @@
 // (not perch's periodic index): checks with names, review decision, unresolved threads, merge state.
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { checkContextFields, checkContexts, summarizeChecks, ghExec, prBatch, notePr, onPrChanged, prKey } from './gh.ts'
+import { checkContextFields, checkContexts, summarizeChecks, ghExec, prBatch } from './gh.ts'
 import { deployFor, type Deploy } from './deploys.ts'
 
 const exec = promisify(execFile)
@@ -71,16 +71,8 @@ export async function prStates(urls: string[], maxAgeMs = 45_000): Promise<Map<s
 
 async function fetchPr(pr: NonNullable<ReturnType<typeof parsePr>>): Promise<PrState> {
   const { stdout } = await ghExec(['api', 'graphql', '-f', `query=${Q(pr.number)}`, '-F', `o=${pr.owner}`, '-F', `r=${pr.repo}`, '-F', `n=${pr.number}`], { maxBuffer: 20e6, timeout: 45_000 })
-  const p = JSON.parse(stdout).data.repository.pullRequest
-  notePr(pr.url, p)
-  return toState(pr, p)
+  return toState(pr, JSON.parse(stdout).data.repository.pullRequest)
 }
-// Another module saw this PR move: the next read here goes to GitHub instead of a cached copy.
-onPrChanged.add((key, source) => {
-  if (source === 'ghpr') return
-  for (const u of cache.keys()) if (prKey(u) === key) cache.delete(u)
-  for (const u of briefs.keys()) if (prKey(u) === key) briefs.delete(u)
-})
 
 async function toState(pr: NonNullable<ReturnType<typeof parsePr>>, p: any): Promise<PrState> {
   const roll = p.commits.nodes[0]?.commit?.statusCheckRollup

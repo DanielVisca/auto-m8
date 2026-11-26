@@ -333,50 +333,12 @@ async function allContexts(rollup: CheckRollup, pullRequestNumber?: number): Pro
   return nodes
 }
 
-// ---------- one view of each PR: what one part of auto-m8 learns, the others hear ----------
-// Eight modules read the same PRs on their own timers (shepherd 45s, orchestra/ghpr, indexer 60s,
-// PR flow 2m, sidebar 2m, preview 5m, ...), each with its own cache. So the shepherd could see CI go
-// green while the sidebar showed red for two more minutes. Now every read reports what it saw here;
-// when a PR moved (newer updatedAt, new head commit, state or CI rollup changed) the other modules
-// drop their cached copy and the UI refreshes, instead of each waiting for its own timer.
-type PrSeen = { updatedAt?: number; head?: string; state?: string; draft?: boolean; rollup?: string }
-const prSeen = new Map<string, PrSeen>()
-export const prKey = (url: string) => {
-  const m = String(url).match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/i)
-  return m ? `${m[1]}/${m[2]}#${m[3]}`.toLowerCase() : ''
-}
-export const onPrChanged = new Set<(key: string, source: string) => void>()
-export const resetPrSeen = () => prSeen.clear()
-// A GraphQL PullRequest node (any field set: only the fields both reads have are compared).
-// Returns true when this read shows the PR moved since the last one any module reported.
-export function notePr(url: string, p: any, source = callerOf()): boolean {
-  const key = prKey(url || p?.url)
-  if (!key || !p) return false
-  const now: PrSeen = {
-    updatedAt: p.updatedAt ? Date.parse(p.updatedAt) : undefined,
-    head: p.headRefOid ?? p.commits?.nodes?.[0]?.commit?.oid ?? undefined,
-    state: p.state ?? undefined,
-    draft: typeof p.isDraft === 'boolean' ? p.isDraft : undefined,
-    rollup: p.commits?.nodes?.[0]?.commit ? String(p.commits.nodes[0].commit.statusCheckRollup?.state ?? 'NONE') : undefined,
-  }
-  const was = prSeen.get(key)
-  // An older read finishing after a newer one (each module's query takes seconds) is not a change.
-  if (was?.updatedAt && now.updatedAt && now.updatedAt < was.updatedAt) return false
-  const moved = !!was && (
-    (now.updatedAt !== undefined && was.updatedAt !== undefined && now.updatedAt > was.updatedAt) ||
-    (['head', 'state', 'draft', 'rollup'] as const).some(f => now[f] !== undefined && was[f] !== undefined && now[f] !== was[f]))
-  prSeen.set(key, { ...was, ...Object.fromEntries(Object.entries(now).filter(([, v]) => v !== undefined)) })
-  if (moved) for (const fn of onPrChanged) try { fn(key, source) } catch (e) { console.error('[gh] onPrChanged', e) }
-  return moved
-}
-
 // A batch of `repository { pullRequest }` aliases (p0, p1, ...) for PR urls, split into chunks.
 // A chunk that fails as a whole is retried once as two halves, so one slow or oversized PR
 // can't keep the others from updating. A chunk that still fails is reported in `failed` and the
 // rest carry on; once GitHub is unreachable the remaining chunks are skipped. `missing` lists PRs
 // GitHub answered for but doesn't know (deleted, renamed repo, no access).
 export async function prBatch(urls: string[], fields: string | ((url: string) => string), opts: { size?: number; timeout?: number } = {}): Promise<{ prs: Map<string, any>; missing: string[]; errors: string[]; failed: Error | null }> {
-  const by = callerOf() // before the first await, while the caller is still on the stack
   const prs = new Map<string, any>()
   const missing: string[] = []
   const errors: string[] = []
@@ -389,7 +351,7 @@ export async function prBatch(urls: string[], fields: string | ((url: string) =>
     try {
       const { data, errors: errs } = await ghGraphql(`{ ${chunk.map(alias).join('\n')} }`, { timeout: opts.timeout })
       errors.push(...errs)
-      chunk.forEach((u, j) => { const pr = data[`p${j}`]?.pullRequest; if (pr) { prs.set(u, pr); notePr(u, pr, by) } else missing.push(u) })
+      chunk.forEach((u, j) => { const pr = data[`p${j}`]?.pullRequest; if (pr) prs.set(u, pr); else missing.push(u) })
     } catch (e: any) {
       if (split && chunk.length > 1 && !ghOffline() && !NETWORK.test(String(e?.message))) {
         const h = Math.ceil(chunk.length / 2)

@@ -6,11 +6,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { all, get } from './db.ts'
 import { originChain, originFor, originatedPrs, prSubject } from './origin.ts'
-import { prBatch, ghExec, ghLimited, ghOffline, ghPressure, notePr, onPrChanged, prKey } from './gh.ts'
+import { prBatch, ghExec, ghLimited, ghOffline, ghPressure } from './gh.ts'
 import { preview, prWorkers, snoozed } from './pr.ts'
 import { areaOf } from './prflow.ts'
 import { presence, refreshPresence, scoutPresence } from './presence.ts'
-import { sectionsFor, onPrSections } from './prsections.ts'
+import { sectionsFor } from './prsections.ts'
 import { toItems, itemsOf } from './transcript.ts'
 
 const exec = promisify(execFile)
@@ -56,7 +56,6 @@ async function pages(q: string) {
   for (let after: string | null = null, i = 0; i < 8; i++) {
     const d: any = await gql(`query { s: search(query: ${JSON.stringify(q)}, type: ISSUE, first: 25${after ? `, after: ${JSON.stringify(after)}` : ''}) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { ${FIELDS} } } } }`)
     out.push(...d.s.nodes)
-    for (const n of d.s.nodes) if (n?.url) notePr(n.url, n, 'prview')
     if (!d.s.pageInfo.hasNextPage) break
     after = d.s.pageInfo.endCursor
   }
@@ -65,32 +64,6 @@ async function pages(q: string) {
 
 let cache: { at: number; data: any } | null = null
 let inflight: Promise<any> | null = null
-
-// A PR in the list moved (the shepherd, a preview or a board read saw it first): re-read just those PRs
-// and patch them into the list, then tell the UI, instead of showing the old state until the 2-minute
-// timer. Refetching the whole list on every change cost ~10x the calls (56 open PRs with CI running
-// change every few seconds), so changes are batched: one small read at most every 30s.
-const pendingKeys = new Set<string>()
-let soon: NodeJS.Timeout | null = null, lastSoon = 0
-const lists = () => Object.values(cache?.data ?? {}).filter((v: any) => Array.isArray(v?.nodes)) as { nodes: any[] }[]
-async function patchChanged() {
-  soon = null; lastSoon = Date.now()
-  const keys = new Set(pendingKeys); pendingKeys.clear()
-  const urls = [...new Set(lists().flatMap(l => l.nodes.map((p: any) => p?.url)).filter((u: string) => u && keys.has(prKey(u))))]
-  if (!urls.length || !cache) return
-  const { prs } = await prBatch(urls, FIELDS, { size: 20 })
-  if (!prs.size || !cache) return
-  for (const l of lists()) l.nodes = l.nodes.map((p: any) => prs.get(p?.url) ?? p)
-  for (const fn of onPrSections) fn()
-}
-onPrChanged.add((key, source) => {
-  if (source === 'prview' || !cache || ghLimited('graphql') || ghPressure()) return
-  if (!lists().some(l => l.nodes.some((p: any) => prKey(p?.url) === key))) return
-  pendingKeys.add(key)
-  if (soon) return
-  soon = setTimeout(() => { patchChanged().catch(() => {}) }, Math.max(1_000, lastSoon + 30_000 - Date.now()))
-  soon.unref?.()
-})
 
 export async function prSidebar(fresh = false) {
   // With GitHub's budget mostly spent (or paused until its reset, or GitHub unreachable) the last
