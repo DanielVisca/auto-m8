@@ -21,6 +21,7 @@ export function browserRoutes(route: Route, body: Body) {
   route('POST', '/api/browser/start', async () => { await B.ensureBrowser(); return B.browserStatus() })
   route('POST', '/api/browser/approvals/:id', async (m, req) => { const b = await body(req); return B.answerApproval(m[1], !!b.ok, !!b.always) })
   route('POST', '/api/browser/:owner/pause', async (m, req) => B.setPaused(decodeURIComponent(m[1]), !!(await body(req)).paused))
+  route('GET', '/api/browser/:owner/request/:id', m => B.requestDetails(decodeURIComponent(m[1]), decodeURIComponent(m[2])))
   route('POST', '/api/browser/:owner/fit', async (m, req) => { const b = await body(req); return B.fitViewport(decodeURIComponent(m[1]), typeof b.ratio === 'number' && isFinite(b.ratio) ? b.ratio : null, typeof b.width === 'number' && isFinite(b.width) ? b.width : undefined) })
   route('POST', '/api/browser/:owner/show',async m => { await B.showWindow(decodeURIComponent(m[1])); return { ok: true } })
   route('POST', '/api/browser/:owner/open', async (m, req) => { const b = await body(req); const s = (await B.session(decodeURIComponent(m[1])))!; if (b.url) await B.navigate(s, String(b.url)); return { ok: true, url: s.url } })

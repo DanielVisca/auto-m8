@@ -245,12 +245,12 @@ export function BrowserView({ owner, compact, onCollapse, cap, mode, onMode, fit
         {!hasFrame && <div className="browser-empty muted small">{conn === 'none' ? 'No browser window for this chat right now.' : 'Waiting for the first picture…'}</div>}
         {!taken && hasFrame && !mini && <div className="browser-hint" onClick={() => setPaused(true)}>Take over to click and type</div>}
       </div>
-      {feedOn && <BrowserFeed items={feedItems} boxRef={feedBox} onHeight={setFeedH} store={mini ? 'perch.pipFeed' : 'perch.browserFeed'} side={mini ? feedSide : undefined} onSide={mini ? onFeedSide : undefined} />}
+      {feedOn && <BrowserFeed owner={owner} items={feedItems} boxRef={feedBox} onHeight={setFeedH} store={mini ? 'perch.pipFeed' : 'perch.browserFeed'} side={mini ? feedSide : undefined} onSide={mini ? onFeedSide : undefined} />}
     </div>
   )
 }
 
-export type FeedItem = { id: string; at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number; running?: boolean; concern?: string; error?: string; detail?: Record<string, string>; children?: FeedItem[] }
+export type FeedItem = { id: string; at: number; kind: 'tool' | 'step' | 'nav' | 'net' | 'note'; text: string; level?: 'ok' | 'warn' | 'bad'; ms?: number; running?: boolean; concern?: string; error?: string; req?: string; links?: { label: string; url: string }[]; detail?: Record<string, string>; children?: FeedItem[] }
 const FEED_ICON: Record<FeedItem['kind'], string> = { tool: '◆', step: '·', nav: '→', net: '⇅', note: '!' }
 const FEED_KIND: Record<FeedItem['kind'], string> = { tool: 'Agent action', step: 'Step', nav: 'Page changed', net: 'Page request', note: 'Event' }
 const fmtMs = (ms?: number) => ms == null ? '' : ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s` : `${Math.floor(ms / 60_000)}m${String(Math.round(ms / 1000) % 60).padStart(2, '0')}s`
@@ -284,16 +284,40 @@ function repeatsError(it: FeedItem, k: string, v: string) {
   return norm(v).startsWith(e) || e.startsWith(norm(v).split('\n')[0])
 }
 
+// A page request's response, loaded from the window when its row opens: the body (JSON pretty-printed)
+// and both sets of headers, with credentials masked by the server.
+type ReqDetails = { gone?: boolean; note?: string; method?: string; url?: string; status?: number | null; mime?: string | null; requestHeaders?: Record<string, string>; responseHeaders?: Record<string, string>; body?: string | null; truncated?: boolean; bodyNote?: string | null }
+function RequestPanel({ owner, id }: { owner: string; id: string }) {
+  const [d, setD] = useState<ReqDetails | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => { api.get<ReqDetails>(`/api/browser/${enc(owner)}/request/${enc(id)}`).then(setD).catch(e => setErr(e.message)) }, [owner, id])
+  if (err) return <div className="kv"><span className="k">response</span><span className="v muted">{err}</span></div>
+  if (!d) return <div className="kv"><span className="k">response</span><span className="v muted">Loading…</span></div>
+  if (d.gone) return <div className="kv"><span className="k">response</span><span className="v muted">{d.note}</span></div>
+  let body = d.body ?? null
+  if (body && /json/.test(d.mime ?? '')) { try { body = JSON.stringify(JSON.parse(body), null, 2) } catch {} }
+  const Headers = ({ h }: { h?: Record<string, string> }) => <div className="feed-headers">{Object.entries(h ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => <div key={k}><span className="hk">{k}</span> <span className="hv">{v}</span></div>)}</div>
+  return <>
+    <div className="kv"><span className="k">response</span>{body != null
+      ? <pre className="feed-code">{body}{d.truncated ? '\n… (cut, too long)' : ''}</pre>
+      : <span className="v muted">{d.bodyNote ?? 'No body'}</span>}</div>
+    <div className="kv"><span className="k">headers</span><span className="v">
+      <details onClick={e => e.stopPropagation()}><summary>Response ({Object.keys(d.responseHeaders ?? {}).length})</summary><Headers h={d.responseHeaders} /></details>
+      <details onClick={e => e.stopPropagation()}><summary>Request ({Object.keys(d.requestHeaders ?? {}).length})</summary><Headers h={d.requestHeaders} /></details>
+    </span></div>
+  </>
+}
+
 // One span or event on the shared timeline [t0, t1]: a bar for spans (growing while running), a tick
 // for instant events. Concerns show in amber with their reason, always visible.
-function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1: number; now: number; depth?: number }) {
+function FeedRow({ it, t0, t1, now, depth = 0, owner }: { it: FeedItem; t0: number; t1: number; now: number; depth?: number; owner: string }) {
   const [open, setOpen] = useState(false)
   const dur = it.running ? now - it.at : it.ms
   const span = Math.max(1, t1 - t0)
   const left = Math.max(0, Math.min(100, ((it.at - t0) / span) * 100))
   const width = dur == null ? 0 : Math.max(0, Math.min(100 - left, ((Math.min(it.at + dur, t1) - Math.max(it.at, t0)) / span) * 100))
   const clipped = it.at < t0
-  const expandable = !!(it.children?.length || (it.detail && Object.keys(it.detail).length))
+  const expandable = !!(it.children?.length || it.req || (it.detail && Object.keys(it.detail).length))
   const tone = it.level === 'bad' ? 'bad' : it.concern || it.level === 'warn' ? 'warn' : it.running ? 'run' : it.kind
   return <>
     <div className={`feed-row ${tone} ${expandable ? 'can-open' : ''} ${open ? 'open' : ''}`} style={{ paddingLeft: 4 + depth * 14 }}
@@ -318,11 +342,13 @@ function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1:
         ? <div key={k} className="kv"><span className="k">{k}</span><pre className="feed-code"><JsCode src={v} /></pre></div>
         : <div key={k} className="kv"><span className="k">{k}</span><span className={`v ${MONO.has(k) ? 'mono' : ''}`}>{v}</span></div>
       )}
+      {it.links?.length ? <div className="kv"><span className="k">open</span><span className="v feed-links">{it.links.map(l => <a key={l.url} href={l.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{l.label} ↗</a>)}</span></div> : null}
+      {it.req && <RequestPanel owner={owner} id={it.req} />}
     </div>}
     {open && it.children?.length ? (() => {
       // Children on their parent's own timeline, so the steps inside one call are readable.
       const c0 = it.at, c1 = Math.max(it.at + (dur ?? 0), ...it.children.map(c => c.at + (c.ms ?? 0)))
-      return it.children.map(c => <FeedRow key={c.id} it={c} t0={c0} t1={c1} now={now} depth={depth + 1} />)
+      return it.children.map(c => <FeedRow key={c.id} it={c} t0={c0} t1={c1} now={now} depth={depth + 1} owner={owner} />)
     })() : null}
   </>
 }
@@ -331,7 +357,7 @@ function FeedRow({ it, t0, t1, now, depth = 0 }: { it: FeedItem; t0: number; t1:
 // bottom; sticks to the bottom unless you scroll up. Click a row with › to see its details and steps.
 // store: where its collapsed state and height are remembered (the side panel and PiP keep their own).
 // side/onSide: in PiP, which side of the picture it sits on, chosen from its header.
-function BrowserFeed({ items, boxRef, onHeight, store = 'perch.browserFeed', side, onSide }: { items: FeedItem[]; boxRef: React.RefObject<HTMLDivElement | null>; onHeight: (h: number) => void; store?: string; side?: FeedSide; onSide?: (s: FeedSide) => void }) {
+function BrowserFeed({ owner, items, boxRef, onHeight, store = 'perch.browserFeed', side, onSide }: { owner: string; items: FeedItem[]; boxRef: React.RefObject<HTMLDivElement | null>; onHeight: (h: number) => void; store?: string; side?: FeedSide; onSide?: (s: FeedSide) => void }) {
   const list = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const [now, setNow] = useState(Date.now())
@@ -401,7 +427,7 @@ function BrowserFeed({ items, boxRef, onHeight, store = 'perch.browserFeed', sid
         {!items.length && <div className="muted small browser-feed-empty">No activity yet</div>}
         {bursts.map((b, i) => <Fragment key={b.items[0].id}>
           {i > 0 && <div className="feed-gap"><span>{fmtMs(b.gap)} later</span></div>}
-          {b.items.map(it => <FeedRow key={it.id} it={it} t0={b.t0} t1={b.t1} now={now} />)}
+          {b.items.map(it => <FeedRow key={it.id} it={it} t0={b.t0} t1={b.t1} now={now} owner={owner} />)}
         </Fragment>)}
       </div>}
     </div>

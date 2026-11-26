@@ -40,7 +40,7 @@ export type StepDo = 'click' | 'fill' | 'type' | 'select' | 'check' | 'uncheck' 
 export type Step = { do: StepDo; ref?: string; role?: string; name?: string; value?: string; key?: string; url?: string; dy?: number; ms?: number; text?: string; submit?: boolean; force?: boolean }
 // What the action log keeps for each step: enough to replay it without refs.
 export type LoggedStep = { do: StepDo; locator?: Locator; value?: string; key?: string; url?: string; dy?: number; ms?: number; text?: string; submit?: boolean; urlAfter: string; took: number; at: number; irreversible?: boolean; secret?: boolean }
-type Net = { id: string; url: string; method: string; type: string; status?: number; mime?: string; at: number; ms?: number; failed?: string; rid?: string }
+type Net = { id: string; url: string; method: string; type: string; status?: number; mime?: string; at: number; ms?: number; failed?: string; rid?: string; reqHeaders?: Record<string, string>; resHeaders?: Record<string, string> }
 
 export type Session = {
   owner: string; targetId: string; sid: string; mainFrame: string; ctx: number | null; loaderId: string
@@ -406,14 +406,14 @@ function wire(c: CDP) {
     const s = bySid(sid); if (!s) return
     if (p.type !== 'WebSocket' && p.type !== 'EventSource') s.inflight.set(p.requestId, Date.now())
     s.lastNetAt = Date.now()
-    s.net.push({ id: p.requestId, url: p.request.url, method: p.request.method, type: p.type ?? '', at: Date.now() })
+    s.net.push({ id: p.requestId, url: p.request.url, method: p.request.method, type: p.type ?? '', at: Date.now(), reqHeaders: p.request.headers })
     if (s.net.length > 300) s.net.splice(0, s.net.length - 300)
   })
   c.on('Network.responseReceived', (p, sid) => {
     const s = bySid(sid); if (!s) return
     const n = s.net.findLast(n => n.id === p.requestId)
     if (n) {
-      n.status = p.response.status; n.mime = p.response.mimeType; n.type = p.type ?? n.type
+      n.status = p.response.status; n.mime = p.response.mimeType; n.type = p.type ?? n.type; n.resHeaders = p.response.headers
       // the backend's request id (x-request-id and friends): joins this request to its server log lines
       const h = p.response.headers ?? {}
       const k = Object.keys(h).find(k => /^x-(request|correlation)-id$/i.test(k))
@@ -429,7 +429,7 @@ function wire(c: CDP) {
     // Worth a line in the feed: the page's own requests that failed, errored or crawled.
     if (n && /^(Document|XHR|Fetch)$/.test(n.type) && !/^(chrome-extension|data|blob):/.test(n.url)) {
       const detail: Record<string, string> = { type: n.type, host: hostOfUrl(n.url), method: n.method, url: n.url, ...(n.status ? { status: String(n.status) } : {}), ...(n.mime ? { mime: n.mime } : {}), ...(n.rid ? { 'request id': n.rid } : {}), ...(n.failed ? { error: n.failed } : {}) }
-      const base = { kind: 'net' as const, at: n.at, ms: n.ms, detail }
+      const base = { kind: 'net' as const, at: n.at, ms: n.ms, detail, req: n.id, links: requestLinks(n) }
       if (n.failed && !/ERR_ABORTED|ERR_BLOCKED/.test(n.failed)) feed(s.owner, { ...base, level: 'bad', text: `${n.method} ${shortUrl(n.url)} failed: ${n.failed.replace(/^net::/, '')}` })
       else if ((n.status ?? 0) >= 400) feed(s.owner, { ...base, level: (n.status ?? 0) >= 500 ? 'bad' : 'warn', text: `${n.status} ${n.method} ${shortUrl(n.url)}` })
       else if ((n.ms ?? 0) > 3000) feed(s.owner, { ...base, text: `${n.method} ${shortUrl(n.url)}` })
@@ -1042,6 +1042,37 @@ const pillScript = (owner: string) => `(() => {
   ;(document.body || document.documentElement).appendChild(host)
 })()`
 async function pill(s: Session) { if (s.shown && /^https?:|^file:|^data:/.test(s.url)) { try { await evalIn(s, pillScript(s.owner), { timeoutMs: 5000 }) } catch {} } }
+
+// ---------- a request's details, for the activity panel ----------
+// Headers that carry credentials are masked; the rest show as sent and received.
+const SECRET_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-csrftoken|x-api-key|x-auth-token)$/i
+const mask = (h?: Record<string, string>) => h ? Object.fromEntries(Object.entries(h).map(([k, v]) => [k, SECRET_HEADERS.test(k) ? '•••' : String(v)])) : {}
+// The backend logs for a request, when settings.browser.requestLogs lists its host and it has an id.
+export function requestLinks(n: { url: string; rid?: string; at: number }): { label: string; url: string }[] | undefined {
+  const cfg = settings.browser.requestLogs
+  if (!n.rid || !cfg?.url || !cfg.hosts?.length) return
+  let host = ''; try { host = new URL(n.url).host } catch { return }
+  if (!cfg.hosts.some(h => h === host || (h.startsWith('*.') && host.endsWith(h.slice(1))))) return
+  const iso = (t: number) => new Date(t).toISOString()
+  const url = cfg.url.replaceAll('{rid}', encodeURIComponent(n.rid)).replaceAll('{from}', encodeURIComponent(iso(n.at - 60_000))).replaceAll('{to}', encodeURIComponent(iso(n.at + 10 * 60_000)))
+  return [{ label: 'Backend logs', url }]
+}
+export async function requestDetails(owner: string, id: string, max = 60_000) {
+  const s = await session(owner, false)
+  if (!s) throw new Error('no browser window for this conversation')
+  const n = s.net.findLast(x => x.id === id)
+  if (!n) return { gone: true, note: 'This request is no longer in the window\'s recent requests.' }
+  let body: string | null = null, bodyNote: string | null = null
+  try {
+    const c = await ensureBrowser()
+    const r = await c.send('Network.getResponseBody', { requestId: n.id }, s.sid, 8000)
+    body = r.base64Encoded ? (/^(text|application\/(json|javascript|xml))/.test(n.mime ?? '') ? Buffer.from(r.body, 'base64').toString('utf8') : null) : r.body
+    if (body == null) bodyNote = `${n.mime ?? 'binary'} body, not shown`
+  } catch (e: any) { bodyNote = /No resource|No data found/i.test(e.message) ? 'The body is gone (the page moved on or Chrome dropped it).' : `Couldn't read the body: ${e.message}` }
+  const truncated = body != null && body.length > max
+  return { method: n.method, url: n.url, status: n.status ?? null, mime: n.mime ?? null, ms: n.ms ?? null, rid: n.rid ?? null,
+    requestHeaders: mask(n.reqHeaders), responseHeaders: mask(n.resHeaders), body: truncated ? body!.slice(0, max) : body, truncated, bodyNote, links: requestLinks(n) ?? [] }
+}
 
 // Open the chat's window in the real Agent Chrome, in front of everything, with the way back.
 export async function showWindow(owner: string) {

@@ -69,7 +69,10 @@ export type Settings = {
   telemetry: { enabled: boolean; key?: string; host?: string }
   // Unblocker cards on Home and the once-per-chat nudge in the system prompt (suggestions.ts). Fresh installs only.
   nudges: { enabled: boolean }
-  browser: { enabled: boolean; chromePath: string; headless: boolean; defaultPolicy: 'trusted' | 'allow' | 'read' | 'deny'; sites: Record<string, 'trusted' | 'allow' | 'read' | 'deny'>; confirmIrreversible: boolean; allowedActions: string[]; maxSessions: number; recordingDays: number; recordVisual: boolean; showWindows: boolean }
+  browser: { enabled: boolean; chromePath: string; headless: boolean; defaultPolicy: 'trusted' | 'allow' | 'read' | 'deny'; sites: Record<string, 'trusted' | 'allow' | 'read' | 'deny'>; confirmIrreversible: boolean; allowedActions: string[]; maxSessions: number; recordingDays: number; recordVisual: boolean; showWindows: boolean
+    // Activity rows for page requests link to that request's backend logs when the host is listed and
+    // the response carried a request id. url is a template: {rid}, {from} and {to} (ISO times around it).
+    requestLogs?: { hosts: string[]; url: string } }
 }
 
 const POSTHOG_CODE = join(HOME, 'Library/Application Support/@posthog/posthog-code/claude')
@@ -101,7 +104,7 @@ export const defaults: Settings = {
   autonomy: { enabled: true },
   telemetry: { enabled: false },
   nudges: { enabled: false },
-  browser: { enabled: true, chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: false, defaultPolicy: 'allow', sites: {}, confirmIrreversible: true, allowedActions: [], maxSessions: 6, recordingDays: 14, recordVisual: false, showWindows: false },
+  browser: { enabled: true, chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: false, defaultPolicy: 'allow', sites: {}, confirmIrreversible: true, allowedActions: [], maxSessions: 6, recordingDays: 14, recordVisual: false, showWindows: false, requestLogs: { hosts: [], url: '' } },
 }
 
 function merge(base: Settings, patch: Partial<Settings>): Settings {

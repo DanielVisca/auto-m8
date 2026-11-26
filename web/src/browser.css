@@ -136,3 +136,12 @@
 .feed-row.open .feed-error { white-space: normal; overflow-wrap: anywhere; }
 .feed-code { grid-column: 2; margin: 2px 0; padding: 6px 8px; border-radius: 4px; background: color-mix(in srgb, var(--bg) 60%, black); border: 1px solid var(--line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16em; overflow: auto; color: var(--fg); }
 .js-k { color: #c792ea; } .js-s { color: #c3e88d; } .js-n { color: #f78c6c; } .js-c { color: var(--muted); font-style: italic; }
+/* A page request's response in its expanded row: body as code, headers folded, backend logs link. */
+.feed-links { display: flex; gap: 10px; flex-wrap: wrap; }
+.feed-links a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.feed-links a:hover { text-decoration: underline; }
+.feed-detail details summary { cursor: pointer; color: var(--muted); font-size: 11px; padding: 1px 0; }
+.feed-detail details[open] summary { color: var(--fg); }
+.feed-headers { margin: 2px 0 4px; padding: 4px 8px; border-left: 2px solid var(--line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; line-height: 1.5; max-height: 14em; overflow: auto; }
+.feed-headers .hk { color: var(--muted); }
+.feed-headers .hv { overflow-wrap: anywhere; }

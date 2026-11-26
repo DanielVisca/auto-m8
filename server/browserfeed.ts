@@ -15,6 +15,8 @@ export type FeedItem = {
   running?: boolean
   concern?: string
   error?: string // one line, shown under the label when it failed
+  req?: string // a page request's id in the window: its headers and body load when the row opens
+  links?: { label: string; url: string }[] // e.g. the request's backend logs
   detail?: Record<string, string>
   children?: FeedItem[]
 }
