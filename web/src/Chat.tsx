@@ -1051,7 +1051,10 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
       const p2 = cmd.kind === 'store'
         ? `Use the "${cmd.name}" skill from the PostHog skill store: load it with use_skill, then follow it.${rest ? `\n\nTask: ${rest}` : ''}`
         : `Use the ${cmd.name} skill.${rest ? `\n\n${rest}` : ''}`
-      const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt: p2, cwd: id ? undefined : cwd, mode, context: true, folderId: folder?.id })
+      const r = await sendChat<{ id: string }>({ id: id ?? undefined, prompt: p2, cwd: id ? undefined : cwd, mode, context: true, folderId: folder?.id, shared: shared.filter(x => !x.loading && !x.file), attachments: files.map(x => x.file) })
+      // Same as a normal send: the attachments went with it, so the draft slot must not keep them.
+      setShared([])
+      try { sessionStorage.removeItem(`perch.compose.shared.${id ?? 'new'}`) } catch {}
       if (!id) started(r.id)
       return
     }
@@ -1420,6 +1423,7 @@ const markChar = (i: number) => String.fromCodePoint(MARK_BASE + i)
 const isMark = (c: string) => { const n = c.codePointAt(0) ?? 0; return n >= MARK_BASE && n < MARK_BASE + MARKS }
 const rawUrl = (p: string) => `/api/files/raw?path=${encodeURIComponent(p)}`
 // Attachments (and shared links) survive the composer being rebuilt on resize, like the typed draft.
+export const forgetNewChatAttachments = () => { try { sessionStorage.removeItem('perch.compose.shared.new') } catch {} }
 function useSharedDraft(id: string | null) {
   const key = `perch.compose.shared.${id ?? 'new'}`
   const [shared, setShared] = useState<Shared[]>(() => { try { return JSON.parse(sessionStorage.getItem(key) ?? '[]') } catch { return [] } })

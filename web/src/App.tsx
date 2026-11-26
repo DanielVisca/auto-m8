@@ -19,7 +19,7 @@ import { AskCard } from './Autopilot'
 import { Boundary } from './Boundary'
 import { EdgeHandle, Splitter, useColumnWidth } from './Splitter'
 import { toast, useToasts } from './api'
-import { Chat } from './Chat'
+import { Chat, forgetNewChatAttachments } from './Chat'
 import { Details } from './Details'
 import { DecisionFlag } from './Decisions'
 import { ProdAlert } from './ProdAlert'
@@ -180,10 +180,13 @@ export function App() {
     addEventListener('perch:login', h); addEventListener('perch:terminal', term); addEventListener('perch:settings', sett)
     return () => { removeEventListener('perch:login', h); removeEventListener('perch:terminal', term); removeEventListener('perch:settings', sett) }
   })
-  const startChat = (prompt?: string) => { if (prompt) try { sessionStorage.setItem('perch.draft', prompt) } catch {} setView({ kind: 'chat', id: null }) }
+  // Every new chat shares one draft slot, so an explicit "new chat" drops attachments left in an
+  // abandoned one; otherwise they reappear in the next chat you start (and get sent with it).
+  const newChat = () => { if (view.kind !== 'chat' || view.id !== null) forgetNewChatAttachments(); setView({ kind: 'chat', id: null }) }
+  const startChat = (prompt?: string) => { if (prompt) try { sessionStorage.setItem('perch.draft', prompt) } catch {} newChat() }
   const askHistory = (q: string) => setView({ kind: 'search', q, agent: 'yes' })
   const searchEverywhere = (q: string) => setView({ kind: 'search', q })
-  const chatInFolder = (f: Folder) => { try { sessionStorage.setItem('perch.folder', JSON.stringify({ id: f.id, cwd: f.cwd, name: f.name })) } catch {} setView({ kind: 'chat', id: null }) }
+  const chatInFolder = (f: Folder) => { try { sessionStorage.setItem('perch.folder', JSON.stringify({ id: f.id, cwd: f.cwd, name: f.name })) } catch {} newChat() }
   const focusFolder = (f: Folder) => api.send('PUT', '/api/settings', { focus: { active: true, areas: [{ name: f.name, query: f.query || `#${f.label}` }] } })
 
   useEffect(() => {
@@ -192,7 +195,7 @@ export function App() {
       const k = e.key.toLowerCase()
       if (k === 'm' && e.shiftKey && shell.mini) { e.preventDefault(); if (mode === 'mini') shell.mini(false).then(r => { if (r !== 'restored') shell.preset?.('compact') }); else shell.mini(true); return }
       if (k === 'k') { e.preventDefault(); setListOpen(true); setTimeout(() => searchRef.current?.focus(), 0) }
-      else if (k === 'n') { e.preventDefault(); setView({ kind: 'chat', id: null }) }
+      else if (k === 'n') { e.preventDefault(); newChat() }
       else if (k === 't') { e.preventDefault(); newTerm() }
       else if (k === '\\') { e.preventDefault(); setListOpen(o => !o) }
       else if (k === ',') { e.preventDefault(); setView({ kind: 'settings' }) }
@@ -265,7 +268,7 @@ export function App() {
       <div className="side-actions drag">
         <div className="side-group">
           <ProfileSwitch onSettings={() => setView({ kind: 'settings' })} />
-          <button className="primary no-drag" onClick={() => setView({ kind: 'chat', id: null })} title="New chat  ⌘N">+ Chat</button>
+          <button className="primary no-drag" onClick={newChat} title="New chat  ⌘N">+ Chat</button>
           <button className="no-drag" onClick={() => newTerm()} title="New terminal  ⌘T">⌘_</button>
           <button className="no-drag" onClick={() => newTerm({ cmd: 'claude', title: 'claude' })} title="Claude Code's own UI in a terminal">✳</button>
         </div>
