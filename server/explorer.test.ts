@@ -162,3 +162,20 @@ test('rootsOf finds src/ Python packages, Go module paths and JS workspace names
   assert.deepEqual(r.go, [['github.com/acme/vm', '']])
   assert.deepEqual(r.js.find(([n]) => n === '@acme/core'), ['@acme/core', 'packages/core'])
 })
+
+test('a word search lists where the thing also lives inside other modules', () => {
+  const c = (id: string, models: string[] = []) => ({ id, name: id.split('/').pop()!, path: id, files: 10, models, relations: [] })
+  const g = {
+    repo: 'r', sha: 's', edges: [], models: {},
+    concepts: [c('products/alerts', ['Alert']), c('products/logs', ['LogsAlertConfiguration', 'LogEntry']), c('products/errors'), c('products/metrics')],
+    folders: ['products/alerts/backend', 'products/errors/backend/platform_alerts', 'products/errors/backend/platform_alerts/sub', 'products/metrics/frontend/alerting', 'products/metrics/backend'],
+  }
+  const f = focusGraph(g, 'alert', 25, false, g.folders)
+  assert.deepEqual(f.nodes.filter(n => n.role === 'focus').map(n => n.id), ['products/alerts'])
+  assert.deepEqual(f.alsoIn, [
+    { concept: 'products/errors', folders: ['backend/platform_alerts'], models: [] },
+    { concept: 'products/metrics', folders: ['frontend/alerting'], models: [] },
+    { concept: 'products/logs', folders: [], models: ['LogsAlertConfiguration'] },
+  ])
+  assert.equal(focusGraph(g, 'billing', 25, false, g.folders).alsoIn, undefined)
+})

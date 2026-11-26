@@ -16,7 +16,9 @@ export type Concept = { id: string; name: string; path: string; files: number; m
 export type Edge = { from: string; to: string; kind: 'fk' | 'import'; weight: number; evidence: Evidence[] }
 export type Graph = { repo: string; sha: string; concepts: Concept[]; edges: Edge[]; models: Record<string, { concept: string; file: string; line: number }>; folders?: string[] }
 export type FocusNode = Concept & { role: 'focus' | 'dependency' | 'dependent' | 'both' | 'second'; score: number; hub: boolean }
-export type FocusGraph = { repo: string; sha: string; focus: string | null; nodes: FocusNode[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string } }
+export type FocusGraph = { repo: string; sha: string; focus: string | null; nodes: FocusNode[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; alsoIn?: AlsoIn[] }
+// Where a searched-for thing also lives inside other modules: a subfolder named for it, or models with it in their name.
+export type AlsoIn = { concept: string; folders: string[]; models: string[] }
 
 // Folders whose children are the modules of a codebase. Deepest match wins, so posthog/models/x beats posthog/x.
 // A repo can override with .explorer.json { "containers": [...] }.
@@ -313,9 +315,10 @@ export function focusGraph(g: Graph, focus?: string | null, cap = 25, showHubs =
     // Not a module of its own, but a folder inside one: say where, so the reader can focus that module.
     const hit = folders.filter(d => stem(d.split('/').pop()!) === q || stem(d.split('/').pop()!).startsWith(q)).sort((a, b) => a.length - b.length)[0]
     const inside = hit ? g.concepts.filter(c => hit.startsWith(c.id + '/')).sort((a, b) => b.id.length - a.id.length)[0] : null
-    if (inside) return { repo: g.repo, sha: g.sha, focus, nodes: [], edges: [], hidden: { dependencies: 0, dependents: 0, second: 0, hubs: [] }, total: g.concepts.length, inside: { folder: hit!, concept: inside.id } } as FocusGraph
+    if (inside) return { repo: g.repo, sha: g.sha, focus, nodes: [], edges: [], hidden: { dependencies: 0, dependents: 0, second: 0, hubs: [] }, total: g.concepts.length, inside: { folder: hit!, concept: inside.id }, alsoIn: alsoInside(g, q, new Set([inside.id]), folders) } as FocusGraph
   }
   const F = new Set(focused.map(c => c.id))
+  const alsoIn = alsoInside(g, q, F, folders)
   const deps = new Map<string, number>(), users = new Map<string, number>()
   // Shared foundations (UI kit, the Team model) are listed by name instead of drawn: they connect to everything.
   const hubs = new Set<string>()
@@ -355,8 +358,34 @@ export function focusGraph(g: Graph, focus?: string | null, cap = 25, showHubs =
     repo: g.repo, sha: g.sha, focus, nodes: [...picked.values()],
     edges: g.edges.filter(e => keep.has(e.from) && keep.has(e.to)),
     hidden: { dependencies: [...deps.keys()].filter(k => !keep.has(k)).length, dependents: [...users.keys()].filter(k => !keep.has(k)).length, second, hubs: [...hubs].sort() },
-    total: g.concepts.length,
+    total: g.concepts.length, ...(alsoIn.length ? { alsoIn } : {}),
   }
+}
+// A word search ("alert") matches modules by name, but the same thing is often a subfolder of a bigger module
+// (logs/backend/alerts) or a model there (LogsAlertConfiguration). List those so the search doesn't look empty.
+const words = (name: string) => name.split(/(?<=[a-z0-9])(?=[A-Z])|[-_\s]+/).map(stem).filter(Boolean)
+export function alsoInside(g: Graph, q: string, skip: Set<string>, folders: string[] = g.folders ?? []): AlsoIn[] {
+  if (q.length < 3) return []
+  const out = new Map<string, AlsoIn>()
+  const at = (id: string) => out.get(id) ?? out.set(id, { concept: id, folders: [], models: [] }).get(id)!
+  const ids = [...g.concepts.map(c => c.id)].sort((a, b) => b.length - a.length)
+  const owner = (d: string) => ids.find(id => d === id || d.startsWith(id + '/'))
+  for (const d of folders) {
+    const last = d.split('/').pop()!
+    if (![stem(last), ...words(last)].some(w => w === q || (q.length >= 4 && w.startsWith(q)))) continue
+    const id = owner(d)
+    if (!id || d === id || skip.has(id)) continue
+    // Only the outermost matching folder: alerts/, not alerts/backend/ too.
+    const rel = d.slice(id.length + 1)
+    const e = at(id)
+    if (!e.folders.some(f => rel.startsWith(f + '/'))) e.folders = [...e.folders.filter(f => !f.startsWith(rel + '/')), rel]
+  }
+  for (const c of g.concepts) {
+    if (skip.has(c.id)) continue
+    for (const m of c.models) if (stem(m) !== q && words(m).includes(q)) at(c.id).models.push(m)
+  }
+  const size = (a: AlsoIn) => a.folders.length * 2 + a.models.length
+  return [...out.values()].map(a => ({ ...a, folders: a.folders.sort().slice(0, 6), models: a.models.sort().slice(0, 6) })).sort((a, b) => size(b) - size(a) || a.concept.localeCompare(b.concept)).slice(0, 12)
 }
 
 // ---------- dream: what if we removed X, or added Y attached to a, b ----------

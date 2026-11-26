@@ -12,7 +12,7 @@ import { GitExplorer } from './GitExplorer'
 type Evidence = { file: string; line: number; text: string; github?: string | null; local?: string }
 type Edge = { from: string; to: string; kind: 'fk' | 'import'; weight: number; evidence: Evidence[] }
 type Node = { id: string; name: string; path: string; files: number; models: string[]; role: 'focus' | 'dependency' | 'dependent' | 'both' | 'second'; score: number; hub: boolean }
-type GraphRes = { repo: string; sha: string; focus: string | null; nodes: Node[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; names: string[]; remote: { owner: string; name: string } | null }
+type GraphRes = { repo: string; sha: string; focus: string | null; nodes: Node[]; edges: Edge[]; hidden: { dependencies: number; dependents: number; second: number; hubs: string[] }; total: number; inside?: { folder: string; concept: string }; alsoIn?: { concept: string; folders: string[]; models: string[] }[]; names: string[]; remote: { owner: string; name: string } | null }
 type Commit = { sha: string; date: string; author: string; subject: string; pr: number | null; url: string | null }
 type Ev = { date: string; kind: 'concept' | 'edge'; id: string; from?: string; to?: string; approx: boolean; source: string; commit: Commit }
 type Timeline = { status: 'running' | 'done'; done: number; total: number; source: string; shallow: boolean; since: string | null; events: Ev[]; milestones: Record<string, Commit[]>; error?: string }
@@ -437,6 +437,12 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
               <div className="small muted explore-hidden">
                 Not drawn: {g.hidden.dependencies} more it builds on, {g.hidden.dependents} more built on it{g.hidden.second ? `, ${g.hidden.second} two hops out` : ''}.
                 {g.hidden.hubs.length > 0 && <> {g.hidden.hubs.length} shared foundations used by almost everything (<span title={g.hidden.hubs.join('\n')}>{g.hidden.hubs.slice(0, 4).map(label).join(', ')}{g.hidden.hubs.length > 4 ? '…' : ''}</span>) are hidden; tick “show shared foundations” to draw them.</>}
+              </div>
+            )}
+            {g.focus && (g.alsoIn?.length ?? 0) > 0 && (
+              <div className="small muted explore-hidden">
+                “{g.focus}” also lives inside other modules:{' '}
+                {g.alsoIn!.map((a, i) => <span key={a.concept}>{i ? ' · ' : ''}<button className="link small" title={[...a.folders.map(f => `${a.concept}/${f}/`), ...a.models.map(m => `model ${m}`)].join('\n')} onClick={() => { setFocus(a.concept); setFocusInput(a.concept) }}>{label(a.concept)}</button> <span>({[...a.folders.map(f => f + '/'), ...a.models].slice(0, 3).join(', ')}{a.folders.length + a.models.length > 3 ? '…' : ''})</span></span>)}
               </div>
             )}
             <TimelineBar tl={tl} steps={steps} step={step} setStep={s => { setPlaying(false); setStep(s) }} playing={playing} setPlaying={setPlaying} at={at} links={storyLinks} onPick={id => pick(id, false)} />
