@@ -7,8 +7,10 @@ import { PrPreviewCard } from './PrPreview'
 import { Brand } from './Brand'
 import { FilesSection } from './Files'
 
-type Detail = Conversation & {
-  prs: (PR & { created: number })[]
+const PLAN_MAX = 12 // mergePlan's cap (server/journey.ts)
+
+type Detail = Omit<Conversation, "prs"> & {
+  prs: (PR & { created: number; via?: string; via_title?: string | null })[]
   links: { kind: string; note: string | null; other: string; dir: string; title: string | null; source: string | null; updated_at: number | null }[]
   tools: { name: string; server: string | null; n: number; errors: number }[]
   siblings: { id: string; title: string; updated_at: number; branch: string | null }[]
@@ -21,7 +23,11 @@ export function Details({ id, onOpen, onMakeRoutine, onContinue }: { id: string;
   const [picking, setPicking] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   if (!c || (c as any).error) return <div className="details muted pad">…</div>
-  const created = c.prs.filter(p => p.created)
+  // The merge plan reads at most PLAN_MAX PRs live: open ones first, so a long tail of merged
+  // work can't push them out. Finished PRs past the cap are listed without the live read.
+  const settled = (p: { state?: string | null }) => /^(merged|closed)$/i.test(p.state ?? '')
+  const created = c.prs.filter(p => p.created).sort((a, b) => Number(settled(a)) - Number(settled(b)))
+  const planned = created.slice(0, PLAN_MAX), overflow = created.slice(PLAN_MAX)
   const mentioned = c.prs.filter(p => !p.created)
   return (
     <div className="details">
@@ -40,7 +46,9 @@ export function Details({ id, onOpen, onMakeRoutine, onContinue }: { id: string;
       <section>
         <h4>Pull requests</h4>
         {!c.prs.length && <div className="muted small">None yet. PRs opened or linked here show up with live status.</div>}
-        {created.length > 0 && <MergePlan urls={created.map(p => p.url)} onOpen={onOpen} />}
+        {created.length > 0 && <MergePlan urls={planned.map(p => p.url)} onOpen={onOpen} />}
+        {overflow.length > 0 && <details><summary className="muted small">{overflow.length} more {overflow.every(settled) ? 'merged or closed' : 'not in the plan'}</summary>{overflow.map(p => <div key={p.url} className="d-pr"><PrBadge pr={p} full /></div>)}</details>}
+        {created.some(p => p.via) && <div className="muted small">{created.filter(p => !p.via).length} opened here, {created.filter(p => p.via).length} by helpers and chats it drove</div>}
         {mentioned.length > 0 && <details><summary className="muted small">{mentioned.length} mentioned</summary>{mentioned.map(p => <div key={p.url} className="d-pr"><PrBadge pr={p} full /></div>)}</details>}
       </section>
 

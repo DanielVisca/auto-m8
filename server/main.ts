@@ -213,11 +213,32 @@ onError.add(() => broadcast('errors'))
 type Row = Record<string, any>
 const DAY = 86400_000
 
+function handedOffPrs(id: string) {
+  return all<any>(`with recursive kids(id, depth) as (
+      select b, 1 from links where a = ? and kind in ('started', 'drives')
+      union select l.b, k.depth + 1 from links l join kids k on l.a = k.id where l.kind in ('started', 'drives') and k.depth < 3)
+    select p.*, cp.url, 1 created, cp.conversation_id via, c.title via_title
+    from conversation_prs cp join (select distinct id from kids where id != ?) k on k.id = cp.conversation_id
+    left join prs p on p.url = cp.url left join conversations c on c.id = cp.conversation_id
+    where cp.created = 1 group by cp.url`, id, id)
+}
+
 function conversationDetail(id: string) {
   const c = detail(id)
   if (!c) return null
   // p.* first: when perch has no status for a PR yet, its null url must not overwrite the real one.
   c.prs = all(`select p.*, cp.url, cp.created from conversation_prs cp left join prs p on p.url = cp.url where cp.conversation_id = ? order by cp.created desc`, id)
+  // Work this chat handed off is its work too: PRs opened by the helpers it started (delegate,
+  // autoresearch) and the chats it drove, a few levels down, count as made here. `via` names the
+  // chat that actually opened it.
+  const own = new Map<string, any>(c.prs.map((p: any) => [p.url, p]))
+  for (const p of handedOffPrs(id)) {
+    const was = own.get(p.url)
+    if (was?.created) continue
+    if (was) Object.assign(was, { created: 1, via: p.via, via_title: p.via_title })
+    else { own.set(p.url, p); c.prs.push(p) }
+  }
+  c.prs.sort((a: any, b: any) => b.created - a.created)
   c.links = links(id)
   c.tools = all(`select name, server, count(*) n, sum(is_error) errors from tool_calls where conversation_id = ? group by name order by n desc limit 15`, id)
   c.siblings = siblings(id).slice(0, 12)
