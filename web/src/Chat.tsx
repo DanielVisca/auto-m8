@@ -1508,6 +1508,7 @@ function Family({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const { data: pd } = useLive<Pulls>(open ? `/api/conversations/${encodeURIComponent(id)}/pulls` : null, ['conversations'])
   const [peek, setPeek] = useState<number | null>(null)
+  const [allPulls, setAllPulls] = useState(false)
   const ref = useRef<HTMLButtonElement>(null)
   const m = data?.members ?? []
   if (m.length < 2) return null
@@ -1523,27 +1524,13 @@ function Family({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
       <button ref={ref} className="icon family-btn" title={`${parent ? `Branched from: ${parent.title}\n` : ''}${m.length} chats in this family`} onClick={() => setOpen(!open)}>⑂ {m.length}</button>
       <Popover anchor={ref} open={open} onClose={() => setOpen(false)}>
         <div className="menu family">
-          <div className="muted small pad-s">This chat's family: where it branched from and every branch off it</div>
-          {m.map(x => {
-            const s = bySource.get(x.id)
-            return (
-              <button key={x.id} className={`family-row ${x.id === id ? 'on' : ''}`} style={{ paddingLeft: 8 + x.depth * 14 }} disabled={x.id === id}
-                onClick={() => { setOpen(false); onOpen(x.id) }} title={x.title}>
-                <span className="muted">{x.depth ? '└' : '●'}</span>
-                <span className="ellipsis grow">{x.title}</span>
-                {s && <span className="chip pull-chip" title={`This chat took ${s.chars.toLocaleString()} characters from it in ${s.n} pull${s.n === 1 ? '' : 's'}`}>↙ {s.n}× · {kchars(s.chars)}</span>}
-                {x.kind && <span className="chip">{FAMILY_KIND[x.kind] ?? x.kind}</span>}
-                {x.id === id && <span className="chip">you are here</span>}
-              </button>
-            )
-          })}
           <div className="family-pulls">
             <div className="muted small pad-s">
               {!pd ? 'Reading what this chat pulled in…'
                 : !ps.length ? "This chat hasn't pulled anything in from other conversations."
                 : <>What this chat pulled in: {[t!.briefs && `${t!.briefs} brief${t!.briefs === 1 ? '' : 's'}`, t!.reads && `${t!.reads} read${t!.reads === 1 ? '' : 's'}`, t!.searches && `${t!.searches} search${t!.searches === 1 ? '' : 'es'}`].filter(Boolean).join(', ')} · {kchars(t!.chars)} chars</>}
             </div>
-            {ps.map((p, i) => (
+            {(allPulls ? ps : ps.slice(0, 5)).map((p, i) => (
               <div key={i} className="pull-row">
                 <div className="pull-head">
                   <span className="chip">{PULL_HOW[p.how]}</span>
@@ -1558,7 +1545,22 @@ function Family({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
                 {peek === i && <div className="pull-peek small">{p.preview || '(empty)'}{p.chars > p.preview.length ? ' …' : ''}</div>}
               </div>
             ))}
+            {ps.length > 5 && <button className="link small pad-s" onClick={() => setAllPulls(!allPulls)}>{allPulls ? 'Show fewer' : `Show all ${ps.length}`}</button>}
           </div>
+          <div className="muted small pad-s">This chat's family: where it branched from and every branch off it</div>
+          {m.map(x => {
+            const s = bySource.get(x.id)
+            return (
+              <button key={x.id} className={`family-row ${x.id === id ? 'on' : ''}`} style={{ paddingLeft: 8 + x.depth * 14 }} disabled={x.id === id}
+                onClick={() => { setOpen(false); onOpen(x.id) }} title={x.title}>
+                <span className="muted">{x.depth ? '└' : '●'}</span>
+                <span className="ellipsis grow">{x.title}</span>
+                {s && <span className="chip pull-chip" title={`This chat took ${s.chars.toLocaleString()} characters from it in ${s.n} pull${s.n === 1 ? '' : 's'}`}>↙ {s.n}× · {kchars(s.chars)}</span>}
+                {x.kind && <span className="chip">{FAMILY_KIND[x.kind] ?? x.kind}</span>}
+                {x.id === id && <span className="chip">you are here</span>}
+              </button>
+            )
+          })}
         </div>
       </Popover>
     </>
