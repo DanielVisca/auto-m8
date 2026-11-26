@@ -88,15 +88,20 @@ async function build() {
     const decision = decisionFor.get(url)
     const needsYou = !!decision || /^NEEDS YOU/.test(w?.outcome ?? '') || /NEEDS YOU/.test(w?.last_detail ?? '') || w?.stage === 'blocked'
       || (station === 'approved' && /merge: manual/.test(w?.outcome ?? ''))
+    // "agent" means an agent is working on it right now. Red with nobody on it is stuck, and stuck
+    // with nobody on it is yours (drafts aren't: they're parked until you pick them up). An approved
+    // PR with no shepherd to merge it is yours too. This is the one definition of "needs you": the
+    // line's pill counts exactly these orange dots.
     let holder: Holder
     if (needsYou) holder = 'you'
     else if (working) holder = 'agent'
+    else if (red && station !== 'draft') holder = 'you'
     else if (station === 'deploy' || station === 'check2') holder = 'prod'
     else if (station === 'verified') holder = 'prod' // live; the scouts are still gathering proof
     else if (station === 'proven') holder = 'idle'
-    else if (station === 'ci') holder = red ? 'agent' : 'ci'
-    else if (station === 'review') holder = red ? 'agent' : 'reviewer'
-    else if (station === 'approved') holder = 'merge'
+    else if (station === 'ci') holder = 'ci'
+    else if (station === 'review') holder = 'reviewer'
+    else if (station === 'approved') holder = w?.enabled ? 'merge' : 'you'
     else holder = 'idle'
     const m = url.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/)
     const title = p?.title ?? get<any>('select title from prs where url = ?', url)?.title ?? ''

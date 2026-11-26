@@ -75,7 +75,6 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
   if (!data) return <div className="pad muted">Reading your PRs from GitHub… the first time takes about a minute.</div>
   if ((data as any).error) return <div className="pad muted">{(data as any).error}</div>
 
-  const needsUrls = new Set(prs.filter(p => p.outcome === 'needs-you').map(p => p.url))
   const n = (o: Outcome) => prs.filter(p => p.outcome === o).length
   const shown = prs.filter(p => matches(p, sel))
   const byUrl = new Map(prs.map(p => [p.url, p]))
@@ -126,7 +125,7 @@ export function PrFlow({ onOpen }: { onOpen: (id: string) => void }) {
           <span className="grow muted small">{viz === 'flow' ? 'Where PRs opened in this range ended up' : 'The line, now: every open PR at its station · colour = who holds it'}</span>
           <div className="seg">{([['flow', 'Flow'], ['line', 'The line']] as const).map(([k, l]) => <button key={k} className={viz === k ? 'on' : ''} onClick={() => { setViz(k); save('perch.prflow.viz', k); setLine(null); setSel(null) }}>{l}</button>)}</div>
         </div>
-        {viz === 'line' ? <RailLine picked={line?.station ?? null} focus={focus} onFocus={setFocus} needs={needsUrls} onPick={(pk, trains) => setLine(pk ? { ...pk, trains } : null)} /> : <>
+        {viz === 'line' ? <RailLine picked={line?.station ?? null} focus={focus} onFocus={setFocus} onPick={(pk, trains) => setLine(pk ? { ...pk, trains } : null)} /> : <>
         <Sankey prs={prs} sel={sel} hover={hover} setHover={setHover} onPick={s => setSel(cur => JSON.stringify(cur) === JSON.stringify(s) ? null : s)} />
         <div className="flow-legend small">
           {OUTCOMES.map(o => <span key={o.id} title={o.hint}><i className={`sw o-${o.id}`} />{o.icon} {o.label}</span>)}

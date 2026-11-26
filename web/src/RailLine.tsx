@@ -15,10 +15,10 @@ export const STN: Record<string, string> = { draft: 'draft', ci: 'CI', review: '
 const ORDER: Record<string, number> = { you: 0, agent: 1, merge: 2, reviewer: 3, ci: 4, prod: 5, idle: 6 }
 // Filters from the legend: a holder colour, a marker, or "needs" (the crossing pill: everything waiting on you).
 export const FOCUS: Record<string, string> = { needs: 'needs you', ...Object.fromEntries(Object.entries(HOLDER).map(([k, [, l]]) => [k, l])), working: 'agent working on it', stuck: 'stuck', waiting: 'waiting for another PR' }
-// "Needs you" is the line's own `you` holder plus whatever the PR list counts as needing you (merge it,
-// red CI with nobody on it), so the pill, the dots and the list below always agree.
-const fits = (t: Train, f: string | null, needs?: Set<string>) => !f ? true
-  : f === 'needs' ? t.holder === 'you' || !!needs?.has(t.url)
+// "Needs you" is the server's `you` holder (explicit asks, stuck with nobody on it, approved with no
+// shepherd to merge it), so the pill counts exactly the orange dots.
+const fits = (t: Train, f: string | null) => !f ? true
+  : f === 'needs' ? t.holder === 'you'
   : f === 'working' ? !!t.working : f === 'stuck' ? !!t.red : f === 'waiting' ? t.signal.length > 0 : t.holder === f
 const PROOF: Record<string, string> = { pass: '✅', concern: '⚠️', no_signal: '🔇', pending: '⏳', n_a: '➖' }
 
@@ -57,7 +57,7 @@ function useWidth() {
 // Clicking a legend item (or the crossing pill, for "needs you") filters by it: other dots fade, the
 // counts show what matches, and the list shows the matches. Both combine; the filter is remembered.
 export type LinePick = { station: string | null; focus: string | null }
-export function RailLine({ picked, focus = null, onFocus, onPick, needs }: { picked?: string | null; focus?: string | null; onFocus?: (f: string | null) => void; onPick?: (pick: LinePick | null, trains: Train[]) => void; needs?: Set<string> } = {}) {
+export function RailLine({ picked, focus = null, onFocus, onPick }: { picked?: string | null; focus?: string | null; onFocus?: (f: string | null) => void; onPick?: (pick: LinePick | null, trains: Train[]) => void } = {}) {
   const { data: D, error } = useLive<Ry>('/api/railyard', ['prflow' as any], undefined, 60_000)
   const [ref, W] = useWidth()
   // Hovering a dot opens the same PR preview card as PR pills, with the line's own context on top.
@@ -67,7 +67,7 @@ export function RailLine({ picked, focus = null, onFocus, onPick, needs }: { pic
   useEffect(() => () => clearTimeout(timer.current), [])
   const enter = (t: Train, el: Element) => { clearTimeout(timer.current); timer.current = setTimeout(() => { anchor.current = el as HTMLElement; setHover(t) }, 350) }
   const leave = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setHover(null), 250) }
-  const chosen = (station: string | null, f: string | null) => (D?.trains ?? []).filter(t => (!station || t.station === station) && fits(t, f, needs))
+  const chosen = (station: string | null, f: string | null) => (D?.trains ?? []).filter(t => (!station || t.station === station) && fits(t, f))
   const pick = (station: string | null, f: string | null) => onPick?.(station || f ? { station, focus: f } : null, station || f ? chosen(station, f) : [])
   const toggle = (f: string) => onFocus?.(focus === f ? null : f)
   // Keep the picked PR list in step with the live data as it refreshes (and with a remembered filter).
@@ -88,10 +88,10 @@ export function RailLine({ picked, focus = null, onFocus, onPick, needs }: { pic
   const driving = D.lanes.filter(l => l.live).length
   const scoutsOut = D.scouts.filter(s => s.runs[0]?.status === 'in_progress').length
   const oldest = D.crossing.find(x => x.since)?.since
-  const waiting = D.trains.filter(t => fits(t, 'needs', needs)).length
+  const waiting = D.trains.filter(t => fits(t, 'needs')).length
   const leg = (f: string, body: any) => onFocus
     ? <button key={f} className={`legend-btn${focus === f ? ' on' : ''}`} aria-pressed={focus === f} onClick={() => toggle(f)}
-        title={focus === f ? 'Show everything again' : `Only show PRs: ${FOCUS[f]} (${D.trains.filter(t => fits(t, f, needs)).length})`}>{body}</button>
+        title={focus === f ? 'Show everything again' : `Only show PRs: ${FOCUS[f]} (${D.trains.filter(t => fits(t, f)).length})`}>{body}</button>
     : <span key={f}>{body}</span>
   return (
     <div ref={ref} className="rail-line">
@@ -107,7 +107,7 @@ export function RailLine({ picked, focus = null, onFocus, onPick, needs }: { pic
         <line x1={pad} x2={W - pad} y1={y0} y2={y0} stroke="var(--line)" strokeWidth={6} strokeLinecap="round" />
         {st.map((s, i) => {
           const x = pad + i * step
-          const on = picked === s, pickS = () => pick(on ? null : s, focus), hits = focus ? at[s].filter(t => fits(t, focus, needs)).length : null
+          const on = picked === s, pickS = () => pick(on ? null : s, focus), hits = focus ? at[s].filter(t => fits(t, focus)).length : null
           return (
             <g key={s} style={picked && !on ? { opacity: 0.4 } : undefined}>
               {onPick && <rect x={x - step / 2 + 2} y={0} width={step - 4} height={Ht} rx={6} className="clickable" onClick={pickS}
@@ -122,7 +122,7 @@ export function RailLine({ picked, focus = null, onFocus, onPick, needs }: { pic
                 const cx = x + (col - (Math.min(perRow, at[s].length) - 1) / 2) * 22, cy = y0 + 30 + row * 24, rr = r(t)
                 const c = HOLDER[t.holder]?.[0] ?? '#6b7280'
                 return (
-                  <g key={t.url} className="clickable" onClick={() => openPr(t.url)} style={fits(t, focus, needs) ? undefined : { opacity: 0.12 }}
+                  <g key={t.url} className="clickable" onClick={() => openPr(t.url)} style={fits(t, focus) ? undefined : { opacity: 0.12 }}
                     onMouseEnter={e => enter(t, e.currentTarget)} onMouseLeave={leave}>
                     {t.holder === 'you' && <circle cx={cx} cy={cy} r={rr + 3.5} fill="none" stroke="#f59e0b" strokeWidth={1.2} strokeDasharray="2 2" />}
                     <circle cx={cx} cy={cy} r={rr} fill={c} fillOpacity={t.holder === 'idle' ? 0.45 : 0.95} stroke={t.red ? 'var(--bad, #ef4444)' : 'none'} strokeWidth={2.5} style={t.working ? { animation: 'pulse 1.4s ease-in-out infinite' } : undefined} />
