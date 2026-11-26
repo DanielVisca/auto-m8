@@ -39,7 +39,7 @@ if (typeof window !== 'undefined') ((window as any).requestIdleCallback ?? ((f: 
 import { Paused, PauseBar, PauseButton } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'
-import { LayoutTree, topLeftOf, UiAsk, UiDraftBar, useLayout, useLayoutColors, useLayoutEscape, type Run } from './Layout'
+import { LayoutTree, topLeftOf, UiAsk, UiButton, UiDraftBar, useLayout, useLayoutColors, useLayoutEscape, type Run } from './Layout'
 
 type View =
   | { kind: 'chat'; id: string | null }
@@ -321,6 +321,7 @@ export function App() {
           <ProdAlert />
           <BrowserFlag onOpen={openById} />
           {showDecisions && <DecisionFlag onOpen={openById} />}
+          <UiButton />
           <PinButton />
           <Resources />
           {canSimple && <button className="s-mode no-drag" onClick={() => { setSimple(true); setView({ kind: 'home' }) }}>Simple</button>}
@@ -367,6 +368,7 @@ export function App() {
             <span className="grow" />
             <BrowserFlag onOpen={openById} />
             {showDecisions && <DecisionFlag onOpen={openById} />}
+            <UiButton />
             <PinButton />
             <Resources />
           </div>
@@ -398,6 +400,7 @@ export function App() {
             <span className="grow" />
             <BrowserFlag onOpen={openById} />
             {showDecisions && <DecisionFlag onOpen={openById} />}
+            <UiButton />
             <PinButton />
             <Resources />
           </div>

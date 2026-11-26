@@ -60,6 +60,12 @@ export function UiAsk() {
   </div>
 }
 
+// The top-bar way in to UiAsk, so changing the UI doesn't depend on knowing ⌘⇧U.
+export function UiButton() {
+  return <button className="icon no-drag" title="Change the UI  ⌘⇧U" aria-label="Change the UI"
+    onClick={() => window.dispatchEvent(new Event('perch-ui-ask'))}>🎨</button>
+}
+
 // While a change asked for in words is in flight or waiting: what it is, and Keep / Undo.
 export function UiDraftBar() {
   const l = useLayout()
