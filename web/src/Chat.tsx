@@ -1,3 +1,4 @@
+import type { BoardPickDetail } from './BoardPick'
 import { BoardButton } from './Boards'
 import { CustomizeItem } from './Layout'
 import { marked } from 'marked'
@@ -994,6 +995,17 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
   const [dragOver, setDragOver] = useState(false)
   const ta = useRef<HTMLTextAreaElement>(null)
 
+  // A part of a board dragged over beside this chat: its screenshot attaches, its reference goes in the box.
+  useEffect(() => {
+    const f = (e: Event) => {
+      const d = (e as CustomEvent<BoardPickDetail>).detail
+      if (!id || d.conversationId !== id) return
+      if (d.png) { const bin = atob(d.png), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); takeFiles([new File([b], `board-part-${Date.now()}.png`, { type: 'image/png' })]) }
+      setText(t => (t && !t.endsWith('\n') ? `${t}\n` : t) + d.note)
+      requestAnimationFrame(() => { const el = ta.current; if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length } })
+    }
+    addEventListener('perch-board-pick', f); return () => removeEventListener('perch-board-pick', f)
+  })
   // Drop or paste from the browser: links become chips with their live context; text a quote.
   const take = (dt: DataTransfer) => {
     const files = [...(dt.files ?? [])]

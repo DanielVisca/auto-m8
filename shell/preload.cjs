@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld('perch', {
   switchProfile: id => ipcRenderer.invoke('profile-switch', id),
   theme: t => ipcRenderer.invoke('theme', t),
   boardThumb: url => ipcRenderer.invoke('board-thumb', url),
+  captureRect: rect => ipcRenderer.invoke('capture-rect', rect),
 })

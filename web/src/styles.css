@@ -1657,3 +1657,8 @@ button.rail-cross:hover, button.rail-cross.on { background: color-mix(in srgb, #
 .recent-scope { display: inline-flex; gap: 6px; padding-right: 8px; white-space: nowrap; }
 .recent-scope .on { color: var(--fg); font-weight: 600; }
 .recent-scope .linklike { text-decoration: none; }
+
+/* Ask about a part of a board: a see-through layer over the board while you drag a box. */
+.board-pick { position: fixed; z-index: 50; cursor: crosshair; background: color-mix(in srgb, var(--bg, #000) 8%, transparent); }
+.board-pick-hint { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 4px 10px; border-radius: 6px; background: var(--accent); color: var(--accent-fg); font-size: 12px; pointer-events: none; white-space: nowrap; }
+.board-pick-box { position: fixed; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 3px; pointer-events: none; }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { post, toast, useLive, type Conversation } from './api'
 import { Canvas } from './Canvas'
+import { BoardPicker } from './BoardPick'
 import { Splitter, useColumnWidth } from './Splitter'
 import { ShareButton, ShareStatus } from './Share'
 
@@ -114,7 +115,11 @@ export function BoardButton({ conversationId }: { conversationId: string }) {
 export function WithBoard({ conversationId, chat, onOpen }: { conversationId: string | null; chat: React.ReactNode; onOpen: (id: string) => void }) {
   const { data } = useLive<{ board: { board_id: string; layout: 'side' | 'full' } | null }>(conversationId ? `/api/chat-board/${encodeURIComponent(conversationId)}` : null, ['canvas'])
   const [peek, setPeek] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const boardEl = useRef<HTMLDivElement>(null), over = useRef(false)
   const width = useColumnWidth('board', 560, 280, 1600)
+  // Holding ⌥ with the pointer over the board starts a pick too, so it's one gesture: ⌥ + drag.
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Alt' && over.current) setPicking(true) }; addEventListener('keydown', k); return () => removeEventListener('keydown', k) }, [])
   const cb = conversationId ? data?.board : null
   const recent = recentList(useRecent().data)
   const { data: b, error } = useLive<any>(cb ? `/api/boards/${encodeURIComponent(cb.board_id)}` : null, ['canvas'])
@@ -125,6 +130,7 @@ export function WithBoard({ conversationId, chat, onOpen }: { conversationId: st
     <div className="row-flex board-strip">
       <b className="grow ellipsis">▦ {b.name}</b>
       {b.ttl_seconds != null && <span className="muted small" title="Expires after this long without use">{duration(b.ttl_seconds)} idle</span>}
+      {conversationId && <button className={`small ${picking ? 'on' : ''}`} onClick={() => setPicking(!picking)} title="Drag a box over part of the board to ask the agent about it (or hold ⌥ and drag)">⬚ Ask about a part</button>}
       <KeepBoard b={b} />
       <ShareButton boardId={b.id} compact />
       {cb.layout === 'full'
@@ -133,7 +139,10 @@ export function WithBoard({ conversationId, chat, onOpen }: { conversationId: st
       <button className="icon" title="Hide the board" onClick={() => set({ board_id: null })}>×</button>
     </div>
   )
-  const board = <div className="with-board-board">{head}<div className="scroll"><Canvas folderId={b.id} ttlSeconds={b.ttl_seconds} conversations={recent} onOpen={onOpen} fit={cb.layout} /></div></div>
+  const board = <div className="with-board-board">{head}<div className="scroll board-pick-root" ref={boardEl} onMouseEnter={() => { over.current = true }} onMouseLeave={() => { over.current = false }}>
+    <Canvas folderId={b.id} ttlSeconds={b.ttl_seconds} conversations={recent} onOpen={onOpen} fit={cb.layout} />
+    {picking && conversationId && <BoardPicker root={() => boardEl.current} boardName={b.name} conversationId={conversationId} onDone={() => setPicking(false)} />}
+  </div></div>
   if (cb.layout === 'full') return <div className={`with-board full ${peek ? 'peek' : ''}`}>{board}{peek && <div className="with-board-chat">{chat}</div>}</div>
   return <div className="with-board side"><div className="with-board-chat">{chat}</div>
     <Splitter side="right" width={width.width} onWidth={width.setWidth} onReset={width.reset} />

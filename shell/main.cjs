@@ -771,6 +771,15 @@ function watchFocus() {
 ipcMain.handle('profile-switch', (_e, id) => switchProfile(id))
 ipcMain.handle('profile-active', () => activeId)
 ipcMain.handle('buttons', (_e, on) => win.setWindowButtonVisibility(!!on))
+// A part of the window the person dragged a box over (a board beside a chat), as a PNG for the chat box.
+ipcMain.handle('capture-rect', async (e, r) => {
+  try {
+    const wc = e.sender, z = wc.getZoomFactor() || 1
+    const rect = { x: Math.max(0, Math.round(r.x * z)), y: Math.max(0, Math.round(r.y * z)), width: Math.max(1, Math.round(r.width * z)), height: Math.max(1, Math.round(r.height * z)) }
+    const img = await wc.capturePage(rect)
+    return img.isEmpty() ? null : img.toPNG().toString('base64')
+  } catch (err) { shellLog(`capture-rect failed: ${err.message}`); return null }
+})
 ipcMain.handle('theme', (_e, t) => { nativeTheme.themeSource = ['light', 'dark'].includes(t) ? t : 'system' }) // window chrome and vibrancy follow
 
 // One perch at a time: opening it again (perch.app, `npm run app`) brings the window forward instead.

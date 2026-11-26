@@ -114,7 +114,7 @@ function TileBox({ t, colW, stacked, onChange, onOpen }: { t: Tile; colW: number
   const style = stacked ? { height: Math.max(240, box.h * ROW) } : { left: box.x * (colW + GAP), top: box.y * (ROW + GAP), width: box.w * colW + (box.w - 1) * GAP, height: box.h * ROW + (box.h - 1) * GAP, zIndex: front ? 5 : 1 }
   const title = t.config.title || (t.kind === 'web' ? hostOf(t.config.url) : t.kind === 'term' ? 'Terminal' : t.kind === 'browser' ? 'Agent browser' : t.kind === 'note' ? 'Note' : t.kind === 'chat' ? 'Chat' : t.kind === 'plan' ? 'Plan' : 'Tile')
   return (
-    <div className={`tile tile-${t.kind}${front ? ' dragging' : ''}`} style={style}>
+    <div className={`tile tile-${t.kind}${front ? ' dragging' : ''}`} style={style} data-tile-id={t.id} data-tile-title={title} data-tile-kind={t.kind}>
       <div className="tile-head" onPointerDown={e => drag(e, 'move')}>
         <span className="muted">{ICON[t.kind]}</span><span className="grow ellipsis" title={title}>{title}</span>
         {t.error && <span className="bad small" title={t.error}>error</span>}
