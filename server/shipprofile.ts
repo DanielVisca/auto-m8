@@ -395,6 +395,15 @@ export function candidates(deps: RawRepo['deployments'], env: string, mergedAt: 
   const seen = new Set<string>()
   return deps.filter(d => d.env === env && /SUCCESS|INACTIVE/i.test(d.state) && Date.parse(d.at) >= mergedAt - 60_000 && !seen.has(d.sha) && seen.add(d.sha)).slice(0, max)
 }
+// When a repo deploys both the main app (task "deploy") and single services ("deploy:<service>"),
+// only the main deploy says the change is live: PostHog's worker deploys carry a merge commit
+// minutes before the web servers do, so counting them started the verify agent early and it
+// found NOT DEPLOYED (PR 142446, 2026-11-25). Repos with only per-service tasks keep all of them.
+export function mainTasks<T extends { task: string }>(deps: T[]): T[] {
+  const main = deps.filter(d => !d.task || d.task === 'deploy')
+  return main.length && main.length < deps.length ? main : deps
+}
+
 export async function liveCheck(slug: string, mergeSha: string, mergedAt: number, envs: string[]): Promise<LiveCheck> {
   const deps = await recentDeployments(slug)
   const parts: string[] = []
@@ -402,7 +411,7 @@ export async function liveCheck(slug: string, mergeSha: string, mergedAt: number
   for (const env of envs) {
     let hit: RawRepo['deployments'][number] | null = null
     // Oldest of the newest first: the first deployment that carried it.
-    for (const d of candidates(deps, env, mergedAt).reverse()) if (await includes(slug, mergeSha, d.sha)) { hit = d; break }
+    for (const d of mainTasks(candidates(deps, env, mergedAt)).reverse()) if (await includes(slug, mergeSha, d.sha)) { hit = d; break }
     if (hit) parts.push(`${env}: ${hit.task || 'deploy'} of ${hit.sha.slice(0, 10)} at ${hit.at}`)
     else { all = false; parts.push(`${env}: no successful deployment containing it yet`) }
   }

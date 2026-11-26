@@ -129,3 +129,11 @@ test('deployment candidates: production env, successful, after the merge, newest
   ]
   assert.deepEqual(candidates(deps, 'prod-us', Date.parse(t(4))).map(d => d.sha), ['c2', 'c1'])
 })
+
+test('live check counts only the main deploy when a repo also deploys single services', async () => {
+  const { mainTasks } = await import('./shipprofile.ts')
+  const d = (task: string) => ({ task, sha: 'a', env: 'prod-us', at: '', state: 'success' })
+  assert.deepEqual(mainTasks([d('deploy:node'), d('deploy'), d('deploy:temporal-worker')]).map(x => x.task), ['deploy'])
+  assert.deepEqual(mainTasks([d('deploy:mcp'), d('deploy:node')]).map(x => x.task), ['deploy:mcp', 'deploy:node'])
+  assert.deepEqual(mainTasks([d(''), d('deploy')]).map(x => x.task), ['', 'deploy'])
+})
