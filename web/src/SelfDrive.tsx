@@ -106,23 +106,70 @@ function CustomNumber({ value, placeholder, decimals, onSave }: { value: number 
 }
 
 // Under the composer, right side, only while self drive is on: what happens next and when (the
-// driver's next look, follow-ups the agent scheduled). Small and quiet; hover for the full text.
-type Next = { at: number | null; kind: 'drive' | 'follow-up'; text: string }
-const when = (at: number | null) => {
+// driver's next look, follow-ups the agent scheduled). Small and quiet; click it for the full story:
+// when, who acts, where, and what it will do or say.
+type Next = { at: number | null; kind: 'drive' | 'follow-up'; text: string; detail?: string; when?: string }
+const clockOf = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+// A real countdown: m:ss under an hour (ticking), the clock time beyond that.
+function countdown(at: number | null, now: number) {
   if (at === null) return ''
-  const mins = Math.round((at - Date.now()) / 60_000)
-  const clock = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return mins <= 0 ? 'now' : mins < 60 ? `in ${mins} min` : `at ${clock}`
+  const s = Math.round((at - now) / 1000)
+  if (s <= 0) return 'now'
+  if (s >= 3600) return `at ${clockOf(at)}`
+  return `in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+const DRIVE_WHAT: Record<string, (d?: string) => string> = {
+  'looks again': d => `Self drive reads this chat again and decides for you: reply to the agent, keep waiting, or hand it back to you.${d ? ` It's waiting because: ${d}` : ''}`,
+  'decides what to say when this turn ends': () => 'When the agent finishes this turn, self drive reads it and replies for you, waits, or hands it back to you.',
+  'carries on after the budget pause': d => `Paused for the hourly budget${d ? ` (${d})` : ''}. Then self drive reads the chat and carries on.`,
+  'carries on after cooling off': d => `Cooling off after a busy hour${d ? ` (${d})` : ''}. Then self drive reads the chat and carries on.`,
+  'waiting for you': d => `Self drive handed this chat back to you: ${d ?? 'it needs something only you can do'}. It picks up again once you reply or the chat moves.`,
+  'tries its decision again': () => "Self drive's last decision failed. It reads the chat and decides again.",
+  'checks the chat picked up its last message': () => "Self drive sent the agent a message. If the chat hasn't moved by then, it reads it again and nudges it.",
 }
 export function DriveNext({ id }: { id: string }) {
   const { data } = useLive<{ on: boolean; next: Next[] }>(`/api/chat/${encodeURIComponent(id)}/self-drive`, ['chats'], undefined, 60_000)
+  const [now, setNow] = useState(Date.now())
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  const soon = (data?.next ?? []).some(n => n.at !== null && n.at - Date.now() < 3600_000)
+  useEffect(() => { if (!data?.on || !soon) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [data?.on, soon])
+  useEffect(() => {
+    if (!open) return
+    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    addEventListener('mousedown', away); addEventListener('keydown', esc)
+    return () => { removeEventListener('mousedown', away); removeEventListener('keydown', esc) }
+  }, [open])
   if (!data?.on || !data.next?.length) return null
   const [first, ...rest] = data.next
-  const line = (n: Next) => `${n.kind === 'drive' ? '🚗' : '⏰'} ${when(n.at) ? `${when(n.at)}: ` : ''}${n.kind === 'drive' ? 'self drive ' : ''}${n.text}`
+  const short = (n: Next) => `${n.kind === 'drive' ? '🚗' : '⏰'} ${countdown(n.at, now) || n.when || ''}${countdown(n.at, now) || n.when ? ': ' : ''}${n.kind === 'drive' ? `self drive ${n.text}` : `follow-up: ${n.text}`}`
   return (
-    <span className="drive-next" title={data.next.map(line).join('\n')}>
-      <span className="drive-next-text">{line(first)}</span>
-      {rest.length > 0 && <span className="muted"> +{rest.length}</span>}
+    <span className="drive-next" ref={ref}>
+      <button className="drive-next-btn" onClick={() => setOpen(o => !o)} aria-expanded={open} title="What happens next in this chat, and who does it">
+        <span className="drive-next-text">{short(first)}</span>
+        {rest.length > 0 && <span className="muted"> +{rest.length}</span>}
+      </button>
+      {open && (
+        <div className="drive-next-card" role="dialog">
+          <div className="drive-next-head">What happens next in this chat</div>
+          {data.next.map((n, i) => (
+            <div key={i} className="drive-next-item">
+              <div className="drive-next-when">
+                <b>{n.kind === 'drive' ? '🚗 Self drive' : '⏰ Follow-up the agent scheduled'}</b>
+                <span className="muted">{n.at !== null ? `${clockOf(n.at)} · ${countdown(n.at, now)}` : n.when ?? ''}</span>
+              </div>
+              {n.kind === 'drive'
+                ? <div>{(DRIVE_WHAT[n.text] ?? (d => d ?? n.text))(n.detail)}</div>
+                : <>
+                    <div>auto-m8 sends this message into this chat{n.when && n.at === null ? ` ${n.when}` : ''}, and the agent here works on it:</div>
+                    <div className="drive-next-msg">{n.detail ?? n.text}</div>
+                  </>}
+            </div>
+          ))}
+          <div className="muted small">Everything here happens in this chat: self drive writes in as 🚗 Self drive, follow-ups as 🤖 auto-m8: follow-up, and the agent here acts on them.</div>
+        </div>
+      )}
     </span>
   )
 }

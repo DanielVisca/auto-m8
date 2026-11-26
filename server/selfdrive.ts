@@ -75,24 +75,26 @@ export function driveState(id: string): DriveState {
 
 // What happens next in a driven chat, soonest first: the driver's own next look, and follow-ups the
 // chat's agent scheduled for itself. at is null for "when something happens" (a turn ends, a PR merges).
-export type NextUp = { at: number | null; kind: 'drive' | 'follow-up'; text: string }
+// text is the short line; detail is the full why (the driver's wait reason) or the follow-up message itself.
+export type NextUp = { at: number | null; kind: 'drive' | 'follow-up'; text: string; detail?: string; when?: string }
 export function nextUp(id: string, r = row(id), now = deps.now()): NextUp[] {
   const out: NextUp[] = []
   if (r?.enabled) {
     const last = get<{ at: number; action: string; reason: string | null }>(
       `select at, action, reason from self_drive_log where conversation_id = ? and action in (${DECISIONS.map(() => '?').join(',')}) order by at desc, id desc limit 1`, id, ...DECISIONS)
     const recheck = settingsOf(r).recheckMin * 60_000
-    if (deps.running(id)) out.push({ at: null, kind: 'drive', text: 'decides what to say when this turn ends' })
-    else if (r.backoff_until && r.backoff_until > now) out.push({ at: r.backoff_until, kind: 'drive', text: r.status === 'budget' ? 'carries on after the budget pause' : 'carries on after cooling off' })
-    else if (r.status === 'needs_you') out.push({ at: null, kind: 'drive', text: `waiting for you: ${r.note ?? 'it handed this back'}` })
-    else if (last?.action === 'wait') out.push({ at: last.at + recheck, kind: 'drive', text: `looks again${last.reason ? `: ${last.reason}` : ''}` })
+    if (deps.running(id)) out.push({ at: null, kind: 'drive', text: 'decides what to say when this turn ends', when: 'when the agent finishes its turn' })
+    else if (r.backoff_until && r.backoff_until > now) out.push({ at: r.backoff_until, kind: 'drive', text: r.status === 'budget' ? 'carries on after the budget pause' : 'carries on after cooling off', detail: r.note ?? undefined })
+    else if (r.status === 'needs_you') out.push({ at: null, kind: 'drive', text: 'waiting for you', detail: r.note ?? 'It handed this chat back.', when: 'until you reply or the chat moves' })
+    else if (last?.action === 'wait') out.push({ at: last.at + recheck, kind: 'drive', text: 'looks again', detail: last.reason ?? undefined })
     else if (last?.action === 'error') out.push({ at: last.at + RETRY_MS, kind: 'drive', text: 'tries its decision again' })
     else if (last && ['reply', 'resume'].includes(last.action)) out.push({ at: last.at + recheck, kind: 'drive', text: 'checks the chat picked up its last message' })
   }
   try {
     for (const p of all<{ due_at: number | null; text: string; until: string | null; pr_url: string | null }>(
       `select due_at, text, until, pr_url from promises where conversation_id = ? and status in ('open', 'waiting') order by coalesce(due_at, created_at) limit 3`, id))
-      out.push({ at: p.due_at, kind: 'follow-up', text: p.due_at ? p.text : `${p.text}${p.until ? ` (when ${p.until}${p.pr_url ? ` on ${p.pr_url}` : ''})` : ''}` })
+      out.push({ at: p.due_at, kind: 'follow-up', text: p.text.split('\n').find(l => l.trim())?.trim().slice(0, 120) ?? 'follow-up', detail: p.text,
+        when: p.due_at ? undefined : p.until ? `when ${p.until}${p.pr_url ? ` on ${p.pr_url}` : ''}` : undefined })
   } catch {} // promises.ts not loaded (tests)
   return out.sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
 }
