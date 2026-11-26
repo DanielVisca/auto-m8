@@ -26,7 +26,16 @@ export function SelfDriveButton({ id }: { id: string }) {
         <span className="drive-tip" role="tooltip">
           <span><b>Self drive</b>: let an agent take control of this chat.</span>
           <span>It answers questions, picks up stalls and keeps going until the work is done. Only what only you can do comes back to you.</span>
-          <span className="muted">{on ? `On · ${data ? statusText(data) : ''}${data?.note ? `: ${data.note}` : ''}` : 'Click to turn on.'} Right-click for settings.</span>
+          {on && data && <span className="muted">Now: {statusText(data)}{data.note ? `: ${data.note}` : ''}</span>}
+          {on && data && <span className="drive-tip-settings">
+            <span><b>Settings</b></span>
+            <span>{data.settings.mode === 'careful' ? 'Careful: also checks with you on big, lasting choices' : 'Full: only irreversible things and real loops come back to you'}</span>
+            <span>Up to {data.settings.perHour} messages an hour · looks again after {data.settings.recheckMin} min of waiting</span>
+            <span>{data.settings.budgetHour ? `Budget $${data.settings.budgetHour}/hour · $${data.spentHour.toFixed(2)} used in the last hour` : `No budget · $${data.spentHour.toFixed(2)} in the last hour`}</span>
+            <span>Driver model: {data.settings.model ? data.settings.model[0].toUpperCase() + data.settings.model.slice(1) : 'Default'}</span>
+            {data.settings.instructions.trim() && <span>Your instructions: “{data.settings.instructions.trim().slice(0, 160)}{data.settings.instructions.trim().length > 160 ? '…' : ''}”</span>}
+          </span>}
+          <span className="muted">{on ? 'Click to turn off.' : 'Click to turn on.'} Right-click to change settings.</span>
         </span>
       )}
       {menu && data && <DriveMenu at={menu} url={url} data={data} onChange={reload} onClose={() => setMenu(null)} />}
