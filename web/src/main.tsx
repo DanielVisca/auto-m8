@@ -4,6 +4,7 @@ import './styles.css'
 import { App } from './App'
 import { Explore } from './Explore'
 import { Canvas } from './Canvas'
+import { Look } from './Look'
 import { registerSw } from './Mobile'
 import { startTracing } from './tracing'
 
@@ -17,10 +18,14 @@ const repoFromHash = () => { const [k, id] = location.hash.slice(1).split('/'); 
 
 // ?thumb=<board id>: the board alone, for the preview the app captures offscreen. No activity pings.
 const thumb = new URLSearchParams(location.search).get('thumb')
+// ?look=<key>: message text an agent asked to see, drawn as the chat draws it (Look.tsx, server/look.ts).
+const look = new URLSearchParams(location.search).get('look')
 const thumbTheme = new URLSearchParams(location.search).get('theme')
-if (thumb && (thumbTheme === 'dark' || thumbTheme === 'light')) document.documentElement.dataset.theme = thumbTheme
+if ((thumb || look) && (thumbTheme === 'dark' || thumbTheme === 'light')) document.documentElement.dataset.theme = thumbTheme
 
-createRoot(document.getElementById('root')!).render(thumb
+createRoot(document.getElementById('root')!).render(look
+  ? <Look lookKey={look} />
+  : thumb
   ? <div className="board-thumb-root"><Canvas folderId={thumb} ttlSeconds={null} conversations={[]} onOpen={() => {}} /></div>
   : popout
   ? <div className="explore-popout"><Explore popout initialRepo={repoFromHash()} onOpenChat={id => window.open(`${location.origin.replace('localhost', '127.0.0.1')}/#chat/${encodeURIComponent(id)}`, '_blank')} /></div>

@@ -126,6 +126,7 @@ import { moveToSection, onPrSections, resortSections } from './prsections.ts'
 import { approvals, browserEvents, closeIdleWindows, freezeIdleWindows, lowerChromePriority, onBrowserChange, pruneRecordings, resumeBrowser, setOwnerBusy } from './browser.ts'
 import { browserRoutes, browserSocket } from './browserroutes.ts'
 import { researchRoutes } from './productresearchroutes.ts'
+import { lookRoutes } from './look.ts'
 import { canvases as exploreCanvases, codebases as exploreCodebases, competitor as exploreCompetitor, competitors as exploreCompetitors, saveThumb, thumbFile } from './explorehub.ts'
 import { ensureProductBoard } from './productresearchboard.ts'
 import { audiences as shareAudiences, forgetShare, shareBoard, shareStatus, sharesOf, targets as shareTargets } from './share.ts'
@@ -772,6 +773,7 @@ termEvents.add((owner, id, event, text) => inboxPush(owner, `term:${id}`, event,
 // The agent browser: a held click, a takeover, a crash wake the conversation that owns the window.
 browserRoutes(route, body)
 researchRoutes(route, body)
+lookRoutes(route, body, PORT) // agents see boards and tile blocks rendered offscreen by the desktop app
 route('GET', '/api/explore/canvases', () => ({ boards: exploreCanvases() }))
 route('GET', '/api/explore/codebases', () => swr('explore-codebases', 10 * 60_000, () => exploreCodebases(), { deadline: 4000 }))
 route('POST', '/api/boards/:id/opened', m => { openedBoard(decodeURIComponent(m[1])); return { ok: true } })

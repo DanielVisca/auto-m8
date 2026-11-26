@@ -424,6 +424,58 @@ ipcMain.handle('board-thumb', (_e, url) => {
   thumbBusy = job.catch(() => null)
   return job
 })
+// look: agents see what auto-m8 draws (a board, a tile or chart block, a draft message) without the
+// Agent Chrome. The server asks over loopback with a per-launch token it reads from look.json in its data
+// folder; the shell renders the page in the same hidden offscreen window as board previews and returns a
+// JPEG. Static only: no clicks, hover or scrolling. Gone when the desktop app isn't running.
+function startLookServer() {
+  const token = require('node:crypto').randomBytes(24).toString('hex')
+  const srv = require('node:http').createServer((req, res) => {
+    const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)) }
+    if (req.method !== 'POST' || req.url !== '/look' || req.headers['x-look-token'] !== token) return send(403, { error: 'forbidden' })
+    let raw = ''
+    req.on('data', c => { raw += c; if (raw.length > 100_000) req.destroy() })
+    req.on('end', () => {
+      let b = {}
+      try { b = JSON.parse(raw) } catch {}
+      const url = String(b.url ?? '')
+      if (!LOCAL.test(url)) return send(400, { error: 'only auto-m8 pages' })
+      const width = Math.min(2400, Math.max(320, Number(b.width) || 1280))
+      const height = Math.min(4000, Math.max(200, Number(b.height) || 800))
+      const wait = Math.min(20_000, Math.max(500, Number(b.wait_ms) || 4000))
+      const job = thumbBusy.then(async () => {
+        clearTimeout(thumbIdle)
+        const w = thumbWindow()
+        try {
+          w.setContentSize(width, height)
+          await Promise.race([w.loadURL(url), new Promise((_, rej) => setTimeout(() => rej(new Error('load timeout')), 15000))])
+          await sleep(wait) // tiles fetch their data and draw
+          // fit: grow to the content's height so a long message or board isn't cut off
+          if (b.fit !== false) {
+            const h = await w.webContents.executeJavaScript('Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)').catch(() => height)
+            if (h > height) { w.setContentSize(width, Math.min(4000, h)); await sleep(400) }
+          }
+          const img = await w.webContents.capturePage()
+          const size = img.getSize()
+          const out = size.width > 1600 ? img.resize({ width: 1600, quality: 'good' }) : img
+          return { image: out.toJPEG(82).toString('base64'), width: size.width, height: size.height, url: w.webContents.getURL() }
+        } catch (e) { shellLog(`look failed: ${e.message}`); return { error: e.message } }
+        finally {
+          if (thumbWin && !thumbWin.isDestroyed()) thumbWin.setContentSize(1280, 720)
+          thumbIdle = setTimeout(() => { if (thumbWin && !thumbWin.isDestroyed()) thumbWin.destroy(); thumbWin = null }, 60_000)
+        }
+      })
+      thumbBusy = job.catch(() => null)
+      job.then(r => send(r.error ? 500 : 200, r), e => send(500, { error: e.message }))
+    })
+  })
+  srv.listen(0, '127.0.0.1', () => {
+    const info = JSON.stringify({ port: srv.address().port, token, pid: process.pid })
+    const dirs = process.env.PERCH_DATA ? [DATA] : readProfiles().list.map(p => p.dataDir) // a test run never claims the real profiles
+    for (const d of dirs) { try { require('node:fs').writeFileSync(join(d, 'look.json'), info, { mode: 0o600 }) } catch {} }
+  })
+}
+app.whenReady().then(startLookServer)
 ipcMain.handle('pin', (_e, on) => { win.setAlwaysOnTop(!!on, 'floating'); return win.isAlwaysOnTop() })
 ipcMain.handle('is-pinned', () => win.isAlwaysOnTop())
 // Writing's Browse…: the native Finder sheet, markdown and text files only. Returns the path or null.

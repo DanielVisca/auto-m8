@@ -56,6 +56,16 @@ const tools = [
   { name: 'work_origin', description: 'Find work that originated with the user, regardless of who authored the PR. action=search query=words or origin:me; action=get subject=<PR URL or conversation id> shows its evidence chain; action=status shows coverage and reconciliation errors. A mention, review or shepherd run is not origin evidence.',
     inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['search', 'get', 'status'] }, query: { type: 'string' }, subject: { type: 'string' }, limit: { type: 'number' } }, required: ['action'] } },
   {
+    name: 'look',
+    description: "See what auto-m8 draws, without the browser: renders a board (board_id) or message text (text: markdown with ```tile / ```chart / ```vega-lite blocks, exactly as the chat draws it) in the desktop app's hidden offscreen window and returns a picture. Use it to check a tile, chart, diagram or board you made before or after showing it: it's fast, opens no window and takes no focus. Limits: a static picture only. No clicking, hovering, typing or scrolling, no tooltips or menus, no app pages other than boards and message text, and it needs the auto-m8 desktop app running. Boards scroll inside their own frame, so pass a larger height (up to 4000) to see tiles further down. Tiles get wait_ms (default 4000, max 20000) to fetch data and draw; look again with a longer wait if one still says loading. For anything interactive in auto-m8 (click through a flow, open a menu, test a button, a page that isn't a board) or for any web page, use the browser tool instead.",
+    inputSchema: { type: 'object', properties: {
+      board_id: { type: 'string', description: 'A board to render (canvas tool ids)' },
+      text: { type: 'string', description: 'Message text to render as the chat would, e.g. the ```tile block you are about to send' },
+      width: { type: 'number', description: 'Viewport width in px (default 1280)' }, height: { type: 'number', description: 'Initial height (default 800); the picture grows to fit the content up to 4000 unless fit=false' },
+      wait_ms: { type: 'number' }, fit: { type: 'boolean' }, theme: { type: 'string', enum: ['dark', 'light'] },
+    } },
+  },
+  {
     name: 'browser',
     description: BROWSER_TOOL_DESCRIPTION,
     inputSchema: { type: 'object', properties: {
@@ -414,6 +424,13 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
     const data = await r.json()
     if (!r.ok) throw new Error((data as any).error ?? 'Product research request failed.')
     return { content: [{ type: 'text', text: JSON.stringify(data) }] }
+  }
+  if (name === 'look') {
+    const port = process.env.PERCH_PORT ?? 4777
+    const r: any = await (await fetch(`http://127.0.0.1:${port}/api/look`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify(args), signal: AbortSignal.timeout(60_000) })).json()
+    const content: any[] = [{ type: 'text', text: r.text ?? r.error ?? 'no reply' }]
+    if (r.image) content.push({ type: 'image', data: r.image, mimeType: 'image/jpeg' })
+    return { content }
   }
   if (name === 'browser') {
     const port = process.env.PERCH_PORT ?? 4777
