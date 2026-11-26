@@ -106,7 +106,7 @@ export function Tab() {
 type Drop = { key: string; label: string; kind: 'link' | 'slack' | 'text' | 'file' | 'image'; context?: string; url?: string; file?: any; busy?: boolean; failed?: string }
 const SLACK = /^https:\/\/[\w-]+\.slack\.com\/archives\/\S+/
 function MiniDrop({ id, onOpen, children }: { id: string | null; onOpen: (id: string) => void; children: React.ReactNode }) {
-  const { data: side } = useLive<any>(id ? null : '/api/sidebar', ['conversations'])
+  const { data: side } = useLive<any>(id ? null : '/api/sidebar?scope=here', ['conversations'])  // drops go to a chat auto-m8 runs, never a terminal or Slack one
   const target: { id: string; title: string } | null = id ? { id, title: '' } : side?.now?.[0] ? { id: side.now[0].id, title: titleOf(side.now[0]) } : null
   const [items, setItems] = useState<Drop[]>([])
   const [note, setNote] = useState('')

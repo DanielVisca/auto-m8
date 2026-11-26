@@ -278,7 +278,7 @@ export function List({ selectedId, onOpen, terms, selectedTerm, onOpenTerm, sear
 
 // Past the few in Now: the rest of the chats you've been in, newest first. Expands inline in the
 // sidebar's own scroll and loads 15 more each time its end comes into view. Refreshes in place when the sidebar does.
-function MoreRecent({ open, onToggle, refresh, row }: { open: boolean; onToggle: () => void; refresh: unknown; row: (c: Conversation) => React.JSX.Element }) {
+function MoreRecent({ open, onToggle, refresh, row, scope, onScope }: { open: boolean; onToggle: () => void; refresh: unknown; row: (c: Conversation) => React.JSX.Element; scope: Scope; onScope: (s: Scope) => void }) {
   const [items, setItems] = useState<Conversation[]>([])
   const [total, setTotal] = useState<number | null>(null)
   const loading = useRef(false)
@@ -287,7 +287,7 @@ function MoreRecent({ open, onToggle, refresh, row }: { open: boolean; onToggle:
     if (loading.current) return
     loading.current = true
     try {
-      const r = await fetch(`/api/sidebar/recent?offset=${offset}&limit=${limit}`).then(r => r.json())
+      const r = await fetch(`/api/sidebar/recent?offset=${offset}&limit=${limit}&scope=${scope}`).then(r => r.json())
       if (!Array.isArray(r?.conversations)) return
       setTotal(r.total)
       setItems(cur => { const next = replace ? r.conversations : [...cur, ...r.conversations.filter((c: Conversation) => !cur.some(x => x.id === c.id))]; count.current = next.length; return next })
@@ -305,9 +305,19 @@ function MoreRecent({ open, onToggle, refresh, row }: { open: boolean; onToggle:
   }, [open, more, items.length]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
-      <button className="link small work-more" onClick={onToggle} title="Chats you've been in, past the ones above. Scroll to load more.">
-        {open ? 'Fewer recent' : `More recent${total ? ` (${total})` : ''}`}
-      </button>
+      <div className="row-flex recent-bar">
+        <button className="link small work-more grow" style={{ textAlign: 'left' }} onClick={onToggle} title="Chats you've been in, past the ones above. Scroll to load more.">
+          {open ? 'Fewer recent' : `More recent${total ? ` (${total})` : ''}`}
+        </button>
+        <span className="recent-scope small" role="group" aria-label="Which chats count as recent">
+          {(['everywhere', 'here'] as const).map(s => (
+            <button key={s} className={`linklike${scope === s ? ' on' : ' muted'}`} aria-pressed={scope === s} onClick={() => onScope(s)}
+              title={s === 'everywhere' ? 'Chats you typed into anywhere: here, a terminal, the Claude desktop app, @PostHog in Slack. Automation stays under Agent runs.' : 'Only chats you opened or wrote in auto-m8'}>
+              {s === 'everywhere' ? 'Everywhere' : 'Here'}
+            </button>
+          ))}
+        </span>
+      </div>
       {open && (
         <div className="recent-more">
           {items.map(row)}
@@ -330,11 +340,14 @@ function PromiseMark({ p }: { p: any }) {
 // Browsing, organised by state: the few you were just in, what needs you, what's working,
 // then everything else still open grouped by the work it's about (a PR, a stack, a repo).
 // Finished work archives itself; search finds it.
+type Scope = 'everywhere' | 'here'
 type Group = { key: string; kind: 'pr' | 'stack' | 'repo'; title: string; url?: string; items: Conversation[]; last: number }
 type Side = { pinned: Conversation[]; now: Conversation[]; needs: Conversation[]; working: Conversation[]; groups: Group[]; archived: number; agents?: (Conversation & { parent?: { id: string; title: string } })[] }
 function Organised({ selectedId, selected, onOpen, onMenu, onSelect, onSearch }: { selectedId: string | null; selected: Set<string>; onOpen: (c: Conversation) => void
   onMenu: (e: React.MouseEvent, c: Conversation) => void; onSelect: (e: React.MouseEvent, c: Conversation) => void; onSearch: (q: string) => void }) {
-  const { data } = useLive<Side>('/api/sidebar', ['conversations', 'chats'])
+  const [scope, setScopeState] = useState<Scope>(() => localStorage.getItem('perch.recentScope') === 'here' ? 'here' : 'everywhere')
+  const setScope = (s: Scope) => { setScopeState(s); try { localStorage.setItem('perch.recentScope', s) } catch {} }
+  const { data } = useLive<Side>(`/api/sidebar?scope=${scope}`, ['conversations', 'chats'])
   const [open, setOpen] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('perch.side.open') ?? '{}') } catch { return {} } })
   const toggle = (k: string) => { const v = { ...open, [k]: !open[k] }; setOpen(v); try { localStorage.setItem('perch.side.open', JSON.stringify(v)) } catch {} }
   if (!data) return <div className="muted pad small">…</div>
@@ -342,7 +355,7 @@ function Organised({ selectedId, selected, onOpen, onMenu, onSelect, onSearch }:
   return (
     <>
       {data.pinned?.length > 0 && <div className="section pinned-section"><div className="section-head pinned-head">📌 Pinned <span className="count">{data.pinned.length}</span></div>{data.pinned.map(row)}</div>}
-      <div className="section">{data.now.map(row)}<MoreRecent open={!!open.recent} onToggle={() => toggle('recent')} refresh={data} row={row} /></div>
+      <div className="section">{data.now.map(row)}<MoreRecent open={!!open.recent} onToggle={() => toggle('recent')} refresh={data} row={row} scope={scope} onScope={setScope} /></div>
       {data.needs.length > 0 && <div className="section"><button className="section-head needs toggle" onClick={() => toggle('waiting')}>Waiting chats <span className="count">{data.needs.length}</span> <span className="muted">{open.waiting ? '▾' : '▸'}</span></button>{open.waiting && data.needs.map(row)}</div>}
       {data.working.length > 0 && (
         <div className="section">

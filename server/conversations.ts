@@ -54,6 +54,23 @@ export function hookStatus(r: Row) {
 const HUMAN_ORIGINS = new Set(['slack', 'user_created', 'posthog_ai', 'signals_chat', 'support_reply', null, undefined, ''])
 export const isAutomated = (r: Row) => r.source === 'posthog-task' && !HUMAN_ORIGINS.has(r.origin)
 
+// When you last typed into a conversation outside auto-m8, or null when you never did: a session
+// you ran in a terminal or the Claude desktop app, or a cloud task you asked for yourself (an
+// @PostHog in Slack, PostHog AI, a task you made by hand). Scripted sessions (sdk-cli without
+// auto-m8), automation and tasks created from a report or template (they carry a parent origin)
+// don't count. Recent's "Everywhere" view counts this as being in the chat, like opening it here.
+const TYPED_ENTRYPOINTS = new Set(['cli', 'claude-desktop', 'claude-vscode', 'claude-jetbrains'])
+const ASKED_ORIGINS = new Set(['slack', 'posthog_ai', 'signals_chat', 'support_reply'])
+export function youAt(r: Row): number | null {
+  if (agentKind(r)) return null
+  if (r.source === 'posthog-task') {
+    const asked = ASKED_ORIGINS.has(r.origin) || (r.origin === 'user_created' && !r.origin_parent)
+    return asked ? r.started_at ?? null : null
+  }
+  if (r.source === 'posthog-code' || TYPED_ENTRYPOINTS.has(r.entrypoint)) return r.you_at ?? null
+  return null
+}
+
 // Who started a thread when it wasn't you: helper, shepherd, routine, autopilot, ... or null when it's
 // yours. Agent threads stay out of your lists (sidebar, Now, Needs you) and live under "Agent runs".
 const AGENT_LABELS = ['shepherd', 'search', 'helper', 'self-fix', 'autopilot', 'orchestrator', 'routine', 'autoresearch']
@@ -163,6 +180,7 @@ function claudeSubsOf(ids: string[] | undefined) {
 const baseSql = (models = true) => `
   select c.*, coalesce(u.title, c.title) title, u.state, u.state_auto, u.pinned, u.note, u.snooze_until, u.seen_at, u.state_at, a.reason ai_reason, a.judged_at ai_at,
     (select coalesce(ps.by, 'you') from perch_started ps where ps.id = c.id) started_by,
+    (select o.parent from work_origins o where o.subject = 'chat:' || c.id) origin_parent,
     (select title from decisions d where d.conversation_id = c.id and d.status = 'open' and coalesce(d.stakes, 'high') = 'high' order by d.created_at desc limit 1) decision,
     (select json_group_array(json_object('url', cp.url, 'created', cp.created, 'state', p.state, 'draft', p.draft,
         'review', p.review, 'checks', p.checks, 'number', p.number, 'repo', p.repo, 'title', p.title))
@@ -207,6 +225,8 @@ function hydrate(r: Row, live: Set<string>) {
   // Search sessions live in the search view; shepherd runs (PR watch, push-through) are automation, not your threads.
   r.agent_kind = agentKind(r)
   r.automated = !!r.agent_kind
+  r.you_at = youAt(r)
+  delete r.origin_parent; delete r.entrypoint
   return derive(r, live)
 }
 // The fields that change when a chat starts or stops running, without re-reading the row.
