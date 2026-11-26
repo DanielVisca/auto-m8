@@ -41,6 +41,7 @@ import { captureApproval } from './needssources.ts'
 import { credits, recordAttention } from './needsattention.ts'
 import { cleanListingLinks } from './db.ts'
 import { projectStatus, projects } from './projects.ts'
+import { addFinding, archOf, archText, removeSection, resolveFinding, sectionsOf, setSections } from './archmap.ts'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { execFile as execFileCb } from 'node:child_process'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
@@ -535,6 +536,10 @@ route('GET', '/api/boards/:id/share-status', async (m, _r, _s, q) => ({ shares: 
 route('POST', '/api/boards/:id/share', async (m, req) => { const b = await body(req); try { return await shareBoard(decodeURIComponent(m[1]), String(b.target ?? 'posthog'), { audience: b.audience || undefined, overwrite: !!b.overwrite }) } catch (e: any) { return { error: e.message } } })
 route('POST', '/api/boards/:id/share/forget', async (m, req) => { const b = await body(req); return { ok: forgetShare(decodeURIComponent(m[1]), String(b.target)) } })
 route('POST', '/api/boards-tile', async (_m, req) => putTile(await body(req)))
+// Live architecture: the parts a board's diagram draws, with their PRs, findings and timings (archmap.ts).
+route('GET', '/api/boards/:id/arch', async (m, _r, _s, q) => { const id = decodeURIComponent(m[1]), a = await archOf(id); return q.get('text') ? { text: archText(id, a) } : a })
+route('POST', '/api/boards/:id/sections', async (m, req) => { const b = await body(req); try { const id = decodeURIComponent(m[1]); if (b.remove) removeSection(id, String(b.remove)); const r = b.sections ? setSections(id, b.sections, !!b.replace) : sectionsOf(id); broadcast('canvasdata'); return { sections: r } } catch (e: any) { return { error: e.message } } })
+route('POST', '/api/boards/:id/findings', async (m, req) => { const b = await body(req); try { const id = b.resolve != null ? (resolveFinding(Number(b.resolve)), Number(b.resolve)) : addFinding(decodeURIComponent(m[1]), b as any); broadcast('canvasdata'); return { id } } catch (e: any) { return { error: e.message } } })
 route('POST', '/api/boards-tile/copy', async (_m, req) => { const b = await body(req); return copyTile(b.tile_id, b.board_id) })
 route('GET', '/api/chat-board/:id', m => ({ board: chatBoard(decodeURIComponent(m[1])) }))
 route('POST', '/api/chat-board/:id', async (m, req) => { const b = await body(req); showBoard(decodeURIComponent(m[1]), b.board_id ?? null, b.layout); return { ok: true } })

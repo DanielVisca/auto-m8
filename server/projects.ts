@@ -194,7 +194,7 @@ function prsOf(projectId: string, conversationId: string): ProjectPr[] {
   return [...out.values()]
 }
 
-function prInfo(u: string): ProjectPr {
+export function prInfo(u: string): ProjectPr {
   const p = safe(() => get<any>('select title, state, review, checks from prs where url = ?', u))
   const w = safe(() => get<any>('select stage, outcome, after_urls from shepherd_watch where url = ?', u))
   const after = (() => { try { return JSON.parse(w?.after_urls ?? '[]') as string[] } catch { return [] } })()

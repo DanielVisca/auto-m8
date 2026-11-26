@@ -118,6 +118,7 @@ It talks to the outside only through this API, already on the page (it is called
 - perch.state: whatever you saved last time (or null); await perch.save(obj) saves it.
 - perch.onRefresh(fn): fn runs every refresh interval; call your load function there and once at start.
 - Colours: use the CSS variables --bg --fg --muted --line --accent (light and dark are set for you). Body margin 0, font inherits.
+For architecture or flow diagrams, put data-section="<short-key>" on the element (box, rect, group) that draws each part of the system: auto-m8 then draws that part's PRs, findings and measured timings over it.
 Fill the whole tile (it can be any size; keep it legible at 320×200). Show a short loading state, and on errors show the message in the tile: never fail silently.`
 
 export function makeTile(input: { folder_id: string; ask: string; tile_id?: string; html?: string; error?: string }, beforeSave?: () => void): Promise<Tile> {

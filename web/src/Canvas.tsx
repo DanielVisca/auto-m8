@@ -9,6 +9,7 @@ import { TermView } from './Term'
 import { BrowserTile } from './BrowserView'
 import { PlanTile } from './ProjectPlan'
 import { BRIDGE } from './tileBridge'
+import { ARCH_OVERLAY } from './archOverlay'
 import { ShareButton } from './Share'
 
 type Tile = { id: string; folder_id: string; kind: 'web' | 'chat' | 'term' | 'note' | 'code' | 'browser' | 'plan'; x: number; y: number; w: number; h: number; config: any; state: any; error: string | null }
@@ -179,7 +180,8 @@ function CodeTile({ t, save, onChange }: { t: Tile; save: (p: Partial<Tile>) => 
   const doc = useMemo(() => {
     const css = getComputedStyle(document.documentElement)
     const theme = Object.fromEntries(['--bg', '--fg', '--muted', '--line', '--accent', '--ok', '--bad', '--warn'].map(k => [k, css.getPropertyValue(k).trim()]))
-    return BRIDGE(theme, t.state) + (t.config.html ?? '')
+    // The live-architecture overlay rides along; it draws only when the board has sections (archmap.ts).
+    return BRIDGE(theme, t.state) + (t.config.html ?? '') + `<script>${ARCH_OVERLAY}</script>`
   }, [t.config.html]) // eslint-disable-line
   useEffect(() => {
     const on = async (e: MessageEvent) => {
@@ -199,9 +201,20 @@ function CodeTile({ t, save, onChange }: { t: Tile; save: (p: Partial<Tile>) => 
     // Live: refresh when perch's data changes (a background refetch found something new, a PR moved),
     // on the tile's own timer as a fallback, and at once when the window comes back. Never while hidden.
     const refresh = Number(t.config.refresh) || 0
-    const kick = () => { if (document.visibilityState === 'visible') frame.current?.contentWindow?.postMessage({ perch: 'refresh' }, '*') }
+    // Sections of a live architecture board: PRs, findings and timings drawn over the tile.
+    let archJson = ''
+    const arch = () => fetch(`/api/boards/${encodeURIComponent(t.folder_id)}/arch`).then(r => r.json()).then(a => {
+      if (!a?.sections?.length && !archJson) return
+      const json = JSON.stringify(a)
+      if (json === archJson) return
+      archJson = json
+      frame.current?.contentWindow?.postMessage({ perch: 'arch', payload: a }, '*')
+    }).catch(() => {})
+    const kick = () => { if (document.visibilityState === 'visible') { frame.current?.contentWindow?.postMessage({ perch: 'refresh' }, '*'); archJson = ''; arch() } }
     let soon: any
     const debounced = () => { clearTimeout(soon); soon = setTimeout(kick, 600) }
+    arch()
+    frame.current?.addEventListener('load', () => { archJson = ''; arch() })
     const offs = (['canvasdata', 'prs', 'prflow', 'home'] as const).map(tp => onTopic(tp, debounced))
     const timer = refresh ? setInterval(kick, Math.max(5, refresh) * 1000) : null
     document.addEventListener('visibilitychange', kick)
