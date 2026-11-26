@@ -196,6 +196,16 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
     const rank = (n: Node) => { const nm = norm(label(n.id)); return nm === q || nm === q + 's' ? 0 : nm.startsWith(q) ? 1 : norm(n.id).includes(q) ? 2 : n.models.some(m => norm(m).includes(q)) ? 3 : 9 }
     return new Set(g.nodes.map(n => [n, rank(n)] as const).filter(([, r]) => r < 9).sort((a, b) => a[1] - b[1]).map(([n]) => n.id))
   }, [g, find])
+  // Nothing on this map matches: say where it is in the rest of the repo (modules first, then models), one click to focus.
+  const elsewhere = useMemo(() => {
+    if (!g || !found || found.size) return []
+    const q = find.trim().toLowerCase().replace(/[-_\s]/g, '')
+    const norm = (x: string) => x.toLowerCase().replace(/[-_\s]/g, '')
+    const on = new Set(g.nodes.flatMap(n => [n.id, ...n.models]))
+    const rank = (x: string) => { const l = norm(x.split('/').pop()!); return (x.includes('/') ? 0 : 3) + (l === q || l === q + 's' ? 0 : l.startsWith(q) ? 1 : 2) }
+    const w = q.replace(/(ies|s)$/, '')
+    return g.names.filter(x => !on.has(x) && norm(x.split('/').pop()!).includes(w)).sort((a, b) => rank(a) - rank(b) || a.length - b.length).slice(0, 8)
+  }, [g, found, find])
   const near = useMemo(() => new Set(g ? g.edges.filter(e => spot.has(e.from) || spot.has(e.to)).flatMap(e => [e.from, e.to]) : []), [g, spot])
   const clearSel = () => { setSelected([]); setActive(null) }
   useEffect(() => { const f = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea')) clearSel() }; addEventListener('keydown', f); return () => removeEventListener('keydown', f) }, [])
@@ -339,6 +349,10 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                   }} />
                 {found && <span className="tiny muted">{found.size} match{found.size === 1 ? '' : 'es'}</span>}
                 {found && !found.size && find.trim() && <button className="link tiny" onClick={() => { setFocus(find.trim()); setFocusInput(find.trim()); setFind(''); setFindOpen(false) }} title="Not on this map: focus the whole repo on it">search the repo →</button>}
+                {elsewhere.length > 0 && <div className="ex-find-more small">
+                  <div className="tiny muted">Not on this map. In the repo:</div>
+                  {elsewhere.map(x => <button key={x} className="link small" title={x.includes('/') ? `Focus ${x}` : `Model ${x}: focus the module it lives in`} onClick={() => { setFocus(x); setFocusInput(x); setFind(''); setFindOpen(false) }}>{x}</button>)}
+                </div>}
                 <button className="link small" title="Close (Esc)" onClick={() => { setFind(''); setFindOpen(false) }}>×</button>
               </> : <button className="ex-find-btn" title="Find a concept on this map" onClick={() => setFindOpen(true)}>⌕</button>}
             </div>
@@ -369,7 +383,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 // where the rest stay as faint context.
                 const lit = spot.size > 0 && (spot.has(e.from) || spot.has(e.to))
                 if (spot.size && !lit && !allLinks && !story) return null
-                if (found && !spot.size && !(found.has(e.from) && found.has(e.to))) return null
+                if (found?.size && !spot.size && !(found.has(e.from) && found.has(e.to))) return null
                 if (!spot.size && drawn && e.evidence.length && !drawn.has(e)) return null
                 const rb = radius(nodeById(e.to)?.files ?? 1) + 3
                 const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
@@ -403,7 +417,7 @@ export function Explore({ initialRepo, onOpenChat, popout }: { initialRepo?: str
                 const p = pos.get(n.id)!
                 const show = visible(n.id)
                 if (!show && T) return null
-                if (found && !found.has(n.id) && !spot.has(n.id) && !(spot.size && near.has(n.id))) return null
+                if (found?.size && !found.has(n.id) && !spot.has(n.id) && !(spot.size && near.has(n.id))) return null
                 const r = radius(n.files)
                 const cls = ['ex-node', n.role, n.hub ? 'hub' : '', active === n.id ? 'active' : '', selected.includes(n.id) ? 'sel' : '', removed.has(n.id) ? 'gone' : '', broken.has(n.id) ? 'broken' : '', affected.has(n.id) ? 'affected' : '', fresh(n.id) ? 'fresh' : '', T && !intro.has(n.id) ? 'undated' : '', spot.size && !spot.has(n.id) && !near.has(n.id) ? 'faded' : ''].join(' ')
                 return (
