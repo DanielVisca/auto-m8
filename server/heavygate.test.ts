@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 process.env.PERCH_HEAVY_DIR = mkdtempSync(join(tmpdir(), 'heavy-'))
 import { writeFileSync } from 'node:fs'
-const { classify, hook, ORPHAN_AFTER_MS } = await import('./heavygate.ts')
+const { classify, hook, ORPHAN_AFTER_MS, bgRunning } = await import('./heavygate.ts')
 const W = '/Users/x/Development/.perch-worktrees/posthog-pr1'
 
 test('classifies heavy commands in big repos only', () => {
@@ -48,4 +48,12 @@ test('a slot left by a refused command frees when the same agent asks again', ()
   // a different agent still can't take it while the retry runs
   assert.equal((hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'other', cwd: W, tool_input: { command: 'git push' } }, 999999) as any).hookSpecificOutput.permissionDecision, 'deny')
   hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'retry', tool_input: {} })
+})
+
+test('a background run holds its slot only while a process still carries its command', () => {
+  const cmd = 'flox activate -- bash -c "python -m pytest -q --reuse-db posthog/hogql/printer/test/test_printer.py"'
+  const running = `bash -c python -m pytest -q --reuse-db posthog/hogql/printer/test/test_printer.py\nclaude -p --output-format stream-json`
+  assert.equal(bgRunning(cmd, running), true)
+  assert.equal(bgRunning(cmd, 'claude -p --output-format stream-json\n/usr/sbin/cfprefsd agent'), false)
+  assert.equal(bgRunning('pytest -q', 'anything'), true) // nothing distinctive: keep until it ages out
 })

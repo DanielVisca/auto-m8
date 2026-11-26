@@ -40,6 +40,26 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch
 const MAX_AGE = { fg: 15 * 60_000, bg: 30 * 60_000 }
 type Slot = { kind: Kind; tool: string; pid: number; bg: boolean; at: number; cwd: string; cmd: string; file: string }
 
+// A background command keeps its slot after PostToolUse (that fires when it starts), so it used to
+// hold the slot for the whole 30 min even when the run took 2 (2026-11-26: two finished pytest runs
+// blocked every test slot on the machine). Free it once nothing running carries its command: the
+// `bash -c "…"` or runner process has the command's paths in its argv while the run is alive.
+export const BG_CHECK_AFTER_MS = 60_000
+const argPaths = (cmd: string) => (cmd.match(/[\w.@-]*\/[\w./@-]{6,}/g) ?? []).filter(t => !/^\/(Users|home|tmp|usr|opt)\/?$/.test(t))
+export function bgRunning(cmd: string, processes: string): boolean {
+  const tokens = argPaths(cmd)
+  if (!tokens.length) return true // nothing distinctive to look for: keep the slot until it ages out
+  return tokens.some(t => processes.includes(t))
+}
+let psCache: { at: number; out: string } | null = null
+function processList(now: number): string {
+  if (psCache && now - psCache.at < 2000) return psCache.out
+  let out = ''
+  try { out = execFileSync('ps', ['-axww', '-o', 'command='], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }) } catch {}
+  psCache = { at: now, out }
+  return out
+}
+
 function held(kind?: Kind, now = Date.now()): Slot[] {
   mkdirSync(DIR, { recursive: true })
   const out: Slot[] = []
@@ -48,6 +68,7 @@ function held(kind?: Kind, now = Date.now()): Slot[] {
     try {
       const h = JSON.parse(readFileSync(file, 'utf8'))
       if ((h.pid && !alive(h.pid)) || now - h.at > (h.bg ? MAX_AGE.bg : MAX_AGE.fg)) { rmSync(file, { force: true }); continue }
+      if (h.bg && now - h.at > BG_CHECK_AFTER_MS && !bgRunning(String(h.cmd ?? ''), processList(now))) { rmSync(file, { force: true }); continue }
       if (!kind || h.kind === kind) out.push({ ...h, file })
     } catch { rmSync(file, { force: true }) }
   }
