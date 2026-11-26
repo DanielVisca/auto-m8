@@ -92,6 +92,7 @@ const SIGN_HOOK = { PreToolUse: [
   { matcher: 'Bash', hooks: [{ type: 'command', command: HEAVY_GATE, timeout: 10 }] }, // heavy checks a few at a time (heavygate.ts)
 ],
   PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: HEAVY_GATE, timeout: 10 }] }],
+  PostToolUseFailure: [{ matcher: 'Bash', hooks: [{ type: 'command', command: HEAVY_GATE, timeout: 10 }] }], // a failed command frees its slot too
 }
 const agentLabel = (id: string) => {
   const by = get<{ by: string | null }>('select by from perch_started where id = ?', id)?.by
