@@ -114,7 +114,17 @@ function describeCall(a: any): string {
     default: return act
   }
 }
+// A window perch closed while the chat was quiet (or lost with Chrome) comes back on the chat's next call:
+// say so once, since in-page state (form input, scroll, an unsaved draft) didn't survive.
 async function browserToolRun(owner: string, a: any): Promise<ToolResult> {
+  const r = await browserToolAction(owner, a)
+  const s = B.sessions.get(owner), back = s?.restored
+  if (!back) return r
+  s!.restored = undefined
+  const ago = Math.max(1, Math.round((Date.now() - back.parkedAt) / 60_000))
+  return { ...r, text: `(Your window was ${back.why} ${ago} min ago; reopened it${back.url ? ` at ${back.url}` : ''}. Logins are kept; unsaved page state is not.)\n\n${r.text}` }
+}
+async function browserToolAction(owner: string, a: any): Promise<ToolResult> {
   if (!owner) return { text: 'Give conversation_id (yours).' }
   const action = String(a.action ?? '')
   const mode = String(a.mode ?? 'interactive')
@@ -122,7 +132,7 @@ async function browserToolRun(owner: string, a: any): Promise<ToolResult> {
   switch (action) {
     case 'status': return { text: JSON.stringify(B.browserStatus(), null, 1) }
     case 'open': {
-      const s = (await B.session(owner))!
+      const s = (await B.session(owner, true, { navigate: !a.url }))!
       if (resolution) s.resolution = resolution // sticky for this window until the next open says otherwise
       if (mode === 'visual') s.record = true // browserrec.ts records this window's DOM and video from here
       if (a.url) await B.navigate(s, String(a.url))

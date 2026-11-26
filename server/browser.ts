@@ -27,6 +27,12 @@ create table if not exists site_paths (id text primary key, host text not null, 
 create index if not exists site_paths_host on site_paths(host);
 `)
 try { db.exec('alter table browser_sessions add column paused integer default 0') } catch {} // added later: a takeover survives restarts
+// Parked windows (target_id null): closed while idle, by the window cap, or gone with Chrome (crash, hang
+// recovery, closed by hand). The row keeps the URL so the chat's next browser call reopens it there
+// instead of failing with "No browser window yet" (2026-11-25: ~200 idle closes, each one a broken next call).
+try { db.exec('alter table browser_sessions add column parked_at integer') } catch {}
+try { db.exec('alter table browser_sessions add column parked_why text') } catch {}
+export const PARKED_KEEP_MS = 7 * 24 * 60 * 60_000
 
 // ---------- types ----------
 export type Locator = { role: string; name: string; pattern?: string | null; testid?: string; id?: string; tag?: string; nth?: number; label?: string; placeholder?: string; inputName?: string; css?: string }
@@ -43,6 +49,7 @@ export type Session = {
   net: Net[]; log: LoggedStep[]; goal?: string; goalStartUrl?: string; runDir: string
   paused: boolean; frames: Set<(jpegB64: string, meta: any) => void>; casting: boolean
   crashed: boolean
+  restored?: { why: string; url: string; parkedAt: number } // reopened from a parked row; browsertool tells the agent once
   resolution?: Resolution // the agent's screenshot resolution for this window (sticky per open); the live view is always high
   record?: boolean // visual recording (browserrec.ts) for this window, set when the agent asks for mode=visual
   shown: boolean // the owner opened it in Chrome: pages get a small "back to perch" pill
@@ -193,7 +200,7 @@ export async function freezeIdleWindows(now = Date.now()) {
   // Windows no chat has picked up since a restart (closed by closeIdleWindows after an hour): freeze
   // them too, through a short-lived attach, or a dashboard left open keeps a core busy all that time.
   const waiting = new Set([...approvals.values()].filter(a => a.state === 'pending').map(a => a.owner))
-  for (const r of all<{ owner: string; target_id: string; updated_at: number | null; paused: number | null }>('select owner, target_id, updated_at, paused from browser_sessions')) {
+  for (const r of all<{ owner: string; target_id: string; updated_at: number | null; paused: number | null }>('select owner, target_id, updated_at, paused from browser_sessions where target_id is not null')) {
     if (sessions.has(r.owner) || r.paused || waiting.has(r.owner) || ownerBusy(r.owner) || frozenTargets.has(r.target_id) || now - (r.updated_at ?? 0) <= FREEZE_MS) continue
     try {
       const c = await ensureBrowser()
@@ -313,9 +320,9 @@ export async function resumeBrowser(keep: (owner: string) => boolean = () => tru
   const c = await ensureBrowser()
   const { targetInfos } = await c.send('Target.getTargets')
   let n = 0
-  for (const row of all<{ owner: string; target_id: string; run_dir: string; paused: number }>('select owner, target_id, run_dir, paused from browser_sessions')) {
+  for (const row of all<{ owner: string; target_id: string; run_dir: string; paused: number }>('select owner, target_id, run_dir, paused from browser_sessions where target_id is not null')) {
     if (sessions.has(row.owner)) continue
-    if (!targetInfos.some((t: any) => t.targetId === row.target_id && t.type === 'page')) { run('delete from browser_sessions where owner = ?', row.owner); continue }
+    if (!targetInfos.some((t: any) => t.targetId === row.target_id && t.type === 'page')) { park(row.owner, 'gone after auto-m8 restarted'); continue }
     if (!row.paused && !keep(row.owner)) continue
     try { (await attach(c, row.owner, row.target_id, row.run_dir && existsSync(row.run_dir) ? row.run_dir : undefined)).adopted = true; n++ } catch (e) { console.error('resumeBrowser', row.owner, e) }
   }
@@ -380,6 +387,7 @@ function wire(c: CDP) {
     if (p.frame.loaderId !== s.loaderId) { s.loaderId = p.frame.loaderId; s.ctx = null }
     if (p.frame.url !== s.url && !/^about:/.test(p.frame.url)) feed(s.owner, { kind: 'nav', text: shortUrl(p.frame.url), detail: { url: p.frame.url, from: s.url } })
     s.url = p.frame.url
+    if (/^(https?|file):/i.test(s.url)) run('update browser_sessions set url = ? where owner = ? and target_id = ?', s.url, s.owner, s.targetId)
     hook({ type: 'navigate', session: s })
     if (s.shown) setTimeout(() => { pill(s) }, 400)
   })
@@ -471,18 +479,42 @@ function dropSession(s: Session, why: string) {
   if (sessions.get(s.owner) !== s) return
   sessions.delete(s.owner)
   hook({ type: 'close', session: s })
-  if (why === 'window closed') run('delete from browser_sessions where owner = ?', s.owner)
+  if (why === 'window closed' || why === 'crashed') park(s.owner, why === 'crashed' ? 'lost when its page crashed' : 'closed outside auto-m8 (by hand, or Chrome quit)', s.url, s.title)
   changed()
 }
 
-export async function session(owner: string, create = true): Promise<Session | null> {
+// Keep the row (and where the page was) but forget the window; session() reopens it on the next call.
+export function park(owner: string, why: string, url?: string, title?: string) {
+  run(`update browser_sessions set target_id = null, paused = 0, parked_at = ?, parked_why = ?, url = coalesce(?, url), title = coalesce(?, title), updated_at = ? where owner = ?`,
+    Date.now(), why, url && /^(https?|file):/i.test(url) ? url : null, title || null, Date.now(), owner)
+}
+
+// create: open a new window if the chat has none. restore: reopen a parked window (idle-closed, evicted by the
+// cap, lost with Chrome) at its last URL; off for passive callers (the live view) so looking doesn't reopen.
+// navigate: false when the caller is about to navigate anyway (open url=…).
+export async function session(owner: string, create = true, opts: { restore?: boolean; navigate?: boolean } = {}): Promise<Session | null> {
   const c = await ensureBrowser()
   const have = sessions.get(owner)
   if (have && !have.crashed) { have.lastUsed = Date.now(); have.adopted = false; await wake(have); return have }
   const { targetInfos } = await c.send('Target.getTargets')
-  const row = get<{ target_id: string; run_dir: string }>('select target_id, run_dir from browser_sessions where owner = ?', owner)
-  if (row && targetInfos.some((t: any) => t.targetId === row.target_id && t.type === 'page')) return attach(c, owner, row.target_id, row.run_dir && existsSync(row.run_dir) ? row.run_dir : undefined)
-  if (!create) return null
+  const row = get<{ target_id: string | null; run_dir: string; url: string | null; parked_at: number | null; parked_why: string | null; updated_at: number | null }>('select target_id, run_dir, url, parked_at, parked_why, updated_at from browser_sessions where owner = ?', owner)
+  const runDir = row?.run_dir && existsSync(row.run_dir) ? row.run_dir : undefined
+  if (row?.target_id && targetInfos.some((t: any) => t.targetId === row.target_id && t.type === 'page')) return attach(c, owner, row.target_id, runDir)
+  // A row whose window is gone (parked, or stale after Chrome restarted under us): reopen it where it was.
+  const restore = !!row && opts.restore !== false
+  if (!create && !restore) return null
+  const s = await openWindow(c, owner, runDir)
+  if (restore && row) {
+    const url = row.url && /^(https?|file):/i.test(row.url) ? row.url : ''
+    s.restored = { why: row.parked_why ?? 'lost when the Agent Chrome restarted', url, parkedAt: row.parked_at ?? row.updated_at ?? Date.now() }
+    run('update browser_sessions set parked_at = null, parked_why = null where owner = ?', owner)
+    feed(owner, { kind: 'note', text: `Reopened the window${url ? ` at ${shortUrl(url)}` : ''} (${s.restored.why})` })
+    if (url && opts.navigate !== false) { try { await navigate(s, url) } catch (e: any) { s.restored.url = `${url} (reload failed: ${e.message})` } }
+  }
+  return s
+}
+
+async function openWindow(c: CDP, owner: string, runDir?: string): Promise<Session> {
   // At the cap: close the least recently used window whose chat isn't mid-turn, never one the owner is
   // looking at, has taken over, or that waits on an approval. Windows re-adopted at start and unused
   // since don't count toward the cap, and go first.
@@ -493,20 +525,26 @@ export async function session(owner: string, create = true): Promise<Session | n
     const victim = all_.filter(s => !s.shown && !s.paused && !waiting.has(s.owner) && !ownerBusy(s.owner))
       .sort((a, b) => Number(!!b.adopted) - Number(!!a.adopted) || a.lastUsed - b.lastUsed)[0]
     if (!victim) throw new Error(`${inUse.length} browser windows are in use by running chats (max ${settings.browser.maxSessions}). Close one with action=close.`)
-    await closeSession(victim.owner)
+    await closeSession(victim.owner, { park: 'closed to make room for another chat' })
   }
   // A new background window: doesn't steal focus from whatever you're doing.
   const { targetId } = await c.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: true })
   hideAgentChrome() // macOS unhides the app for every new window
-  return attach(c, owner, targetId)
+  return attach(c, owner, targetId, runDir)
 }
 
-export async function closeSession(owner: string) {
+// park: closed by perch, not the agent: keep where it was so the next call reopens it there.
+export async function closeSession(owner: string, opts: { park?: string } = {}) {
   const s = sessions.get(owner)
-  const row = get<{ target_id: string }>('select target_id from browser_sessions where owner = ?', owner)
+  const row = get<{ target_id: string | null }>('select target_id from browser_sessions where owner = ?', owner)
   const targetId = s?.targetId ?? row?.target_id
+  let url = s?.url, title = s?.title
+  if (opts.park && !s && targetId && cdp && !cdp.closed) { // untracked since a restart: ask Chrome where it is
+    try { const t = (await cdp.send('Target.getTargets')).targetInfos.find((t: any) => t.targetId === targetId); url = t?.url; title = t?.title } catch {}
+  }
   if (s) dropSession(s, 'closed')
-  run('delete from browser_sessions where owner = ?', owner)
+  if (opts.park && row) park(owner, opts.park, url, title)
+  else run('delete from browser_sessions where owner = ?', owner)
   if (targetId && cdp && !cdp.closed) { try { await cdp.send('Target.closeTarget', { targetId }) } catch {} }
   changed()
 }
@@ -523,13 +561,14 @@ export function idleWindows(now = Date.now(), idleMs = IDLE_CLOSE_MS): string[] 
   const keep = (owner: string) => waiting.has(owner) || ownerBusy(owner)
   const out: string[] = []
   for (const s of sessions.values()) if (!s.shown && !s.paused && !keep(s.owner) && now - s.lastUsed > idleMs) out.push(s.owner)
-  for (const r of all<{ owner: string; updated_at: number | null; paused: number | null }>('select owner, updated_at, paused from browser_sessions'))
+  for (const r of all<{ owner: string; updated_at: number | null; paused: number | null }>('select owner, updated_at, paused from browser_sessions where target_id is not null'))
     if (!sessions.has(r.owner) && !r.paused && !keep(r.owner) && now - (r.updated_at ?? 0) > idleMs) out.push(r.owner) // untracked since a restart
   return out
 }
 export async function closeIdleWindows(now = Date.now()) {
   const owners = idleWindows(now)
-  for (const owner of owners) await closeSession(owner)
+  for (const owner of owners) await closeSession(owner, { park: `closed after ${Math.round(IDLE_CLOSE_MS / 60_000)} min idle` })
+  run('delete from browser_sessions where target_id is null and coalesce(parked_at, updated_at, 0) < ?', now - PARKED_KEEP_MS)
   if (owners.length) console.log(`[browser] closed ${owners.length} idle agent window(s): ${owners.map(o => o.slice(0, 8)).join(', ')}`)
   return owners
 }
@@ -915,7 +954,7 @@ export async function fetchWithCookies(_owner: string, url: string, init: { meth
 
 // ---------- live view: screencast and takeover ----------
 export async function watchFrames(owner: string, f: (jpegB64: string, meta: any) => void) {
-  const s = await session(owner, false)
+  const s = await session(owner, false, { restore: false })
   if (!s) throw new Error('no browser window for this conversation')
   s.frames.add(f)
   const c = await ensureBrowser()
@@ -1022,8 +1061,8 @@ export async function showWindow(owner: string) {
 // mid-drag; the page reflows once, which the agent's next snapshot picks up.
 export const FIT_WIDTH = 1280
 export async function fitViewport(owner: string, ratio: number | null, panelWidth?: number) {
-  const s = await session(owner, false)
-  if (!s) throw new Error('no browser window for this conversation')
+  const s = await session(owner, false, { restore: false })
+  if (!s) return { ok: false, parked: true } // closed while idle: nothing to fit until the chat uses it again
   const c = await ensureBrowser()
   const { windowId } = await c.send('Browser.getWindowForTarget', { targetId: s.targetId })
   if (ratio == null) {

@@ -121,8 +121,8 @@ function extraCols(models: boolean) {
     extras = true
   }
   return `${driveCol()}
-    -- An Agent Chrome window open for this chat right now (browser.ts deletes the row when it closes).
-    exists (select 1 from browser_sessions b where b.owner = c.id) has_browser,
+    -- An Agent Chrome window open for this chat right now (a parked row, target_id null, is closed until the chat uses it).
+    exists (select 1 from browser_sessions b where b.owner = c.id and b.target_id is not null) has_browser,
     -- Which model families it has run on, with when each was last used ("claude:1794..,ollama:1794.."),
     -- plus the engine it is set to now (chat_prefs), so the row can stack them with the current one on top.
     ${models ? USED_MODELS : ''}

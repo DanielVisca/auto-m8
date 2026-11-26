@@ -358,6 +358,32 @@ test('re-attaches to the same window after perch restarts', { skip }, async () =
   assert.match((await B.snapshot(s2)).text, /^Order/)
 })
 
+test('a window closed while idle (or lost with Chrome) reopens at its last page on the next call', { skip }, async () => {
+  const BT = await import('./browsertool.ts')
+  const s = (await B.session('conv-park'))!
+  await B.navigate(s, base + '/form')
+  const old = s.targetId
+  // the idle sweep closes it
+  await B.closeSession('conv-park', { park: 'closed after 60 min idle' })
+  assert.equal(B.sessions.has('conv-park'), false)
+  // the live view doesn't reopen it just by looking
+  assert.equal(await B.session('conv-park', false, { restore: false }), null)
+  // the agent's next call does, on the same page, and is told once
+  const r = await BT.browserTool('conv-park', { action: 'snapshot' })
+  assert.match(r.text, /closed after 60 min idle .*reopened it at .*\/form/)
+  assert.match(r.text, /Pizza order/)
+  assert.notEqual(B.sessions.get('conv-park')!.targetId, old)
+  assert.doesNotMatch((await BT.browserTool('conv-park', { action: 'snapshot' })).text, /reopened/)
+  // closed by hand / Chrome crash: same
+  const c = await B.ensureBrowser()
+  await c.send('Target.closeTarget', { targetId: B.sessions.get('conv-park')!.targetId })
+  for (let i = 0; i < 50 && B.sessions.has('conv-park'); i++) await new Promise(r => setTimeout(r, 50))
+  assert.match((await BT.browserTool('conv-park', { action: 'read' })).text, /(closed outside auto-m8|lost when the Agent Chrome restarted) .*reopened it at .*\/form/)
+  // the agent closing it means gone
+  await BT.browserTool('conv-park', { action: 'close' })
+  assert.match((await BT.browserTool('conv-park', { action: 'snapshot' })).text, /No browser window yet/)
+})
+
 test('action log is written per run', { skip }, async () => {
   const s = (await B.session('conv-a'))!
   const lines = readFileSync(join(s.runDir, 'actions.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
