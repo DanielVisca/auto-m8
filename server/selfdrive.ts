@@ -44,7 +44,7 @@ export const BUDGET_PAUSE_MS = 15 * 60_000 // over the hourly budget: look again
 // budgetHour: API-equivalent $ per trailing hour across the chat's own turns and the driver's calls
 // (on a subscription it isn't billed, but it counts toward usage limits). null = no budget.
 export type DriveSettings = { mode: 'full' | 'careful'; perHour: number; recheckMin: number; model: string | null; instructions: string; budgetHour: number | null }
-export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null; settings: DriveSettings; spentHour: number }
+export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null; settings: DriveSettings; spentHour: number; next: NextUp[] }
 type Row = { id: string; enabled: number; replies: number; last_reply: string | null; last_reply_at: number | null; status: string | null; note: string | null; backoff_until: number | null
   mode: string | null; per_hour: number | null; recheck_min: number | null; model: string | null; instructions: string | null; budget_hour: number | null }
 const settingsOf = (r?: Row | null): DriveSettings => ({
@@ -70,7 +70,31 @@ const row = (id: string) => get<Row>('select * from self_drive where id = ?', id
 export const isSelfDriving = (id: string) => !!row(id)?.enabled
 export function driveState(id: string): DriveState {
   const r = row(id)
-  return { on: !!r?.enabled, replies: r?.replies ?? 0, status: r?.status ?? null, note: r?.note ?? null, lastReplyAt: r?.last_reply_at ?? null, settings: settingsOf(r), spentHour: spentSince(id, deps.now() - 3600_000) }
+  return { on: !!r?.enabled, replies: r?.replies ?? 0, status: r?.status ?? null, note: r?.note ?? null, lastReplyAt: r?.last_reply_at ?? null, settings: settingsOf(r), spentHour: spentSince(id, deps.now() - 3600_000), next: r?.enabled ? nextUp(id, r) : [] }
+}
+
+// What happens next in a driven chat, soonest first: the driver's own next look, and follow-ups the
+// chat's agent scheduled for itself. at is null for "when something happens" (a turn ends, a PR merges).
+export type NextUp = { at: number | null; kind: 'drive' | 'follow-up'; text: string }
+export function nextUp(id: string, r = row(id), now = deps.now()): NextUp[] {
+  const out: NextUp[] = []
+  if (r?.enabled) {
+    const last = get<{ at: number; action: string; reason: string | null }>(
+      `select at, action, reason from self_drive_log where conversation_id = ? and action in (${DECISIONS.map(() => '?').join(',')}) order by at desc, id desc limit 1`, id, ...DECISIONS)
+    const recheck = settingsOf(r).recheckMin * 60_000
+    if (deps.running(id)) out.push({ at: null, kind: 'drive', text: 'decides what to say when this turn ends' })
+    else if (r.backoff_until && r.backoff_until > now) out.push({ at: r.backoff_until, kind: 'drive', text: r.status === 'budget' ? 'carries on after the budget pause' : 'carries on after cooling off' })
+    else if (r.status === 'needs_you') out.push({ at: null, kind: 'drive', text: `waiting for you: ${r.note ?? 'it handed this back'}` })
+    else if (last?.action === 'wait') out.push({ at: last.at + recheck, kind: 'drive', text: `looks again${last.reason ? `: ${last.reason}` : ''}` })
+    else if (last?.action === 'error') out.push({ at: last.at + RETRY_MS, kind: 'drive', text: 'tries its decision again' })
+    else if (last && ['reply', 'resume'].includes(last.action)) out.push({ at: last.at + recheck, kind: 'drive', text: 'checks the chat picked up its last message' })
+  }
+  try {
+    for (const p of all<{ due_at: number | null; text: string; until: string | null; pr_url: string | null }>(
+      `select due_at, text, until, pr_url from promises where conversation_id = ? and status in ('open', 'waiting') order by coalesce(due_at, created_at) limit 3`, id))
+      out.push({ at: p.due_at, kind: 'follow-up', text: p.due_at ? p.text : `${p.text}${p.until ? ` (when ${p.until}${p.pr_url ? ` on ${p.pr_url}` : ''})` : ''}` })
+  } catch {} // promises.ts not loaded (tests)
+  return out.sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
 }
 export const driveLog = (id: string, limit = 30) =>
   all<{ at: number; action: string; message: string | null; reason: string | null }>('select at, action, message, reason from self_drive_log where conversation_id = ? order by at desc limit ?', id, limit)

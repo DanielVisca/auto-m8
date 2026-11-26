@@ -2,7 +2,7 @@ import { BoardButton } from './Boards'
 import { marked } from 'marked'
 import { createContext, memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
-import { SelfDriveButton } from './SelfDrive'
+import { DriveNext, SelfDriveButton } from './SelfDrive'
 import { ago, api, cachedThread, loadThread, baseName, post, sendChat, toast, shortPath, useOutbox, titleOf, useLive, shell, type Conversation, type Item, type Term } from './api'
 import { adopt, apply, dropReplayedPrompt, emptyLive, toolLabel, toolSummary, type Live } from './stream'
 import { StateMenu } from './List'
@@ -1223,6 +1223,7 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
           </label>
         )}
         {id && <button className="link small" onClick={findRelated}>find related</button>}
+        {id && <DriveNext id={id} />}
       </div>
       <CwdList />
     </div>

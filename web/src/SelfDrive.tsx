@@ -104,3 +104,25 @@ function CustomNumber({ value, placeholder, decimals, onSave }: { value: number 
   return <input className={`drive-num${value !== null ? ' on' : ''}`} type="number" min={decimals ? 0.1 : 1} step={decimals ? 0.5 : 1} value={text} placeholder={placeholder}
     onChange={e => setText(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') { commit(); (e.target as HTMLInputElement).blur() } }} />
 }
+
+// Under the composer, right side, only while self drive is on: what happens next and when (the
+// driver's next look, follow-ups the agent scheduled). Small and quiet; hover for the full text.
+type Next = { at: number | null; kind: 'drive' | 'follow-up'; text: string }
+const when = (at: number | null) => {
+  if (at === null) return ''
+  const mins = Math.round((at - Date.now()) / 60_000)
+  const clock = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return mins <= 0 ? 'now' : mins < 60 ? `in ${mins} min` : `at ${clock}`
+}
+export function DriveNext({ id }: { id: string }) {
+  const { data } = useLive<{ on: boolean; next: Next[] }>(`/api/chat/${encodeURIComponent(id)}/self-drive`, ['chats'], undefined, 60_000)
+  if (!data?.on || !data.next?.length) return null
+  const [first, ...rest] = data.next
+  const line = (n: Next) => `${n.kind === 'drive' ? '🚗' : '⏰'} ${when(n.at) ? `${when(n.at)}: ` : ''}${n.kind === 'drive' ? 'self drive ' : ''}${n.text}`
+  return (
+    <span className="drive-next" title={data.next.map(line).join('\n')}>
+      <span className="drive-next-text">{line(first)}</span>
+      {rest.length > 0 && <span className="muted"> +{rest.length}</span>}
+    </span>
+  )
+}

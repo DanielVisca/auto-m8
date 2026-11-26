@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BACKOFF_MS, setDriveSettings, deps, drive, driveLog, driveState, MAX_BACKOFFS, MAX_RESUMES, parseVerdict, PER_HOUR, prompt, QUIET_MS, setSelfDrive, stallIn, sweep, WAIT_RECHECK_MS, type Verdict } from './selfdrive.ts'
+import { BACKOFF_MS, nextUp, setDriveSettings, deps, drive, driveLog, driveState, MAX_BACKOFFS, MAX_RESUMES, parseVerdict, PER_HOUR, prompt, QUIET_MS, setSelfDrive, stallIn, sweep, WAIT_RECHECK_MS, type Verdict } from './selfdrive.ts'
 import { get, run } from './db.ts'
 import type { Item } from './transcript.ts'
 
@@ -199,4 +199,20 @@ test('an hourly budget pauses (never hands back) and counts the driver too', asy
   assert.equal(driveState('c12').status, 'budget')
   assert.equal(driveState('c12').on, true)
   assert.equal(setDriveSettings('c12', { budgetHour: null }).settings.budgetHour, null)
+})
+
+test('nextUp: the driver\'s next look after a wait, cooling off, and handing back', async () => {
+  fresh('c13')
+  verdict = { action: 'wait', reason: 'CI running on 142434' }
+  await drive('c13')
+  const n = nextUp('c13')
+  assert.equal(n[0].kind, 'drive')
+  assert.equal(n[0].at, clock + 20 * 60_000)
+  assert.match(n[0].text, /looks again: CI running on 142434/)
+  run('update self_drive set backoff_until = ?, status = ? where id = ?', clock + 1000, 'budget', 'c13')
+  assert.match(nextUp('c13')[0].text, /budget pause/)
+  run('update self_drive set backoff_until = null, status = ?, note = ? where id = ?', 'needs_you', 'approve the drop', 'c13')
+  assert.match(nextUp('c13')[0].text, /waiting for you: approve the drop/)
+  setSelfDrive('c13', false)
+  assert.deepEqual(driveState('c13').next, [])
 })
