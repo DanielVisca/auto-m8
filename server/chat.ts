@@ -85,10 +85,14 @@ const MCP_SCRIPT = join(import.meta.dirname, 'mcp.ts')
 // Every GitHub comment an agent posts from your account carries a tiny signature naming the
 // automation (see signhook.ts). A PreToolUse hook blocks unsigned ones and hands back the line to add.
 // The second keeps agents' file tools off docs in "no agent text" mode (docguard.ts); signhook runs the same check on Bash.
+const HEAVY_GATE = `'${process.execPath}' '${join(import.meta.dirname, 'heavygate.ts')}'`
 const SIGN_HOOK = { PreToolUse: [
   { matcher: 'Bash|mcp__.*github.*|mcp__.*GitHub.*', hooks: [{ type: 'command', command: `'${process.execPath}' '${join(import.meta.dirname, 'signhook.ts')}'`, timeout: 10 }] },
   { matcher: 'Write|Edit|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: `'${process.execPath}' '${join(import.meta.dirname, 'docguard.ts')}'`, timeout: 10 }] },
-] }
+  { matcher: 'Bash', hooks: [{ type: 'command', command: HEAVY_GATE, timeout: 10 }] }, // heavy checks a few at a time (heavygate.ts)
+],
+  PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: HEAVY_GATE, timeout: 10 }] }],
+}
 const agentLabel = (id: string) => {
   const by = get<{ by: string | null }>('select by from perch_started where id = ?', id)?.by
   return !by || by === 'you' || by === 'agent' ? 'auto-m8 chat' : `auto-m8 ${by}`
