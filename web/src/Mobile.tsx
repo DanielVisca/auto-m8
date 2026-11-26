@@ -153,7 +153,7 @@ export function CloudBar({ id, desktop = false, running = false }: { id: string;
   if (!data) return null
   if (!lease) return <button className={btn} disabled={busy || (desktop && running)}
     title={running ? 'It is mid-turn: let the turn finish, then continue it in the cloud' : 'Keep this going as a PostHog cloud task while the Mac is away; messages you send here go to it, and it comes back to this conversation after'}
-    onClick={() => act(`/api/cloud/${encodeURIComponent(id)}`)}>{busy ? '…' : '☁ Continue in cloud'}</button>
+    onClick={() => act(`/api/cloud/${encodeURIComponent(id)}`)}>{busy ? '…' : desktop ? <>☁<span className="lbl"> Continue in cloud</span></> : '☁ Continue in cloud'}</button>
   return (
     <span className={`cloud-bar ${desktop ? 'cloud-ctl' : ''}`}>
       <a href={lease.url ?? '#'} target="_blank" rel="noreferrer" title="Open the cloud task in PostHog">☁ {lease.status === 'returning' ? 'Coming back…' : lease.finished_at ? 'Cloud finished' : 'In the cloud'}</a>

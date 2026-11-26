@@ -799,8 +799,8 @@ export function Chat({ id, onOpen, onTerminal, settings, compact, panel, details
           <Family id={id} onOpen={onOpen} />
           {conv && <StateMenu c={conv} />}
           <SelfDriveButton id={id} />
-          <button className="icon" title="Side question that isn't saved (/btw)  ⌘⇧B" onClick={() => setBtwOpen(!btwOpen)}>btw</button>
-          <button className="icon" title="Open in Claude Code (terminal)" onClick={() => onTerminal(id)}>⌘_</button>
+          <button className="icon btw-btn" title="Side question that isn't saved (/btw)  ⌘⇧B" onClick={() => setBtwOpen(!btwOpen)}>btw</button>
+          <button className="icon term-btn" title="Open in Claude Code (terminal)" onClick={() => onTerminal(id)}>⌘_</button>
           {conv?.source === 'claude' && <CloudBar id={id} desktop running={running} />}
           <BoardButton conversationId={id} />
           <OpenIn id={id} />

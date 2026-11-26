@@ -130,6 +130,14 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 /* Side padding follows the chat pane's own width (cqi), not the window's (vw): beside a canvas the pane is narrow while the window is wide. */
 .chat { container-type: inline-size; min-width: 0; }
 .view-head { display: flex; align-items: center; gap: 6px; padding: 4px 12px 6px; border-bottom: 1px solid var(--line); min-height: 34px; }
+/* A chat squeezed by a board beside it: the title gives way first, then the controls with another
+   route (⌘_ is in ↗, btw has ⌘⇧B), so nothing spills past the chat into the next pane. */
+.chat > .view-head { min-width: 0; }
+.chat > .view-head > * { flex-shrink: 0; }
+.chat > .view-head > .title, .chat > .view-head > .title-edit { flex-shrink: 1; min-width: 0; }
+@container (max-width: 760px) { .chat > .view-head .cloud-ctl .lbl, .chat > .view-head .drive-status, .chat > .view-head > .term-btn { display: none; } }
+@container (max-width: 600px) { .chat > .view-head > .btw-btn, .chat > .view-head > .state-menu { display: none; } }
+@container (max-width: 460px) { .chat > .view-head > .drive-wrap, .chat > .view-head > .family-btn { display: none; } }
 .chat .scroll { overflow-x: hidden; padding: 14px clamp(10px, 4cqi, 48px) 8px; }
 .msg { max-width: 860px; margin: 0 auto 12px; }
 .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
