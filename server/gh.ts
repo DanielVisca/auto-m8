@@ -9,6 +9,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { recordError, resolveErrors } from './errors.ts'
+import { db, all, run } from './db.ts'
 
 const exec = promisify(execFile)
 
@@ -49,10 +50,35 @@ export function noteGhRateLimited(r: GhResource, until: number) {
 }
 export const clearGhRateLimits = () => { for (const k of Object.keys(limitedUntil)) delete limitedUntil[k] }
 
-// Calls per perch module per hour (last 24h): which part of perch spends GitHub's budget.
+// Calls per perch module per hour: which part of perch spends GitHub's budget. Kept in memory for a
+// week and written to gh_usage every minute, so a restart no longer wipes the history and the peaks
+// stay visible (before, /api/github/budget only ever showed the hours since the last restart).
 type Tally = { calls: number; failed: number; limited: number; skipped: number; byResource: Record<string, number> }
 const usage = new Map<number, Map<string, Tally>>()
 const HOUR = 3600_000
+const KEEP_HOURS = 7 * 24
+const dirty = new Set<string>() // `${hour}|${caller}` written since the last flush
+try {
+  db.exec('create table if not exists gh_usage (hour integer not null, caller text not null, tally text not null, primary key (hour, caller))')
+  for (const r of all<{ hour: number; caller: string; tally: string }>('select hour, caller, tally from gh_usage where hour >= ?', Date.now() - KEEP_HOURS * HOUR)) {
+    if (!usage.has(r.hour)) usage.set(r.hour, new Map())
+    try { usage.get(r.hour)!.set(r.caller, JSON.parse(r.tally)) } catch {}
+  }
+} catch (e) { console.error('[gh] usage history unavailable', e) }
+export function flushGhUsage() {
+  if (!dirty.size) return
+  const keys = [...dirty]; dirty.clear()
+  try {
+    for (const k of keys) {
+      const [h, caller] = [Number(k.slice(0, k.indexOf('|'))), k.slice(k.indexOf('|') + 1)]
+      const t = usage.get(h)?.get(caller)
+      if (t) run('insert into gh_usage (hour, caller, tally) values (?, ?, ?) on conflict(hour, caller) do update set tally = excluded.tally', h, caller, JSON.stringify(t))
+    }
+    run('delete from gh_usage where hour < ?', Date.now() - 30 * 24 * HOUR)
+  } catch (e) { for (const k of keys) dirty.add(k); console.error('[gh] usage flush failed', e) }
+}
+setInterval(flushGhUsage, 60_000).unref?.()
+process.once('beforeExit', flushGhUsage)
 function callerOf(stack = new Error().stack ?? ''): string {
   for (const line of stack.split('\n').slice(1)) {
     const f = line.match(/\/server\/([\w.-]+)\.ts:/)?.[1]
@@ -62,12 +88,13 @@ function callerOf(stack = new Error().stack ?? ''): string {
 }
 function tally(caller: string, r: GhResource, kind: 'ok' | 'failed' | 'limited' | 'skipped') {
   const h = Math.floor(Date.now() / HOUR) * HOUR
-  if (!usage.has(h)) { usage.set(h, new Map()); for (const k of usage.keys()) if (k < h - 24 * HOUR) usage.delete(k) }
+  if (!usage.has(h)) { usage.set(h, new Map()); for (const k of usage.keys()) if (k < h - KEEP_HOURS * HOUR) usage.delete(k) }
   const m = usage.get(h)!
   const t = m.get(caller) ?? { calls: 0, failed: 0, limited: 0, skipped: 0, byResource: {} }
   if (kind === 'skipped') t.skipped++
   else { t.calls++; t.byResource[r] = (t.byResource[r] ?? 0) + 1; if (kind === 'failed') t.failed++; if (kind === 'limited') { t.failed++; t.limited++ } }
   m.set(caller, t)
+  dirty.add(`${h}|${caller}`)
 }
 // What GitHub said about the GraphQL budget at the last probe.
 export type GhBudget = { limit: number; used: number; remaining: number; resetAt: number; at: number }
@@ -80,8 +107,9 @@ export function ghPressure(now = Date.now()): boolean {
   return !!b && b.limit > 0 && now - b.at < 10 * 60_000 && b.resetAt > now && b.used / b.limit >= 0.7
 }
 export const setGhBudgetForTest = (b: GhBudget | null) => { lastBudget = b }
-export function ghUsage() {
-  const hours = [...usage].sort(([a], [b]) => b - a).map(([hour, m]) => ({
+export function ghUsage(maxHours = 24) {
+  const since = Math.floor(Date.now() / HOUR) * HOUR - (maxHours - 1) * HOUR
+  const hours = [...usage].filter(([h]) => h >= since).sort(([a], [b]) => b - a).map(([hour, m]) => ({
     hour, total: [...m.values()].reduce((s, t) => s + t.calls, 0),
     callers: [...m].map(([caller, t]) => ({ caller, ...t })).sort((a, b) => b.calls - a.calls),
   }))
@@ -305,12 +333,50 @@ async function allContexts(rollup: CheckRollup, pullRequestNumber?: number): Pro
   return nodes
 }
 
+// ---------- one view of each PR: what one part of auto-m8 learns, the others hear ----------
+// Eight modules read the same PRs on their own timers (shepherd 45s, orchestra/ghpr, indexer 60s,
+// PR flow 2m, sidebar 2m, preview 5m, ...), each with its own cache. So the shepherd could see CI go
+// green while the sidebar showed red for two more minutes. Now every read reports what it saw here;
+// when a PR moved (newer updatedAt, new head commit, state or CI rollup changed) the other modules
+// drop their cached copy and the UI refreshes, instead of each waiting for its own timer.
+type PrSeen = { updatedAt?: number; head?: string; state?: string; draft?: boolean; rollup?: string }
+const prSeen = new Map<string, PrSeen>()
+export const prKey = (url: string) => {
+  const m = String(url).match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/i)
+  return m ? `${m[1]}/${m[2]}#${m[3]}`.toLowerCase() : ''
+}
+export const onPrChanged = new Set<(key: string, source: string) => void>()
+export const resetPrSeen = () => prSeen.clear()
+// A GraphQL PullRequest node (any field set: only the fields both reads have are compared).
+// Returns true when this read shows the PR moved since the last one any module reported.
+export function notePr(url: string, p: any, source = callerOf()): boolean {
+  const key = prKey(url || p?.url)
+  if (!key || !p) return false
+  const now: PrSeen = {
+    updatedAt: p.updatedAt ? Date.parse(p.updatedAt) : undefined,
+    head: p.headRefOid ?? p.commits?.nodes?.[0]?.commit?.oid ?? undefined,
+    state: p.state ?? undefined,
+    draft: typeof p.isDraft === 'boolean' ? p.isDraft : undefined,
+    rollup: p.commits?.nodes?.[0]?.commit ? String(p.commits.nodes[0].commit.statusCheckRollup?.state ?? 'NONE') : undefined,
+  }
+  const was = prSeen.get(key)
+  // An older read finishing after a newer one (each module's query takes seconds) is not a change.
+  if (was?.updatedAt && now.updatedAt && now.updatedAt < was.updatedAt) return false
+  const moved = !!was && (
+    (now.updatedAt !== undefined && was.updatedAt !== undefined && now.updatedAt > was.updatedAt) ||
+    (['head', 'state', 'draft', 'rollup'] as const).some(f => now[f] !== undefined && was[f] !== undefined && now[f] !== was[f]))
+  prSeen.set(key, { ...was, ...Object.fromEntries(Object.entries(now).filter(([, v]) => v !== undefined)) })
+  if (moved) for (const fn of onPrChanged) try { fn(key, source) } catch (e) { console.error('[gh] onPrChanged', e) }
+  return moved
+}
+
 // A batch of `repository { pullRequest }` aliases (p0, p1, ...) for PR urls, split into chunks.
 // A chunk that fails as a whole is retried once as two halves, so one slow or oversized PR
 // can't keep the others from updating. A chunk that still fails is reported in `failed` and the
 // rest carry on; once GitHub is unreachable the remaining chunks are skipped. `missing` lists PRs
 // GitHub answered for but doesn't know (deleted, renamed repo, no access).
 export async function prBatch(urls: string[], fields: string | ((url: string) => string), opts: { size?: number; timeout?: number } = {}): Promise<{ prs: Map<string, any>; missing: string[]; errors: string[]; failed: Error | null }> {
+  const by = callerOf() // before the first await, while the caller is still on the stack
   const prs = new Map<string, any>()
   const missing: string[] = []
   const errors: string[] = []
@@ -323,7 +389,7 @@ export async function prBatch(urls: string[], fields: string | ((url: string) =>
     try {
       const { data, errors: errs } = await ghGraphql(`{ ${chunk.map(alias).join('\n')} }`, { timeout: opts.timeout })
       errors.push(...errs)
-      chunk.forEach((u, j) => { const pr = data[`p${j}`]?.pullRequest; if (pr) prs.set(u, pr); else missing.push(u) })
+      chunk.forEach((u, j) => { const pr = data[`p${j}`]?.pullRequest; if (pr) { prs.set(u, pr); notePr(u, pr, by) } else missing.push(u) })
     } catch (e: any) {
       if (split && chunk.length > 1 && !ghOffline() && !NETWORK.test(String(e?.message))) {
         const h = Math.ceil(chunk.length / 2)

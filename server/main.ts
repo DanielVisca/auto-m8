@@ -1049,7 +1049,7 @@ route('GET', '/api/skills-store/command', () => skills.installCommand())
 route('POST', '/api/skills-store/install', () => skills.installStore())
 route('POST', '/api/skills-store/install-pasted', async (_m, req) => runStoreCommand(String((await body(req)).command ?? '')))
 route('GET', '/api/errors', () => ({ errors: recentErrors() }))
-route('GET', '/api/github/budget', () => ghUsage())
+route('GET', '/api/github/budget', (_m, _r, _s, q) => ghUsage(Math.min(24 * 30, Math.max(1, Number(q.get('hours')) || 24))))
 route('POST', '/api/errors/:key/resolve', m => { run(`update errors set status = 'resolved' where key = ?`, decodeURIComponent(m[1])); broadcast('errors'); return { ok: true } })
 route('POST', '/api/client-errors', async (_m, req) => {
   const b = await body(req)

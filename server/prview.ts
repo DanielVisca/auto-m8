@@ -6,11 +6,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { all, get } from './db.ts'
 import { originChain, originFor, originatedPrs, prSubject } from './origin.ts'
-import { prBatch, ghExec, ghLimited, ghOffline, ghPressure } from './gh.ts'
+import { prBatch, ghExec, ghLimited, ghOffline, ghPressure, notePr, onPrChanged, prKey } from './gh.ts'
 import { preview, prWorkers, snoozed } from './pr.ts'
 import { areaOf } from './prflow.ts'
 import { presence, refreshPresence, scoutPresence } from './presence.ts'
-import { sectionsFor } from './prsections.ts'
+import { sectionsFor, onPrSections } from './prsections.ts'
 import { toItems, itemsOf } from './transcript.ts'
 
 const exec = promisify(execFile)
@@ -56,6 +56,7 @@ async function pages(q: string) {
   for (let after: string | null = null, i = 0; i < 8; i++) {
     const d: any = await gql(`query { s: search(query: ${JSON.stringify(q)}, type: ISSUE, first: 25${after ? `, after: ${JSON.stringify(after)}` : ''}) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { ${FIELDS} } } } }`)
     out.push(...d.s.nodes)
+    for (const n of d.s.nodes) if (n?.url) notePr(n.url, n, 'prview')
     if (!d.s.pageInfo.hasNextPage) break
     after = d.s.pageInfo.endCursor
   }
@@ -64,6 +65,20 @@ async function pages(q: string) {
 
 let cache: { at: number; data: any } | null = null
 let inflight: Promise<any> | null = null
+
+// A PR in the list moved (the shepherd, a preview or a board read saw it first): refresh the list now
+// and tell the UI, instead of showing the old state until the 2-minute timer. At most every 20s,
+// so a burst of changes (a push to ten PRs) costs one refresh.
+let soon: NodeJS.Timeout | null = null, lastSoon = 0
+const listed = () => new Set<string>(Object.values(cache?.data ?? {}).flatMap((v: any) => Array.isArray(v?.nodes) ? v.nodes.map((p: any) => prKey(p?.url)) : []))
+onPrChanged.add((key, source) => {
+  if (source === 'prview' || soon || !cache || !listed().has(key) || ghLimited('graphql') || ghPressure()) return
+  soon = setTimeout(() => {
+    soon = null; lastSoon = Date.now()
+    prSidebar(true).then(() => { for (const l of onPrSections) l() }).catch(() => {})
+  }, Math.max(0, lastSoon + 20_000 - Date.now()))
+  soon.unref?.()
+})
 
 export async function prSidebar(fresh = false) {
   // With GitHub's budget mostly spent (or paused until its reset, or GitHub unreachable) the last

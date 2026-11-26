@@ -26,7 +26,7 @@ import { editLabels, setTitle } from './conversations.ts'
 import { link } from './context.ts'
 import { all, get, run } from './db.ts'
 import { recordError, resolveErrors } from './errors.ts'
-import { checkContextFields, checkContexts, summarizeChecks, ghOffline, isGhSkippedOffline, prBatch, ghExec } from './gh.ts'
+import { checkContextFields, checkContexts, summarizeChecks, ghOffline, isGhSkippedOffline, prBatch, ghExec, onPrChanged, prKey } from './gh.ts'
 import { activeShepherds, prWorktree } from './pr.ts'
 import { autonomyOn, settings, updateSettings } from './settings.ts'
 import { isPaused } from './pausehold.ts'
@@ -671,6 +671,9 @@ const FINGERPRINT = `updatedAt state isDraft headRefOid reviewDecision mergedAt
 const lastRead = new Map<string, { at: number; fp: string; snap: Snapshot }>()
 const stale = new Set<string>() // the shepherd wrote to these PRs (status, comment, ready): read them again
 export const resetSnapshotCache = () => { lastRead.clear(); stale.clear() }
+// Another module (sidebar, preview, a board) saw a watched PR move before the shepherd's own check did:
+// read it in full on the next tick instead of after its fingerprint check or the 15-minute re-read.
+onPrChanged.add((key, source) => { if (source !== 'shepherd') for (const u of lastRead.keys()) if (prKey(u) === key) stale.add(u) })
 export const fingerprintOf = (p: any) => {
   const r = p?.commits?.nodes?.[0]?.commit?.statusCheckRollup
   return [p?.updatedAt, p?.state, p?.isDraft, p?.headRefOid, p?.reviewDecision, p?.mergedAt, r?.state ?? '', r?.contexts?.totalCount ?? ''].join('|')

@@ -97,3 +97,29 @@ test('budget notice at 80% names the callers', () => {
   assert.equal(gh.budgetNotice({ limit: 5000, used: 3000, remaining: 2000, resetAt: at, at: Date.now() }), null)
   assert.match(gh.budgetNotice({ limit: 5000, used: 4200, remaining: 800, resetAt: at, at: Date.now() })!, /used 4,200 of 5,000 GitHub GraphQL points.*gh\.test/)
 })
+
+test('notePr: a newer read anywhere tells the other modules; same or older reads do not', () => {
+  gh.resetPrSeen()
+  const heard: string[] = []
+  const fn = (k: string, s: string) => heard.push(`${k} ${s}`)
+  gh.onPrChanged.add(fn)
+  const pr = (updatedAt: string, rollup?: string, extra: any = {}) => ({ updatedAt, state: 'OPEN', isDraft: false, ...(rollup ? { commits: { nodes: [{ commit: { statusCheckRollup: { state: rollup } } }] } } : {}), ...extra })
+  assert.equal(gh.notePr(url(9), pr('2026-11-25T10:00:00Z', 'PENDING'), 'shepherd'), false) // first sighting
+  assert.equal(gh.notePr(url(9), pr('2026-11-25T10:00:00Z'), 'prview'), false) // fewer fields, same PR
+  assert.equal(gh.notePr(url(9), pr('2026-11-25T10:00:00Z', 'SUCCESS'), 'shepherd'), true) // CI went green, updatedAt didn't move
+  assert.equal(gh.notePr(url(9), pr('2026-11-25T09:00:00Z', 'PENDING'), 'prview'), false) // an older read finishing late
+  assert.equal(gh.notePr(url(9).replace('PostHog', 'posthog'), pr('2026-11-25T11:00:00Z', 'SUCCESS', { headRefOid: 'abc' }), 'ghpr'), true) // same PR, other casing
+  assert.equal(gh.notePr(url(9), pr('2026-11-25T11:00:00Z', 'SUCCESS', { isDraft: true }), 'ghpr'), true) // marked draft
+  gh.onPrChanged.delete(fn)
+  assert.deepEqual(heard, ['posthog/posthog#9 shepherd', 'posthog/posthog#9 ghpr', 'posthog/posthog#9 ghpr'])
+})
+
+test('usage survives a flush to gh_usage', async () => {
+  fake(`echo ok`)
+  await gh.ghExec(['api', 'user'])
+  gh.flushGhUsage()
+  const { all } = await import('./db.ts')
+  const rows = all<any>('select caller, tally from gh_usage')
+  assert.ok(rows.some(r => JSON.parse(r.tally).byResource.core >= 1))
+  assert.ok(gh.ghUsage(24 * 7).hours[0].total >= 1)
+})
