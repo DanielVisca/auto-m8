@@ -432,6 +432,7 @@ function startLookServer() {
   const token = require('node:crypto').randomBytes(24).toString('hex')
   const srv = require('node:http').createServer((req, res) => {
     const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)) }
+    if (req.method === 'POST' && req.url === '/drive' && req.headers['x-look-token'] === token) return driveRequest(req, res)
     if (req.method !== 'POST' || req.url !== '/look' || req.headers['x-look-token'] !== token) return send(403, { error: 'forbidden' })
     let raw = ''
     req.on('data', c => { raw += c; if (raw.length > 100_000) req.destroy() })
@@ -476,6 +477,62 @@ function startLookServer() {
   })
 }
 app.whenReady().then(startLookServer)
+
+// look's interactive mode: agents click through auto-m8's own UI to test it, in hidden offscreen windows
+// (one per conversation, at most 3, closed after 10 idle minutes), driven over the Chrome DevTools
+// protocol through webContents.debugger. Never leaves auto-m8: other URLs are refused, popups denied.
+const drives = new Map() // owner -> { win, used }
+const DRIVE_CDP = new Set(['Runtime.evaluate', 'Input.dispatchMouseEvent', 'Input.dispatchKeyEvent', 'Input.insertText'])
+function driveWin(owner, width, height) {
+  let d = drives.get(owner)
+  if (d && !d.win.isDestroyed()) { d.used = Date.now(); return d }
+  if (drives.size >= 3) { const [o, old] = [...drives.entries()].sort((a, b) => a[1].used - b[1].used)[0]; try { old.win.destroy() } catch {} drives.delete(o) }
+  const w = new BrowserWindow({ show: false, width, height, paintWhenInitiallyHidden: true,
+    webPreferences: { offscreen: true, preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true } })
+  w.webContents.setAudioMuted(true)
+  w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  w.webContents.on('will-navigate', (e, u) => { if (!LOCAL.test(u)) e.preventDefault() })
+  w.webContents.on('dialog', e => e.preventDefault?.())
+  w.webContents.debugger.attach('1.3')
+  d = { win: w, used: Date.now() }
+  drives.set(owner, d)
+  return d
+}
+setInterval(() => { for (const [o, d] of drives) if (d.win.isDestroyed() || Date.now() - d.used > 10 * 60_000) { try { d.win.destroy() } catch {} drives.delete(o) } }, 60_000).unref?.()
+function driveRequest(req, res) {
+  const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)) }
+  let raw = ''
+  req.on('data', c => { raw += c; if (raw.length > 2_000_000) req.destroy() })
+  req.on('end', async () => {
+    let b = {}
+    try { b = JSON.parse(raw) } catch {}
+    const owner = String(b.owner || 'default')
+    try {
+      if (b.op === 'close') { const d = drives.get(owner); if (d) { try { d.win.destroy() } catch {} drives.delete(owner) } return send(200, { ok: true }) }
+      if (b.op === 'open') {
+        const url = String(b.url ?? '')
+        if (!LOCAL.test(url)) return send(400, { error: 'only auto-m8 pages' })
+        const width = Math.min(2400, Math.max(320, Number(b.width) || 1280)), height = Math.min(2400, Math.max(320, Number(b.height) || 860))
+        const d = driveWin(owner, width, height)
+        d.win.setContentSize(width, height)
+        await Promise.race([d.win.loadURL(url), sleep(15000)])
+        return send(200, { ok: true, url: d.win.webContents.getURL() })
+      }
+      const d = drives.get(owner)
+      if (!d || d.win.isDestroyed()) return send(409, { error: 'no window open; use action=open first' })
+      d.used = Date.now()
+      if (b.op === 'cdp') {
+        if (!DRIVE_CDP.has(b.method)) return send(400, { error: `not allowed: ${b.method}` })
+        return send(200, { result: await d.win.webContents.debugger.sendCommand(b.method, b.params ?? {}) })
+      }
+      if (b.op === 'shot') {
+        const img = await d.win.webContents.capturePage()
+        return send(200, { image: img.toJPEG(80).toString('base64'), url: d.win.webContents.getURL(), ...img.getSize() })
+      }
+      return send(400, { error: 'op must be open, cdp, shot or close' })
+    } catch (e) { shellLog(`drive ${b.op} failed: ${e.message}`); send(500, { error: e.message }) }
+  })
+}
 ipcMain.handle('pin', (_e, on) => { win.setAlwaysOnTop(!!on, 'floating'); return win.isAlwaysOnTop() })
 ipcMain.handle('is-pinned', () => win.isAlwaysOnTop())
 // Writing's Browse…: the native Finder sheet, markdown and text files only. Returns the path or null.

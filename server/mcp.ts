@@ -57,11 +57,16 @@ const tools = [
     inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['search', 'get', 'status'] }, query: { type: 'string' }, subject: { type: 'string' }, limit: { type: 'number' } }, required: ['action'] } },
   {
     name: 'look',
-    description: "See what auto-m8 draws, without the browser: renders a board (board_id) or message text (text: markdown with ```tile / ```chart / ```vega-lite blocks, exactly as the chat draws it) in the desktop app's hidden offscreen window and returns a picture. Use it to check a tile, chart, diagram or board you made before or after showing it: it's fast, opens no window and takes no focus. Limits: a static picture only. No clicking, hovering, typing or scrolling, no tooltips or menus, no app pages other than boards and message text, and it needs the auto-m8 desktop app running. Boards scroll inside their own frame, so pass a larger height (up to 4000) to see tiles further down. Tiles get wait_ms (default 4000, max 20000) to fetch data and draw; look again with a longer wait if one still says loading. For anything interactive in auto-m8 (click through a flow, open a menu, test a button, a page that isn't a board) or for any web page, use the browser tool instead.",
+    description: "See and test auto-m8's own UI without the browser, in the desktop app's hidden offscreen windows: nothing pops up and focus is never taken. Two modes. picture (default): a board (board_id) or message text (text: markdown with ```tile / ```chart / ```vega-lite blocks, drawn exactly as the chat draws it) comes back as an image. Use it to check a tile, chart, diagram or board you made. It's a still picture: wait_ms (default 4000, max 20000) lets tiles load; boards scroll inside their frame, so pass a larger height (up to 4000) to see lower tiles. Interactive, for TESTING auto-m8's UI only: open (path inside auto-m8, e.g. /#explore, /#chat/<id>; returns a snapshot with refs), act (steps: [{do:'click'|'hover'|'type'|'fill'|'select'|'press'|'scroll'|'wait', ref|name, role?, value?, key?, text?, ms?}], returns what happened and a fresh snapshot), snapshot (find? mode full?), close; screenshot=true adds an image to any of them. The hidden window is the real app on live data: irreversible clicks (send, delete, merge, share…) and Enter in a message box are refused. Do real work with the tools built for it (canvas, board, send_to_conversation, shepherd…), never by clicking the UI. Use the browser tool for any website other than auto-m8, or for auto-m8 when the desktop app isn't running (look says so).",
     inputSchema: { type: 'object', properties: {
-      board_id: { type: 'string', description: 'A board to render (canvas tool ids)' },
-      text: { type: 'string', description: 'Message text to render as the chat would, e.g. the ```tile block you are about to send' },
-      width: { type: 'number', description: 'Viewport width in px (default 1280)' }, height: { type: 'number', description: 'Initial height (default 800); the picture grows to fit the content up to 4000 unless fit=false' },
+      action: { type: 'string', enum: ['picture', 'open', 'act', 'snapshot', 'close'], description: 'picture (default): still image of board_id or text. open/act/snapshot/close: click through auto-m8 to test its UI' },
+      board_id: { type: 'string', description: 'picture: a board to render (canvas tool ids)' },
+      text: { type: 'string', description: 'picture: message text to render as the chat would, e.g. the ```tile block you are about to send' },
+      path: { type: 'string', description: 'open: a path inside auto-m8, e.g. /#explore or /#chat/<id>' },
+      steps: { type: 'array', items: { type: 'object' }, description: 'act: steps run in order; stops at the first failure' },
+      find: { type: 'string', description: 'snapshot: only elements matching these words' }, mode: { type: 'string', enum: ['interactive', 'full'] },
+      screenshot: { type: 'boolean', description: 'open/act/snapshot: include an image' },
+      width: { type: 'number', description: 'Viewport width in px (default 1280)' }, height: { type: 'number', description: 'Viewport height (picture default 800 and grows to fit unless fit=false; interactive default 860)' },
       wait_ms: { type: 'number' }, fit: { type: 'boolean' }, theme: { type: 'string', enum: ['dark', 'light'] },
     } },
   },
@@ -427,7 +432,7 @@ async function call(name: string, args: any): Promise<string | { content: any[] 
   }
   if (name === 'look') {
     const port = process.env.PERCH_PORT ?? 4777
-    const r: any = await (await fetch(`http://127.0.0.1:${port}/api/look`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify(args), signal: AbortSignal.timeout(60_000) })).json()
+    const r: any = await (await fetch(`http://127.0.0.1:${port}/api/look`, { method: 'POST', headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` }, body: JSON.stringify({ ...args, owner: process.env.PERCH_CONVERSATION_ID || 'default' }), signal: AbortSignal.timeout(170_000) })).json()
     const content: any[] = [{ type: 'text', text: r.text ?? r.error ?? 'no reply' }]
     if (r.image) content.push({ type: 'image', data: r.image, mimeType: 'image/jpeg' })
     return { content }
