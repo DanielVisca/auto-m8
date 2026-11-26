@@ -363,7 +363,9 @@ its own. It gets the theme colours as CSS variables (\`--bg\`, \`--fg\`,
 (the tile API keeps that name; use it exactly):
 
 - \`await perch.data({source: 'posthog', hogql: 'select …'})\`, or \`source: 'github', path\`,
-  or \`source: 'perch', path\` (auto-m8's own data): read data
+  or \`source: 'perch', path\` (auto-m8's own data; the path starts with \`/api/\`, e.g.
+  \`/api/needs\`, \`/api/conversations\`): read data. A failed read rejects the promise and
+  shows under the tile, so catch it and show a quiet empty state.
 - \`perch.onRefresh(fn)\`: runs at start, when auto-m8's data changes and when vars change
 - \`perch.vars\`: the block's \`vars\`
 - \`await perch.run(command, args)\`: ask auto-m8 to do something. Commands:
@@ -375,4 +377,13 @@ its own. It gets the theme colours as CSS variables (\`--bg\`, \`--fg\`,
   - \`layout.switch {name}\`
 
 Tiles can't change data directly; these commands are the only way they act.
+
+Keep tiles tidy:
+- Fill the block and no more: \`html,body{margin:0;height:100%;overflow:hidden}\`. The block
+  clips anything outside it, so a tile can't draw over the views next to it.
+- No \`position: fixed\` popovers or menus: they are cut off at the block's edge.
+- Don't redo what a view already has (the sidebar has search, the chat has its own header).
+  Prefer navigation (rail, top bar) that calls the commands above.
+- A full-width bar at the top of the window gets 78px of left padding on macOS for the
+  window buttons; don't add your own.
 `

@@ -1460,12 +1460,14 @@ table.cell-grid tbody tr:hover td { background: color-mix(in srgb, var(--bg3) 40
 /* Layouts drawn from a file (web/src/Layout.tsx). */
 .layout-row, .layout-column { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .layout-row { flex-direction: row; } .layout-column { flex-direction: column; }
+/* A cell never draws outside its box, so one part of a layout can't run over another. */
+.layout-cell { overflow: hidden; position: relative; }
 .layout-cell > * { flex: 1; min-width: 0; min-height: 0; }
 .layout-cell > .sidebar, .layout-cell > .detail-col { border: none; }
 .layout-custom .layout-row > .layout-cell + .layout-cell { border-left: 1px solid var(--line); }
 .layout-custom .layout-column > .layout-cell + .layout-cell { border-top: 1px solid var(--line); }
 .layout-tile { position: relative; display: flex; flex-direction: column; background: var(--bg2); }
-.layout-tile iframe { flex: 1; border: 0; width: 100%; background: var(--bg); }
+.layout-tile iframe { flex: 1; border: 0; width: 100%; min-height: 0; height: 100%; background: var(--bg); } /* an iframe is 150px tall by default; without min-height 0 a 44px bar spills over the views below */
 .layout-tile-err { padding: 6px 8px; border-top: 1px solid var(--line); }
 
 /* Blocker cards (BlockerCard.tsx): a fix for a lapsed sign-in or missing connection, in the chat */

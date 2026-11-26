@@ -39,7 +39,7 @@ if (typeof window !== 'undefined') ((window as any).requestIdleCallback ?? ((f: 
 import { Paused, PauseBar, PauseButton } from './Paused'
 import { TermView } from './Term'
 import { CloudBar, Handoff, SimpleHome, usePresence, useSimple } from './Mobile'
-import { LayoutTree, topLeftOf, UiAsk, UiButton, UiDraftBar, useLayout, useLayoutColors, useLayoutEscape, type Run } from './Layout'
+import { LayoutTree, topLeftOf, UiAsk, UiButton, UiDraftBar, useLayout, useLayoutColors, useLayoutCycle, useLayoutEscape, type Run } from './Layout'
 
 type View =
   | { kind: 'chat'; id: string | null }
@@ -134,6 +134,7 @@ export function App() {
   const layout = useLayout()
   useLayoutColors(layout?.layout.colors)
   useLayoutEscape()
+  useLayoutCycle()
   // Theme: system, light or dark, on the page and on the window chrome.
   const zen = !!settings?.focus?.active
   const theme = layout?.layout.theme ?? settings?.ui?.theme ?? 'system'

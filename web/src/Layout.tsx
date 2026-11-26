@@ -60,10 +60,52 @@ export function UiAsk() {
   </div>
 }
 
-// The top-bar way in to UiAsk, so changing the UI doesn't depend on knowing ⌘⇧U.
+// The top-bar way in: switch between your layouts in one click, or ask for a change (same as ⌘⇧U).
 export function UiButton() {
-  return <button className="icon no-drag" title="Change the UI  ⌘⇧U" aria-label="Change the UI"
-    onClick={() => window.dispatchEvent(new Event('perch-ui-ask'))}>🎨</button>
+  const l = useLayout()
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
+  useEffect(() => {
+    if (!at) return
+    const close = (e: Event) => { if (!(e.target as HTMLElement)?.closest?.('.ui-menu')) setAt(null) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null) }
+    addEventListener('mousedown', close); addEventListener('keydown', esc)
+    return () => { removeEventListener('mousedown', close); removeEventListener('keydown', esc) }
+  }, [at])
+  const pick = (name: string) => { setAt(null); switchLayout(name) }
+  return <>
+    <button className="icon no-drag" title="Layouts and UI changes  ⌘⇧L next layout · ⌘⇧U change" aria-label="Change the UI"
+      onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setAt(at ? null : { x: Math.min(r.left, innerWidth - 240), y: r.bottom + 4 }) }}>🎨</button>
+    {at && l && <div className="ctx ui-menu" style={{ left: at.x, top: at.y }}>
+      <div className="ctx-head">Layout · ⌘⇧L next</div>
+      {l.layouts.map(x => <button key={x.name} onClick={() => pick(x.name)}>
+        <span style={{ width: 12 }}>{l.active === x.name ? '✓' : ''}</span>{x.name}{x.shipped && <span className="muted small" style={{ marginLeft: 'auto' }}>built in</span>}
+      </button>)}
+      <div className="ctx-head" style={{ borderTop: '1px solid var(--line)', marginTop: 4 }} />
+      <button onClick={() => { setAt(null); window.dispatchEvent(new Event('perch-ui-ask')) }}>Change the UI… <span className="muted small" style={{ marginLeft: 'auto' }}>⌘⇧U</span></button>
+      <button onClick={() => { setAt(null); location.hash = '#settings/general' }}>Layout settings and versions</button>
+    </div>}
+  </>
+}
+
+export const switchLayout = (name: string) => api.send('PUT', '/api/layouts/active', { name })
+
+// ⌘⇧L: the next layout, round the list, so flipping between two is one key.
+export function useLayoutCycle() {
+  const l = useLayout()
+  const ref = useRef(l)
+  ref.current = l
+  useEffect(() => {
+    const f = (e: KeyboardEvent) => {
+      if (!(e.metaKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l')) return
+      const s = ref.current
+      if (!s?.layouts.length) return
+      e.preventDefault()
+      const i = s.layouts.findIndex(x => x.name === s.active)
+      switchLayout(s.layouts[(i + 1) % s.layouts.length].name)
+    }
+    addEventListener('keydown', f)
+    return () => removeEventListener('keydown', f)
+  }, [])
 }
 
 // While a change asked for in words is in flight or waiting: what it is, and Keep / Undo.
@@ -124,17 +166,20 @@ export function topLeftOf(node: LayoutNode, shown: { sidebar: boolean; details: 
 }
 
 export function LayoutTree({ node, slots, run, corner, dir = 'row' }: { node: LayoutNode; slots: Slots; run: Run; corner?: string | null; dir?: 'row' | 'column' }) {
-  const content = (n: LayoutNode): ReactNode | null => {
+  // parent: which way the node's parent lays out, so a tile in the window's corner knows how to clear the buttons.
+  const content = (n: LayoutNode, parent: 'row' | 'column' = dir): ReactNode | null => {
     if (n.hidden) return null
     if (n.type !== 'block') {
-      const kids = (n.children ?? []).map(c => [c, content(c)] as const).filter(([, el]) => el !== null)
+      const kids = (n.children ?? []).map(c => [c, content(c, n.type === 'row' ? 'row' : 'column')] as const).filter(([, el]) => el !== null)
       if (!kids.length) return null
       const d = n.type === 'row' ? 'row' : 'column'
       return <div className={`layout-${d}`}>{kids.map(([c, el]) => <Cell key={c.id} node={c} dir={d} corner={corner}>{el}</Cell>)}</div>
     }
     const c = n.content!
     if ('view' in c) return slots[c.view] ?? null
-    return <LayoutTile path={c.tile} vars={c.vars ?? {}} run={run} />
+    // A full-width bar in the corner (its parent is a column) clears the window buttons on its left,
+    // inside the tile, so its colour runs under them and a 44px bar keeps its 44px.
+    return <LayoutTile path={c.tile} vars={c.vars ?? {}} run={run} insetLeft={!!corner && n.id === corner && parent === 'column'} />
   }
   const el = content(node)
   return <Cell node={node} dir={dir} corner={corner} root>{el}</Cell>
@@ -153,13 +198,13 @@ function Cell({ node, dir, root, corner, children }: { node: LayoutNode; dir: 'r
   const view = node.content && 'view' in node.content ? node.content.view : undefined
   // The main view and the sidebar already leave room for the window buttons; anything else gets a strip.
   const inCorner = node.type === 'block' && !!corner && (view ? view === corner : node.id === corner)
-  if (inCorner && view !== 'main' && view !== 'sidebar') style.paddingTop = 28
+  if (inCorner && view !== 'main' && view !== 'sidebar' && !(dir === 'column' && !view)) style.paddingTop = 28
   return <div className={`layout-cell ${inCorner ? 'layout-corner' : ''}`} data-layout-id={node.id} style={style}>{children}</div>
 }
 
 const SOURCES = new Set(['posthog', 'github', 'perch'])
 
-function LayoutTile({ path, vars, run }: { path: string; vars: Record<string, string | number | boolean>; run: Run }) {
+function LayoutTile({ path, vars, run, insetLeft }: { path: string; vars: Record<string, string | number | boolean>; run: Run; insetLeft?: boolean }) {
   const [html, setHtml] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -173,7 +218,7 @@ function LayoutTile({ path, vars, run }: { path: string; vars: Record<string, st
     const off = onTopic('layouts', load)
     return () => { live = false; off() }
   }, [path])
-  const doc = useMemo(() => html === null ? null : inlineDoc(tileTheme(), vars, html), [html, JSON.stringify(vars)]) // eslint-disable-line
+  const doc = useMemo(() => html === null ? null : inlineDoc(tileTheme(), vars, html + (insetLeft ? '<style>body{padding-left:78px!important;box-sizing:border-box}</style>' : '')), [html, insetLeft, JSON.stringify(vars)]) // eslint-disable-line
   const runRef = useRef(run)
   runRef.current = run
   useEffect(() => {

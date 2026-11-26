@@ -514,7 +514,10 @@ route('GET', '/api/canvas/:folder', m => ({ tiles: canvasTiles(decodeURIComponen
 route('POST', '/api/canvas/tile', async (_m, req) => { const b = await body(req); requireCanvas(b.folder_id); return saveTile(b as any) })
 route('POST', '/api/canvas/tile/:id/delete', m => { removeTile(decodeURIComponent(m[1])); return { ok: true } })
 route('POST', '/api/canvas/tile/:id/report', async (m, req) => { reportTile(decodeURIComponent(m[1]), (await body(req)).error ?? null); return { ok: true } })
-route('POST', '/api/canvas/data', async (_m, req) => { const r = await canvasData(await body(req)); return { data: r.v, at: r.at, stale: r.stale } })
+// A tile's data error belongs to that tile (it shows it in place), not to the app-wide toast and Health.
+route('POST', '/api/canvas/data', async (_m, req) => {
+  try { const r = await canvasData(await body(req)); return { data: r.v, at: r.at, stale: r.stale } } catch (e: any) { return { error: String(e?.message ?? e) } }
+})
 route('POST', '/api/canvas/make', async (_m, req) => {
   const b = await body(req)
   requireCanvas(b.folder_id)
