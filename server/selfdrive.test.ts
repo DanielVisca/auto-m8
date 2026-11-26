@@ -160,7 +160,7 @@ test('a running chat or a pause is left alone', async () => {
 })
 
 test('verdict parsing and prompt', () => {
-  assert.deepEqual(parseVerdict('sure: {"action":"reply","message":"go","reason":"r"}'), { action: 'reply', message: 'go', reason: 'r' })
+  assert.deepEqual(parseVerdict('sure: {"action":"reply","message":"go","reason":"r"}'), { action: 'reply', message: 'go', reason: 'r', recheckMinutes: undefined })
   assert.equal(parseVerdict('{"action":"merge it"}'), null)
   assert.equal(parseVerdict('nope'), null)
   const p = prompt('c1', asked)
@@ -216,4 +216,18 @@ test('nextUp: the driver\'s next look after a wait, cooling off, and handing bac
   assert.equal(nextUp('c13')[0].detail, 'approve the drop')
   setSelfDrive('c13', false)
   assert.deepEqual(driveState('c13').next, [])
+})
+
+test('waiting: the driver picks its own wake-up time; the sweep honours it', async () => {
+  fresh('c14')
+  verdict = { action: 'wait', reason: 'agent checks again in 35 min', recheckMinutes: 40 }
+  await drive('c14')
+  assert.equal(nextUp('c14')[0].at, clock + 40 * 60_000)
+  updated = clock - 1
+  clock += 25 * 60_000 // past the 20 min default, before its own 40
+  assert.ok(!sweep().includes('c14'))
+  clock += 16 * 60_000
+  assert.ok(sweep().includes('c14'))
+  await new Promise(r => setImmediate(r))
+  assert.equal(parseVerdict('{"action":"wait","reason":"x","recheck_minutes":12}')!.recheckMinutes, 12)
 })

@@ -18,7 +18,7 @@ run(`create table if not exists self_drive (
   status text, note text, updated_at integer)`)
 run(`create table if not exists self_drive_log (
   id integer primary key autoincrement, conversation_id text not null, at integer not null, action text not null, message text, reason text)`)
-for (const col of ['backoff_until integer', 'mode text', 'per_hour integer', 'recheck_min integer', 'model text', 'instructions text', 'budget_hour real']) { try { run(`alter table self_drive add column ${col}`) } catch {} }
+for (const col of ['backoff_until integer', 'mode text', 'per_hour integer', 'recheck_min integer', 'model text', 'instructions text', 'budget_hour real', 'wake_at integer']) { try { run(`alter table self_drive add column ${col}`) } catch {} }
 try { run('alter table self_drive_log add column cost real') } catch {} // the driver's own spend per decision
 run('create index if not exists self_drive_log_conv on self_drive_log(conversation_id, at)')
 
@@ -46,7 +46,7 @@ export const BUDGET_PAUSE_MS = 15 * 60_000 // over the hourly budget: look again
 export type DriveSettings = { mode: 'full' | 'careful'; perHour: number; recheckMin: number; model: string | null; instructions: string; budgetHour: number | null }
 export type DriveState = { on: boolean; replies: number; status: string | null; note: string | null; lastReplyAt: number | null; settings: DriveSettings; spentHour: number; next: NextUp[] }
 type Row = { id: string; enabled: number; replies: number; last_reply: string | null; last_reply_at: number | null; status: string | null; note: string | null; backoff_until: number | null
-  mode: string | null; per_hour: number | null; recheck_min: number | null; model: string | null; instructions: string | null; budget_hour: number | null }
+  mode: string | null; per_hour: number | null; recheck_min: number | null; model: string | null; instructions: string | null; budget_hour: number | null; wake_at: number | null }
 const settingsOf = (r?: Row | null): DriveSettings => ({
   mode: r?.mode === 'careful' ? 'careful' : 'full', perHour: r?.per_hour || PER_HOUR, recheckMin: r?.recheck_min || WAIT_RECHECK_MS / 60_000,
   model: r?.model || null, instructions: r?.instructions ?? '', budgetHour: r?.budget_hour || null })
@@ -86,7 +86,7 @@ export function nextUp(id: string, r = row(id), now = deps.now()): NextUp[] {
     if (deps.running(id)) out.push({ at: null, kind: 'drive', text: 'decides what to say when this turn ends', when: 'when the agent finishes its turn' })
     else if (r.backoff_until && r.backoff_until > now) out.push({ at: r.backoff_until, kind: 'drive', text: r.status === 'budget' ? 'carries on after the budget pause' : 'carries on after cooling off', detail: r.note ?? undefined })
     else if (r.status === 'needs_you') out.push({ at: null, kind: 'drive', text: 'waiting for you', detail: r.note ?? 'It handed this chat back.', when: 'until you reply or the chat moves' })
-    else if (last?.action === 'wait') out.push({ at: last.at + recheck, kind: 'drive', text: 'looks again', detail: last.reason ?? undefined })
+    else if (last?.action === 'wait') out.push({ at: r.wake_at ?? last.at + recheck, kind: 'drive', text: 'looks again', detail: last.reason ?? undefined })
     else if (last?.action === 'error') out.push({ at: last.at + RETRY_MS, kind: 'drive', text: 'tries its decision again' })
     else if (last && ['reply', 'resume'].includes(last.action)) out.push({ at: last.at + recheck, kind: 'drive', text: 'checks the chat picked up its last message' })
   }
@@ -186,7 +186,7 @@ export function sweep(now = deps.now()): string[] {
     const moved = !last || updated > last.at // the chat did something the driver hasn't looked at
     const due =
       (moved && now - updated >= QUIET_MS) ||
-      (!moved && last?.action === 'wait' && since >= recheck) ||
+      (!moved && last?.action === 'wait' && (r.wake_at ? now >= r.wake_at : since >= recheck)) ||
       (!moved && (last?.action === 'error' || last?.action === 'backoff' || last?.action === 'budget') && since >= RETRY_MS) ||
       (!moved && (last?.action === 'reply' || last?.action === 'resume') && since >= recheck) // sent, and nothing happened
     if (!due || (last?.action === 'needs_you' && !moved)) continue
@@ -218,7 +218,9 @@ function schedule(id: string, stalled: string | null = null, finished = false) {
   timers.set(id, t)
 }
 
-export type Verdict = { action: 'reply' | 'done' | 'needs_you' | 'wait'; message?: string; reason?: string }
+// recheckMinutes: on wait, when the driver wants to look again if nothing happens first (it picks; your
+// "look again after" setting is the fallback).
+export type Verdict = { action: 'reply' | 'done' | 'needs_you' | 'wait'; message?: string; reason?: string; recheckMinutes?: number }
 
 // finished: the turn just ended cleanly (a result event), so the transcript can't be read as a stall;
 // it may simply not be flushed yet. Stall detection is for errors and the sweep.
@@ -284,6 +286,8 @@ const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
 function act(id: string, v: Verdict, cost: number | null = null): Verdict {
   const message = (v.message ?? '').trim(), reason = (v.reason ?? '').trim()
+  const wake = v.action === 'wait' && Number(v.recheckMinutes) > 0 ? deps.now() + Math.max(1, Math.min(24 * 60, Math.round(Number(v.recheckMinutes)))) * 60_000 : null
+  run('update self_drive set wake_at = ? where id = ?', wake, id)
   if (v.action === 'wait') { setStatus(id, 'waiting', reason || null); log(id, 'wait', null, reason, cost); return v }
   if (v.action === 'done') {
     run('update self_drive set enabled = 0, status = ?, note = ?, updated_at = ? where id = ?', 'done', reason || 'Finished.', deps.now(), id)
@@ -339,12 +343,12 @@ How ${name} works: they act like the founder of the work. Ship small and fast, d
 Choose one action:
 - "reply": the agent asked something, offered options, stopped short ("say go and I'll…"), hit a fixable blocker, or stopped before finishing. Write ${name}'s next message: answer the question, pick the option (usually the agent's recommendation unless it's wrong), or tell it exactly what to do next. If the agent raised a real doubt that the task is wrong or harmful, it's fine to answer "stop" or to change direction: don't rubber-stamp.
 - "done": the work is finished and checked (PR opened and handed to its shepherd, question answered, result verified). Nothing left for the agent to do.
-- "wait": the agent is waiting on something that will come back by itself (CI, a deploy, a helper, a scheduled follow-up) and said so. Nothing to send now.
+- "wait": the agent is waiting on something that will come back by itself (CI, a deploy, a helper, a scheduled follow-up) and said so. Nothing to send now. You'll be woken as soon as the agent writes again; also set "recheck_minutes" for when to look again if nothing happens first: just after the agent's own scheduled check, or when CI or the deploy should be done.
 - "needs_you": rare. ${name} turned this on to not be needed: before choosing it, look for any way forward (another approach, a different tool, a reversible version, doing the independent parts first) and reply with that instead. Only when the next step truly can't happen without them: something irreversible or destructive in production, spending money, sending a message or posting publicly as them, a merge the PR's plan doesn't already allow, a credential or hardware approval, or a decision that belongs to someone outside the team. Also when the chat is going in circles.
 
 Never approve destructive production actions, spending, or messages to people on ${name}'s behalf: that is "needs_you". Don't invent facts the transcript doesn't support.
 ${ds.mode === 'careful' ? `\n${name} set this chat to careful: also choose "needs_you" for big choices with lasting consequences (architecture, a public API, data model changes, which of two substantially different approaches to build), with the options and your recommendation in "reason".\n` : ''}${ds.instructions.trim() ? `\n${name}'s own instructions for driving this chat (follow them over the defaults above, except the never-approve rule):\n${ds.instructions.trim()}\n` : ''}${lastReply ? `\nYour last message to the agent was: "${lastReply.slice(0, 600)}". If that didn't move the work forward, try something different, don't repeat it.\n` : ''}${goal ? `\nThe goal of this chat: ${goal.goal}${goal.done_when ? `\nDone when: ${goal.done_when}` : ''}\n` : ''}
-Reply with ONLY JSON: {"action": "reply" | "done" | "wait" | "needs_you", "message": "the message to send (reply only), in ${name}'s voice", "reason": "one short line: why"}
+Reply with ONLY JSON: {"action": "reply" | "done" | "wait" | "needs_you", "message": "the message to send (reply only), in ${name}'s voice", "reason": "one short line: why", "recheck_minutes": 25 (wait only, optional)}
 
 The conversation so far (most recent last):
 ${transcriptFor(items)}`
@@ -365,6 +369,6 @@ export function parseVerdict(out: string): Verdict | null {
   try {
     const v = JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1))
     if (!['reply', 'done', 'wait', 'needs_you'].includes(v?.action)) return null
-    return { action: v.action, message: v.message ? String(v.message) : undefined, reason: v.reason ? String(v.reason) : undefined }
+    return { action: v.action, message: v.message ? String(v.message) : undefined, reason: v.reason ? String(v.reason) : undefined, recheckMinutes: Number(v.recheck_minutes) > 0 ? Number(v.recheck_minutes) : undefined }
   } catch { return null }
 }
