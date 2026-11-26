@@ -1,6 +1,7 @@
 // "Welcome back": what needs you, what to pick up, what's slipping, your PR stacks, and the
 // notepad. Two modes for two kinds of day: Drive (push existing work through) and Create.
 import { useEffect, useRef, useState } from 'react'
+import { CustomizeItem } from './Layout'
 import { SHOW_LABELS, ago, api, post, titleOf, useLive, type Conversation, type PR } from './api'
 import { PrBadge } from './List'
 import { FocusBanner } from './Focus'
@@ -344,6 +345,7 @@ export function PrMenu({ target, onClose, onOpen, onDone }: { target: { x: numbe
         </>
       ) : <div className="muted small pad-s">No PR on this one: snooze it, or open the conversation.</div>}
       {target.id && <button onClick={() => { onOpen(target.id!); onClose() }}>💬 Open the conversation</button>}
+      <CustomizeItem onDone={onClose} />
     </div>
   )
 }

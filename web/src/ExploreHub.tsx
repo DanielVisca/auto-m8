@@ -1,7 +1,7 @@
 // Explore's landing page: pick what to explore (canvases, competitor products, codebases, writing), then a
 // sortable gallery of each, with an info panel that links back to the chats behind every item.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { LayoutCards, LayoutPreview, useLayoutsAll } from './Layout'
+import { CustomizeItem, LayoutCards, LayoutPreview, useLayoutsAll } from './Layout'
 import { ago, post, shell, toast, useLive } from './api'
 import type { Repo } from './ExploreRuntime'
 import { usePublished, useWriting, WritingArt } from './WritingHome'
@@ -190,6 +190,7 @@ function CardMenu({ at, title, items, onClose }: { at: { x: number; y: number };
   return <div className="ctx" ref={ref} role="menu" style={{ left: Math.min(at.x, innerWidth - 240), top: Math.min(at.y, innerHeight - 40 - items.length * 30) }} onContextMenu={e => e.preventDefault()}>
     <div className="ctx-head ellipsis">{title}</div>
     {items.map((it, i) => it === 'sep' ? <hr key={i} className="exh-sep" /> : <button key={i} role="menuitem" className={it.danger ? 'exh-danger' : ''} onClick={() => { onClose(); it.run() }}>{it.label}</button>)}
+    <CustomizeItem onDone={onClose} />
   </div>
 }
 

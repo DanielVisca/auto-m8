@@ -1,4 +1,5 @@
 import { BoardButton } from './Boards'
+import { CustomizeItem } from './Layout'
 import { marked } from 'marked'
 import { createContext, memo, startTransition, useContext, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ConversationDecisions, DecisionStrip } from './Decisions'
@@ -221,7 +222,7 @@ function Activity({ activity }: { activity: NonNullable<Extract<Item, { kind: 'a
   </details>
 }
 // Markdown, with ```chart blocks drawn as charts and ```tile blocks run as inline HTML.
-const RichText = memo(({ text }: { text: string }) => {
+export const RichText = memo(({ text }: { text: string }) => {
   const parts = useMemo(() => splitCharts(text), [text])
   if (parts.length === 1 && parts[0].kind === 'md') return <Markdown text={text} />
   return <>{parts.map((p, i) => p.kind === 'md' ? (p.text.trim() ? <Markdown key={i} text={p.text} /> : null)
@@ -599,6 +600,7 @@ export function Messages({ items, running, onBranch, onRewind, convId }: { items
             <button onClick={() => onBranch?.(menu.uuid!)}>⑂ Branch from here</button>
             <button onClick={() => onRewind?.(menu.uuid!)}>↺ Rewind to here</button>
           </>}
+          <CustomizeItem onDone={() => setMenu(null)} />
         </div>
       )}
       {(fullFor === threadKey ? groupMessages(items, running) : groupMessages(items, running).slice(-TAIL_ROWS)).map(row => row.kind === 'item' ? renderEntry(row.entry) : <div key={`${convId ?? ''}:turn:${row.index}`} className="chat-turn">

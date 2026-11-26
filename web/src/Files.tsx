@@ -1,6 +1,7 @@
 // Files an agent made for you: listed per conversation, viewable in perch, and one click from
 // Finder, your clipboard (the contents, or the file itself to paste into Slack) or a download.
 import { useEffect, useRef, useState } from 'react'
+import { CustomizeItem } from './Layout'
 import { api, post, shell, toast, useLive } from './api'
 import { copyText, focusInChat, Markdown, type FocusAt } from './Chat'
 import { Brand } from './Brand'
@@ -159,6 +160,7 @@ function PathMenu() {
       {onMac() && <button onClick={go(() => act(at.path, 'open', 'Opened'))}>↗ {at.dir ? 'Open folder' : 'Open in its app'}</button>}
       {!at.dir && <button onClick={go(() => openFile(at.path))}>👁 View in auto-m8</button>}
       <button onClick={go(() => copyText(at.path).then(() => toast('Path copied', { kind: 'ok' })))}>⌁ Copy path</button>
+      <CustomizeItem onDone={() => setAt(null)} />
     </div>
   )
 }

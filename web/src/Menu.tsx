@@ -1,6 +1,7 @@
 // Right-click on any conversation (or a selection of them): state, snooze, labels, and spreading
 // a label to the conversations that look like the same workstream.
 import { carry } from './Profile'
+import { CustomizeItem } from './Layout'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { SHOW_LABELS, openIn, post, useLive, type Conversation, type OpenTarget } from './api'
 import { Brand } from './Brand'
@@ -98,6 +99,7 @@ export function ContextMenu({ target, onClose, onOpenTerminal }: { target: MenuT
       {one && one.source !== 'posthog-task' && <button onClick={() => { onOpenTerminal(one.id); onClose() }}><Brand id="claude" size={15} /> Open in Claude Code here</button>}
       {one && openData?.targets.map(t => <button key={t.target} onClick={() => { openIn(one.id, t); onClose() }}><Brand id={t.target === 'posthog-code' ? 'posthog' : t.target} size={15} /> Open in {t.label}</button>)}
       {one && <button onClick={() => { navigator.clipboard.writeText(one.source === 'posthog-task' ? one.url ?? one.id : `claude --resume ${one.id}`); onClose() }}>Copy {one.source === 'posthog-task' ? 'link' : 'resume command'}</button>}
+      <CustomizeItem onDone={onClose} />
     </div>
   )
 }

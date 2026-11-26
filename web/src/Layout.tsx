@@ -88,35 +88,25 @@ function Highlight({ el }: { el: Element | null }) {
   return <div className="ui-highlight" style={{ left: r.left - 3, top: r.top - 3, width: r.width + 6, height: r.height + 6 }} />
 }
 
-// Right-click anywhere auto-m8 has no menu of its own: "Customize this…" outlines that part and opens
-// the ask box about it. Text fields and selected text keep their usual right-click.
+// What was last right-clicked, so a menu's "Customize this…" knows what it is about. Only listens:
+// every right-click menu stays as it is.
+let lastRightClicked: Element | null = null
 export function UiCustomizeMenu() {
-  const [at, setAt] = useState<{ x: number; y: number; el: Element } | null>(null)
   useEffect(() => {
-    const f = (e: MouseEvent) => {
-      if (e.defaultPrevented) return
-      const el = e.target as HTMLElement
-      if (!el?.closest || el.closest('input, textarea, select, [contenteditable="true"], .ui-ask, .ui-menu, .xterm')) return
-      if (String(getSelection() ?? '').trim()) return
-      e.preventDefault()
-      setAt({ x: Math.min(e.clientX, innerWidth - 230), y: Math.min(e.clientY, innerHeight - 60), el })
-    }
-    addEventListener('contextmenu', f)
-    return () => removeEventListener('contextmenu', f)
+    const f = (e: MouseEvent) => { lastRightClicked = e.target as Element }
+    addEventListener('contextmenu', f, true)
+    return () => removeEventListener('contextmenu', f, true)
   }, [])
-  useEffect(() => {
-    if (!at) return
-    const close = (e: Event) => { if (!(e.target as HTMLElement)?.closest?.('.ui-menu')) setAt(null) }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null) }
-    addEventListener('mousedown', close); addEventListener('keydown', esc); addEventListener('scroll', close, true)
-    return () => { removeEventListener('mousedown', close); removeEventListener('keydown', esc); removeEventListener('scroll', close, true) }
-  }, [at])
-  if (!at) return null
+  return null
+}
+
+// The last item in a right-click menu: outline what was right-clicked and ask for a change to it.
+export function CustomizeItem({ onDone }: { onDone?: () => void }) {
+  const el = lastRightClicked
+  if (!el) return null
   return <>
-    <Highlight el={at.el} />
-    <div className="ctx ui-menu" style={{ left: at.x, top: at.y }}>
-      <button onClick={() => { const el = at.el; setAt(null); window.dispatchEvent(new CustomEvent('perch-ui-ask', { detail: { el } })) }}>🎨 Customize this…</button>
-    </div>
+    <hr />
+    <button onClick={() => { onDone?.(); window.dispatchEvent(new CustomEvent('perch-ui-ask', { detail: { el } })) }}>🎨 Customize this…</button>
   </>
 }
 
@@ -137,8 +127,9 @@ export function UiAsk() {
   useEffect(() => {
     const f = (e: KeyboardEvent) => { if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 'u') { e.preventDefault(); setOpen(o => !o); setErr(null); setEl(null) } }
     const ev = (e: Event) => { setOpen(true); setErr(null); setPicking(false); setEl((e as CustomEvent).detail?.el ?? null); setTimeout(() => input.current?.focus(), 0) }
-    addEventListener('keydown', f); addEventListener('perch-ui-ask', ev)
-    return () => { removeEventListener('keydown', f); removeEventListener('perch-ui-ask', ev) }
+    const pick = () => { setOpen(true); setErr(null); setEl(null); setPicking(true) }
+    addEventListener('keydown', f); addEventListener('perch-ui-ask', ev); addEventListener('perch-ui-pick', pick)
+    return () => { removeEventListener('keydown', f); removeEventListener('perch-ui-ask', ev); removeEventListener('perch-ui-pick', pick) }
   }, [])
   // Picking: hover outlines, click chooses, Escape gives up. Clicks don't reach the app meanwhile.
   useEffect(() => {
@@ -178,7 +169,7 @@ export function UiAsk() {
           <label><input type="radio" checked={mode === 'new'} onChange={() => setMode('new')} /> Save as new layout</label>
           {mode === 'new' && <input className="ui-ask-name" value={name} onChange={e => setName(e.target.value)} placeholder="my-layout" />}
         </div>
-        <div className="muted small">{err ? <span className="bad">{err}</span> : <>Enter asks an agent. Keep or Undo it from the bar at the top. Versions are in Settings → Layout. Right-click anything to customize it.</>}</div>
+        <div className="muted small">{err ? <span className="bad">{err}</span> : <>Enter asks an agent. Keep or Undo it from the bar at the top. Versions are in Settings → Layout. Right-click 🎨 to pick a part of the window.</>}</div>
       </div>
     </div>
   </>
@@ -210,7 +201,8 @@ export function UiButton() {
   }, [at])
   const pick = (name: string) => { setAt(null); switchLayout(name) }
   return <>
-    <button className="icon no-drag" title="Layouts and UI changes  ⌘⇧L next layout · ⌘⇧U change" aria-label="Change the UI"
+    <button className="icon no-drag" title="Layouts and UI changes  ⌘⇧L next layout · ⌘⇧U change · right-click to customize an element" aria-label="Change the UI"
+      onContextMenu={e => { e.preventDefault(); setAt(null); window.dispatchEvent(new Event('perch-ui-pick')) }}
       onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setAt(at ? null : { x: Math.min(r.left, innerWidth - 240), y: r.bottom + 4 }) }}>🎨</button>
     {at && l && <div className="ctx ui-menu" style={{ left: at.x, top: at.y }}>
       <div className="ctx-head">Layout · ⌘⇧L next</div>
@@ -218,6 +210,7 @@ export function UiButton() {
         <span style={{ width: 12 }}>{l.active === x.name ? '✓' : ''}</span>{f >= 0 ? '★ ' : ''}{x.name}<span className="muted small" style={{ marginLeft: 'auto' }}>{f >= 0 ? `⌘⌥${f + 1}` : x.shipped ? 'built in' : ''}</span>
       </button> })}
       <div className="ctx-head" style={{ borderTop: '1px solid var(--line)', marginTop: 4 }} />
+      <button onClick={() => { setAt(null); window.dispatchEvent(new Event('perch-ui-pick')) }} title="Point at one part of the window, then say how it should change">Customize an element… <span className="muted small" style={{ marginLeft: 'auto' }}>right-click 🎨</span></button>
       <button onClick={() => { setAt(null); window.dispatchEvent(new Event('perch-ui-ask')) }}>Change the UI… <span className="muted small" style={{ marginLeft: 'auto' }}>⌘⇧U</span></button>
       <button onClick={() => { setAt(null); location.hash = '#settings/layout' }}>Browse, try and favourite layouts…</button>
     </div>}
