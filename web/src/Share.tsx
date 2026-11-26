@@ -9,6 +9,18 @@ type Target = { id: string; label: string; about: string; ok: boolean; why?: str
 type Audience = { id: string; label: string; kind?: 'private' | 'project' | 'members'; hint?: string; group?: string; private?: boolean }
 type Share = { target: string; url: string | null; audience: string | null; audience_label: string | null; shared_at: number; notes: string[]; conflict?: boolean }
 
+// Fetched once when a Share button first mounts, so the popover opens with targets already there.
+let targetsReq: Promise<Target[]> | null = null
+let targetsAt = 0
+const loadTargets = () => {
+  if (!targetsReq || Date.now() - targetsAt > 5 * 60_000) {
+    targetsAt = Date.now()
+    targetsReq = api.get<{ targets: Target[] }>('/api/share/targets').then(r => r.targets)
+    targetsReq.then(ts => { if (ts.some(t => !t.ok)) targetsReq = null }, () => { targetsReq = null })
+  }
+  return targetsReq
+}
+
 export function ShareButton({ boardId, compact }: { boardId: string; compact?: boolean }) {
   const btn = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
@@ -25,8 +37,9 @@ export function ShareButton({ boardId, compact }: { boardId: string; compact?: b
     if (!open) return
     setResult(null); setErr(null)
     loadShares()
-    if (!targets) api.get<{ targets: Target[] }>('/api/share/targets').then(r => setTargets(r.targets)).catch(e => setErr(String(e.message ?? e)))
+    loadTargets().then(setTargets).catch(e => setErr(String(e.message ?? e)))
   }, [open]) // eslint-disable-line
+  useEffect(() => { loadTargets().then(setTargets).catch(() => {}) }, [])
   const t = targets?.find(x => x.id === target)
   const prev = shares.find(s => s.target === target)
   useEffect(() => {

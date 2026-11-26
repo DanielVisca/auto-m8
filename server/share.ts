@@ -384,13 +384,29 @@ const posthogTarget: Target = {
 
 export const TARGETS: Target[] = [posthogTarget]
 
+// The Share popover waits on these, and each is a PostHog round trip (with retries and no timeout
+// of its own), so opening it took seconds. Keep answers for a while, share one in-flight call, and
+// give up on availability after a few seconds instead of leaving the popover on "Loading…".
+const memo = new Map<string, { at: number; ttl: number; v: Promise<any> }>()
+function cached<T>(key: string, ttl: (v: T) => number, fn: () => Promise<T>): Promise<T> {
+  const hit = memo.get(key)
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.v
+  const entry = { at: Date.now(), ttl: 60_000, v: fn() }
+  memo.set(key, entry)
+  entry.v.then(v => { entry.at = Date.now(); entry.ttl = ttl(v) }, () => { if (memo.get(key) === entry) memo.delete(key) })
+  return entry.v
+}
+const within = <T>(ms: number, p: Promise<T>, why: string) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error(why)), ms).unref?.())])
+
 export async function targets() {
-  return Promise.all(TARGETS.map(async t => ({ id: t.id, label: t.label, about: t.about, ...(await t.available()) })))
+  return Promise.all(TARGETS.map(async t => ({ id: t.id, label: t.label, about: t.about,
+    ...(await cached(`avail:${t.id}:${project()}`, (v: { ok: boolean }) => v.ok ? 10 * 60_000 : 20_000,
+      () => within(6000, t.available(), `${t.label} didn't answer in 6s. Try again in a moment.`).catch((e: any) => ({ ok: false, why: e.message })))) })))
 }
 export async function audiences(target: string) {
   const t = TARGETS.find(x => x.id === target)
   if (!t) throw new Error(`No share target "${target}"`)
-  return t.audiences()
+  return cached(`aud:${target}:${project()}`, () => 5 * 60_000, () => t.audiences())
 }
 
 // Where a board is shared, whether the local board has changes the shared copy lacks, and who has
