@@ -6,7 +6,7 @@ import { ClaudeBillingCard, ClaudeSubsCard } from './ClaudeAccounts'
 import { PrSpendCard, SpendCard } from './Spend'
 import { useBrowser } from './BrowserView'
 import { Kits } from './Kits'
-import { askForUi, useLayout, type LayoutVersion } from './Layout'
+import { askForUi, LayoutCards, useLayout, type LayoutVersion } from './Layout'
 
 // The agent browser (server/browser.ts): a dedicated Chrome profile perch drives, one window per chat.
 const POLICIES = [['trusted', 'trusted: no confirmations'], ['allow', 'allow: confirm irreversible actions'], ['read', 'read only'], ['deny', 'deny']] as const
@@ -65,7 +65,7 @@ function AgentBrowser({ settings, save }: { settings: any; save: (p: any) => any
 }
 
 // Settings is split into tabs, listed in a side panel. The tab rides in the hash (#settings/spend), so links can open one.
-const TABS: [string, string, string][] = [['general', 'General', 'Your name, autonomy, decisions, look and window'], ['connections', 'Connections', 'Claude, GitHub, PostHog, MCP servers, phone'], ['chats', 'Chats & browser', 'Defaults for new chats and the agent browser'], ['accounts', 'Accounts', 'Claude profiles auto-m8 runs as'], ['models', 'Models', 'Routing and local models'], ['spend', 'Spend', 'AI spend, per PR, and subscription usage'], ['health', 'Health', 'Availability, search learning, missing capabilities']]
+const TABS: [string, string, string][] = [['general', 'General', 'Your name, autonomy, decisions, look and window'], ['layout', 'Layout & UI', 'Preview, try and favourite layouts, or make your own'], ['connections', 'Connections', 'Claude, GitHub, PostHog, MCP servers, phone'], ['chats', 'Chats & browser', 'Defaults for new chats and the agent browser'], ['accounts', 'Accounts', 'Claude profiles auto-m8 runs as'], ['models', 'Models', 'Routing and local models'], ['spend', 'Spend', 'AI spend, per PR, and subscription usage'], ['health', 'Health', 'Availability, search learning, missing capabilities']]
 const tabFromHash = () => { const t = location.hash.split('/')[1]; return TABS.some(x => x[0] === t) ? t : null }
 
 type Mcp = { name: string; target: string; status: string; kind: string }
@@ -93,6 +93,13 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
       </nav>
       <div className="page settings-page">
         <h2>{TABS.find(t => t[0] === tab)?.[1]}</h2>
+      {tab === 'layout' && <section className="card">
+        <h3>Layouts</h3>
+        <div className="muted small" style={{ marginBottom: 8 }}>How the window is arranged. Click a preview to try it: the bar at the top keeps or undoes it. Star the ones you like to switch between them from the keyboard.</div>
+        <LayoutCards />
+        <h3 style={{ marginTop: 18 }}>Make and manage</h3>
+        <LayoutPicker />
+      </section>}
       {tab === 'general' && <>
       <section className="card">
         <h3>You and your agents</h3>
@@ -127,7 +134,7 @@ export function Settings({ settings, onTerminal }: { settings: any; onTerminal: 
         <div className="field">Theme
           <div className="seg">{(['system', 'light', 'dark'] as const).map(t => <button key={t} className={settings.ui.theme === t ? 'on' : ''} onClick={() => save({ ui: { theme: t } })}>{t}</button>)}</div>
         </div>
-        <LayoutPicker />
+        <div className="field">Layout <button className="link small" onClick={() => pick('layout')}>Preview, try and favourite layouts →</button></div>
       </section>
       <section className="card">
         <h3>Window</h3>
@@ -742,10 +749,6 @@ function LayoutPicker() {
       <button className="small" disabled={!change.trim()} onClick={ask}>Ask</button>
       <span className="muted small">or ⌘⇧U anywhere</span>
     </div>
-    <div className="field">Layout
-      <div className="seg">{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => pick(x.name)} title={x.shipped ? 'Shipped with auto-m8: copy it to change it' : `${l.dir}/${x.name}.json`}>{x.name}</button>)}</div>
-      <span className="muted small">⌘⌥⇧Esc always goes back to default.</span>
-    </div>
     <div className="field">Copy <b>{l.active}</b> as <input value={as} placeholder="my-layout" style={{ width: 140 }} onChange={e => setAs(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && as.trim()) copy() }} />
       <button className="small" disabled={!as.trim()} onClick={copy}>Copy</button>
       <button className="small" onClick={() => post('/api/layouts/reveal', {})} title={l.dir}>Show folder</button>
@@ -772,12 +775,10 @@ function LayoutGallery() {
       setMsg(`Asked an agent to add ${x.repo}. Keep or Undo it from the bar at the top.`)
     } catch (e: any) { setMsg(String(e?.message ?? e)) }
   }
-  return <div className="field" style={{ alignItems: 'flex-start' }}>Gallery
+  return <div className="field" style={{ alignItems: 'flex-start' }}>Shared
     <div style={{ flex: 1 }}>
-      {!open ? <button className="small" onClick={() => setOpen(true)}>Browse layouts</button> : <>
-        <div className="muted small" style={{ margin: '2px 0 6px' }}>Built in and yours</div>
-        <div className="seg" style={{ flexWrap: 'wrap' }}>{l.layouts.map(x => <button key={x.name} className={l.active === x.name ? 'on' : ''} onClick={() => api.send('PUT', '/api/layouts/active', { name: x.name })}>{x.name}{x.shipped ? '' : ' ·  yours'}</button>)}</div>
-        <div className="muted small" style={{ margin: '10px 0 6px' }}>Shared by others <a href={`https://github.com/topics/${g?.topic ?? 'auto-m8-layout'}`} target="_blank" rel="noreferrer">on GitHub</a></div>
+      {!open ? <button className="small" onClick={() => setOpen(true)}>Browse shared layouts</button> : <>
+        <div className="muted small" style={{ margin: '2px 0 6px' }}>Shared by others <a href={`https://github.com/topics/${g?.topic ?? 'auto-m8-layout'}`} target="_blank" rel="noreferrer">on GitHub</a></div>
         {!g ? <div className="muted small">Loading…</div> : g.problem && !g.items.length ? <div className="bad small">{g.problem}</div> : !g.items.length
           ? <div className="muted small">Nobody has shared one yet. Make yours with ⌘⇧U, then ask an agent to “share my layout”: it writes the recipe and preview and shows you the repo before publishing.</div>
           : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>

@@ -27,7 +27,7 @@ import { BrowserFlag } from './BrowserView'
 import { Resources } from './Resources'
 import { Insights } from './Insights'
 import { Explore } from './Explore'
-import { CanvasGallery, CodebaseGallery, CompetitorGallery, CompetitorPage, ExploreHub } from './ExploreHub'
+import { CanvasGallery, CodebaseGallery, CompetitorGallery, CompetitorPage, ExploreHub, LayoutsPage } from './ExploreHub'
 import { Library } from './Library'
 import { List } from './List'
 import { Settings } from './Settings'
@@ -251,6 +251,7 @@ export function App() {
         if (id === 'canvases') return <CanvasGallery {...nav} />
         if (id === 'competitors') return <CompetitorGallery {...nav} />
         if (id === 'codebases') return <CodebaseGallery {...nav} />
+        if (id === 'layouts') return <LayoutsPage {...nav} />
         if (id === 'writing') return <WritingHome onOpenDoc={id => setView({ kind: 'doc', id })} onStart={startChat} onBack={() => nav.onSection(null)} />
         if (id.startsWith('competitor:')) { const [, pid, t] = id.split(':'); return <CompetitorPage key={id} id={pid} tour={t === 'tour'} {...nav} /> }
         return <><button className="link small exh-back" style={{ margin: '6px 12px 0' }} onClick={() => nav.onSection(id === 'code' ? null : 'codebases')}>← {id === 'code' ? 'Explore' : 'Codebases'}</button><Explore key={id} initialRepo={id === 'code' ? undefined : id} onOpenChat={openById} /></>

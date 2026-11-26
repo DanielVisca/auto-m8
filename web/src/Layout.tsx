@@ -63,6 +63,7 @@ export function UiAsk() {
 // The top-bar way in: switch between your layouts in one click, or ask for a change (same as ⌘⇧U).
 export function UiButton() {
   const l = useLayout()
+  const favs = useLayoutsAll()?.favourites ?? []
   const [at, setAt] = useState<{ x: number; y: number } | null>(null)
   useEffect(() => {
     if (!at) return
@@ -77,35 +78,121 @@ export function UiButton() {
       onClick={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setAt(at ? null : { x: Math.min(r.left, innerWidth - 240), y: r.bottom + 4 }) }}>🎨</button>
     {at && l && <div className="ctx ui-menu" style={{ left: at.x, top: at.y }}>
       <div className="ctx-head">Layout · ⌘⇧L next</div>
-      {l.layouts.map(x => <button key={x.name} onClick={() => pick(x.name)}>
-        <span style={{ width: 12 }}>{l.active === x.name ? '✓' : ''}</span>{x.name}{x.shipped && <span className="muted small" style={{ marginLeft: 'auto' }}>built in</span>}
-      </button>)}
+      {l.layouts.map(x => { const f = favs.indexOf(x.name); return <button key={x.name} onClick={() => pick(x.name)}>
+        <span style={{ width: 12 }}>{l.active === x.name ? '✓' : ''}</span>{f >= 0 ? '★ ' : ''}{x.name}<span className="muted small" style={{ marginLeft: 'auto' }}>{f >= 0 ? `⌘⌥${f + 1}` : x.shipped ? 'built in' : ''}</span>
+      </button> })}
       <div className="ctx-head" style={{ borderTop: '1px solid var(--line)', marginTop: 4 }} />
       <button onClick={() => { setAt(null); window.dispatchEvent(new Event('perch-ui-ask')) }}>Change the UI… <span className="muted small" style={{ marginLeft: 'auto' }}>⌘⇧U</span></button>
-      <button onClick={() => { setAt(null); location.hash = '#settings/general' }}>Layout settings and versions</button>
+      <button onClick={() => { setAt(null); location.hash = '#settings/layout' }}>Browse, try and favourite layouts…</button>
     </div>}
   </>
 }
 
 export const switchLayout = (name: string) => api.send('PUT', '/api/layouts/active', { name })
 
-// ⌘⇧L: the next layout, round the list, so flipping between two is one key.
+export type LayoutEntry = { name: string; shipped: boolean; layout: Layout; error: string | null }
+export function useLayoutsAll() {
+  return useLive<{ layouts: LayoutEntry[]; favourites: string[] }>('/api/layouts/all', ['layouts', 'settings']).data
+}
+export const tryLayout = (name: string) => post<any>('/api/layouts/try', { name })
+export const favouriteLayout = (name: string, on: boolean) => post<any>('/api/layouts/favourite', { name, on })
+
+// ⌘⇧L: the next favourite (or the next layout when fewer than two are starred), so flipping between
+// two is one key. ⌘⌥1-9: straight to favourite 1-9.
 export function useLayoutCycle() {
   const l = useLayout()
-  const ref = useRef(l)
-  ref.current = l
+  const all = useLayoutsAll()
+  const ref = useRef({ l, favs: all?.favourites ?? [] })
+  ref.current = { l, favs: all?.favourites ?? [] }
   useEffect(() => {
     const f = (e: KeyboardEvent) => {
-      if (!(e.metaKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l')) return
-      const s = ref.current
+      const { l: s, favs } = ref.current
       if (!s?.layouts.length) return
+      const digit = /^Digit([1-9])$/.exec(e.code)
+      if (e.metaKey && e.altKey && !e.shiftKey && !e.ctrlKey && digit) {
+        const name = favs[Number(digit[1]) - 1]
+        if (!name) return
+        e.preventDefault(); switchLayout(name); return
+      }
+      if (!(e.metaKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l')) return
       e.preventDefault()
-      const i = s.layouts.findIndex(x => x.name === s.active)
-      switchLayout(s.layouts[(i + 1) % s.layouts.length].name)
+      const ring = favs.length >= 2 ? favs : s.layouts.map(x => x.name)
+      const i = ring.indexOf(s.active)
+      switchLayout(ring[(i + 1) % ring.length])
     }
     addEventListener('keydown', f)
     return () => removeEventListener('keydown', f)
   }, [])
+}
+
+// A layout in miniature: its rows, columns and blocks as boxes, in its own colours.
+export function LayoutPreview({ layout, height = 90 }: { layout: Layout; height?: number }) {
+  const dark = layout.theme === 'dark'
+  const c = layout.colors ?? {}
+  const bg = c.bg ?? (layout.theme ? (dark ? '#1b1d21' : '#fafafa') : 'var(--bg)')
+  const box = c.bg2 ?? (layout.theme ? (dark ? '#26292f' : '#eceef1') : 'var(--bg2)')
+  const fg = c.muted ?? (layout.theme ? (dark ? '#9aa1ab' : '#6b7280') : 'var(--muted)')
+  const accent = c.accent ?? 'var(--accent)'
+  const line = c.line ?? 'var(--line)'
+  const draw = (n: LayoutNode, dir: 'row' | 'column'): ReactNode => {
+    if (n.hidden) return null
+    const flex = n.size && 'px' in n.size ? `0 0 ${Math.max(6, n.size.px / 14)}%` : `${n.size && 'weight' in n.size ? n.size.weight : 1} 1 0`
+    const st: CSSProperties = { flex, display: 'flex', minWidth: 0, minHeight: 0, gap: 2, flexDirection: n.type === 'column' ? 'column' : 'row' }
+    if (n.type !== 'block') return <div key={n.id} style={st}>{(n.children ?? []).map(k => draw(k, n.type === 'column' ? 'column' : 'row'))}</div>
+    const v = n.content && 'view' in n.content ? n.content.view : null
+    const label = v ?? (n.content && 'tile' in n.content ? n.content.tile.replace(/^.*\//, '').replace(/\.html$/, '') : n.id)
+    return <div key={n.id} title={label} style={{ ...st, borderRadius: 3, background: v === 'main' ? bg : box, border: `1px ${v ? 'solid' : 'dashed'} ${v === 'main' ? accent : line}`,
+      alignItems: 'center', justifyContent: 'center', fontSize: 9, color: fg, overflow: 'hidden', whiteSpace: 'nowrap', [dir === 'row' ? 'minWidth' : 'minHeight']: 6 }}>{label}</div>
+  }
+  return <div className="layout-preview" style={{ height, background: bg, borderColor: line }}>{draw(layout, 'row')}</div>
+}
+
+// Every layout as a card: a preview, Try (a draft you Keep or Undo from the top bar), Use, and a
+// star that puts it on ⌘⌥1-9. Settings → Layout and Explore → Layouts both show this.
+export function LayoutCards() {
+  const l = useLayout()
+  const all = useLayoutsAll()
+  const [msg, setMsg] = useState<string | null>(null)
+  if (!l || !all) return <div className="muted small">…</div>
+  const favs = all.favourites
+  const say = (r: any) => setMsg(r?.error ?? null)
+  const order = [...all.layouts].sort((a, b) => (favs.indexOf(a.name) + 1 || 99) - (favs.indexOf(b.name) + 1 || 99))
+  return <>
+    <div className="layout-cards">
+      {order.map(x => {
+        const fav = favs.indexOf(x.name)
+        const on = l.active === x.name
+        return <div key={x.name} className={`layout-card ${on ? 'on' : ''}`}>
+          <button className="layout-card-art" onClick={() => !on && tryLayout(x.name).then(say)} title={on ? 'This is the layout you are using' : 'Try it: Keep or Undo from the bar at the top'}>
+            <LayoutPreview layout={x.layout} />
+          </button>
+          <div className="row-flex" style={{ gap: 6 }}>
+            <b className="grow">{x.name}</b>
+            {fav >= 0 && <span className="kbd" title="Switch to it from anywhere">⌘⌥{fav + 1}</span>}
+            <button className={`icon small ${fav >= 0 ? 'on' : ''}`} title={fav >= 0 ? 'Remove from favourites' : 'Favourite: gets a ⌘⌥ number and joins the ⌘⇧L cycle'}
+              disabled={fav < 0 && favs.length >= 9} onClick={() => favouriteLayout(x.name, fav < 0).then(say)}>{fav >= 0 ? '★' : '☆'}</button>
+          </div>
+          <div className="muted small">{x.shipped ? 'Built in' : 'Yours'}{x.error ? <span className="bad"> · {x.error}</span> : ''}</div>
+          <div className="row-flex" style={{ gap: 6 }}>
+            {on ? <span className="muted small">In use</span> : <>
+              <button className="small" onClick={() => tryLayout(x.name).then(say)} title="Switch now; Undo in the top bar puts it back">Try</button>
+              <button className="small" onClick={() => switchLayout(x.name)}>Use</button>
+            </>}
+          </div>
+        </div>
+      })}
+      <button className="layout-card layout-card-new" onClick={() => window.dispatchEvent(new Event('perch-ui-ask'))} title="Describe a UI and an agent builds it as a draft">
+        <div className="layout-preview" style={{ height: 90, display: 'grid', placeItems: 'center', fontSize: 22 }}>＋</div>
+        <b>Make your own</b>
+        <span className="muted small">Describe it (⌘⇧U). An agent builds it; Keep or Undo.</span>
+      </button>
+    </div>
+    <div className="muted small" style={{ marginTop: 6 }}>
+      {l.draft ? <>Trying <b>{l.active}</b>: <button className="link small" onClick={() => post('/api/layouts/keep', {})}>Keep</button> · <button className="link small" onClick={() => post('/api/layouts/undo', {})}>Undo</button>. </> : null}
+      ★ favourites switch with ⌘⌥1–9 and ⌘⇧L cycles them{favs.length < 2 ? ' (all layouts until two are starred)' : ''}. ⌘⌥⇧Esc always goes back to default.
+    </div>
+    {msg && <div className="bad small">{msg}</div>}
+  </>
 }
 
 // While a change asked for in words is in flight or waiting: what it is, and Keep / Undo.

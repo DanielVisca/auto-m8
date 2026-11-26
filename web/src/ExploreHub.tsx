@@ -1,6 +1,7 @@
 // Explore's landing page: pick what to explore (canvases, competitor products, codebases, writing), then a
 // sortable gallery of each, with an info panel that links back to the chats behind every item.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { LayoutCards, LayoutPreview, useLayoutsAll } from './Layout'
 import { ago, post, shell, toast, useLive } from './api'
 import type { Repo } from './ExploreRuntime'
 import { usePublished, useWriting, WritingArt } from './WritingHome'
@@ -116,6 +117,7 @@ export function ExploreHub(nav: Nav) {
   const repos = useCodebases()
   const writing = useWriting()
   const published = usePublished()
+  const layouts = useLayoutsAll()
   const recent = useMemo(() => { try { return JSON.parse(localStorage.getItem('perch.explore.repos') ?? '[]') as string[] } catch { return [] } }, [])
   useThumbs(canvases)
   const shown = [...canvases].sort((a, b) => (b.opened_at ?? b.updated_at) - (a.opened_at ?? a.updated_at)).slice(0, 4)
@@ -146,6 +148,12 @@ export function ExploreHub(nav: Nav) {
           <span className="muted small">{repos.length} repos on this Mac · {mapped.length} mapped</span>
           <span className="small">Architecture map: what each part is built on, and how it grew.</span>
         </button>
+        <button className="exh-tile" onClick={() => nav.onSection('layouts')}>
+          <div className="exh-tile-art exh-art-quad">{(layouts?.layouts ?? []).slice(0, 4).map(x => <div key={x.name} className="exh-thumb"><LayoutPreview layout={x.layout} height={60} /></div>)}</div>
+          <b>Layouts</b>
+          <span className="muted small">{layouts?.layouts.length ?? 0} layouts · {layouts?.favourites.length ?? 0} on hotkeys</span>
+          <span className="small">Preview and try other UIs with one-click undo, or describe your own.</span>
+        </button>
         <button className="exh-tile" onClick={() => nav.onSection('writing')}>
           <div className="exh-tile-art"><WritingArt data={writing} posts={published?.pages?.filter(p => p.byline).map(p => p.title)} /></div>
           <b>Writing</b>
@@ -155,6 +163,16 @@ export function ExploreHub(nav: Nav) {
       </div>
     </div>
   )
+}
+
+// Explore → Layouts: the same cards as Settings → Layout.
+export function LayoutsPage(nav: Nav) {
+  return <div className="page exh">
+    <Back onSection={nav.onSection} />
+    <div className="row-flex exh-head"><h2 className="grow">Layouts</h2><button className="small" onClick={() => { location.hash = '#settings/layout' }}>Versions and folder</button></div>
+    <div className="muted small" style={{ marginBottom: 10 }}>Click a preview to try it; the bar at the top keeps or undoes it. ★ puts a layout on ⌘⌥1–9.</div>
+    <LayoutCards />
+  </div>
 }
 
 // ── Gallery shell: search, sort, filter, grid, info panel ────────────────────────────────────

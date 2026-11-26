@@ -912,6 +912,35 @@ const keepVersion = (label?: string) => {
 try { keepVersion('When auto-m8 started') } catch {}
 watchLayouts(() => { try { keepVersion() } catch {} broadcast('layouts') })
 route('GET', '/api/layouts', () => ({ ...loadLayout(activeLayout()), active: activeLayout(), layouts: listLayouts(), dir: LAYOUT_DIR, draft: layoutDraft }))
+// Every layout's tree, for the previews in Settings → Layout and Explore → Layouts.
+route('GET', '/api/layouts/all', () => ({ layouts: listLayouts().map(x => { const l = loadLayout(x.name); return { ...x, layout: l.layout, error: l.error } }), favourites: settings.ui.favourites ?? [] }))
+// Favourites go on ⌘⌥1-9 in the order they were starred, and ⌘⇧L cycles through them.
+route('POST', '/api/layouts/favourite', async (_m, req) => {
+  const b = await body(req)
+  const name = String(b.name ?? '')
+  const known = new Set(listLayouts().map(x => x.name))
+  if (!known.has(name)) return { error: `no layout called "${name}"` }
+  const now = (settings.ui.favourites ?? []).filter(n => n !== name && known.has(n))
+  const favourites = b.on === false ? now : [...now, name].slice(0, 9)
+  updateSettings({ ui: { ...settings.ui, favourites } })
+  broadcast('layouts'); broadcast('settings')
+  return { ok: true, favourites }
+})
+// Try a layout: switch to it as a draft, so the Keep/Undo bar puts the window back in one click.
+route('POST', '/api/layouts/try', async (_m, req) => {
+  const name = String((await body(req)).name ?? '')
+  const l = loadLayout(name)
+  if (l.name !== name) return { error: l.error }
+  if (name === activeLayout()) return { ok: true, name }
+  const before = layoutDraft?.before ?? snapshotLayouts(`Before trying ${name}`, activeLayout())
+  if (!before) return { error: 'could not save a version first' }
+  layoutDraft = { before, text: `Trying the ${name} layout`, at: Date.now(), changed: true }
+  layoutNextLabel = `Tried ${name}`
+  updateSettings({ ui: { ...settings.ui, layout: name } })
+  try { keepVersion() } catch {}
+  broadcast('layouts'); broadcast('settings')
+  return { ok: true, name }
+})
 route('GET', '/api/layouts/versions', () => listLayoutVersions())
 route('GET', '/api/layouts/gallery', () => sharedLayouts())
 // Restores a version: the files and which layout was active.

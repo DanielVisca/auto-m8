@@ -36,7 +36,7 @@ export type Settings = {
   posthog: { host: string; projectId?: number | null; pollSeconds: number }
   chat: { permissionMode: string; model: string; cwd: string; chrome: boolean; idleMinutes: number }
   window: { alwaysOnTop: boolean; hotkey: string; collapseHotkey?: string; bounds: { x: number; y: number; width: number; height: number } | null; autoMini: boolean; autoTuck?: boolean }
-  ui: { theme: 'system' | 'light' | 'dark'; layout?: string } // layout: a file in layouts/ or a shipped one (server/layout.ts)
+  ui: { theme: 'system' | 'light' | 'dark'; layout?: string; favourites?: string[] } // layout: a file in layouts/ or a shipped one (server/layout.ts); favourites: layouts on ⌘⌥1-9, in order
   organize: { archiveDoneAfterDays: number }
   ai: { model: string; dailyBrief: boolean; attention?: boolean } // the model for briefs, history answers and skill search
   needs: { enabled: boolean; engine: string; maxRunsPerDay: number }

@@ -60,7 +60,15 @@ const SIDEBAR_RIGHT: Layout = {
     { id: 'sidebar', type: 'block', size: { px: 300 }, min: 220, max: 560, content: { view: 'sidebar' } },
   ],
 }
-export const SHIPPED: Record<string, Layout> = { default: DEFAULT, 'sidebar-right': SIDEBAR_RIGHT }
+// Just the chat list and the main view: no details column, for a narrow window or heads-down work.
+const FOCUS: Layout = {
+  id: 'root', type: 'row',
+  children: [
+    { id: 'sidebar', type: 'block', size: { px: 260 }, min: 200, max: 420, divider: true, content: { view: 'sidebar' } },
+    { id: 'main', type: 'block', content: { view: 'main' } },
+  ],
+}
+export const SHIPPED: Record<string, Layout> = { default: DEFAULT, 'sidebar-right': SIDEBAR_RIGHT, focus: FOCUS }
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,40}$/
 

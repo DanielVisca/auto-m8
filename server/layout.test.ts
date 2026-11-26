@@ -87,3 +87,8 @@ test('versions: a change is kept once, and restoring brings the files and active
   assert.equal(listVersions()[0].label, 'Before restoring a version', 'an unsaved state is kept before restoring over it')
   assert.deepEqual(restoreVersion('../x', 'default'), { error: 'no such version' })
 })
+
+test('focus ships with no details column', () => {
+  assert.ok(listLayouts().some(l => l.name === 'focus' && l.shipped))
+  assert.equal(JSON.stringify(SHIPPED.focus).includes('"details"'), false)
+})
