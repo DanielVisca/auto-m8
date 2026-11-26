@@ -276,7 +276,7 @@ function PhoneAccess() {
       <div className="muted small">Lets a paired phone on the same network use auto-m8: browse, search, chat, terminals. Nothing on the network gets in without pairing. Traffic is plain HTTP, so only turn this on for networks you trust (home, not a café). For anywhere, Tailscale works too: pair over its address the same way.</div>
       {(data.enabled || anywhere) && (
         <>
-          {data.enabled && <div className="small">Listening on {data.listening.length ? data.listening.map(ip => <code key={ip}>{ip}</code>) : <span className="bad">no network address yet</span>}. macOS may ask once whether node can accept incoming connections: allow it.</div>}
+          {data.enabled && <div className="small">Listening on {data.listening.length ? data.listening.map((ip, i) => <span key={ip}>{i ? ', ' : ''}<code>{ip}</code></span>) : <span className="bad">no network address yet</span>}. macOS may ask once whether node can accept incoming connections: allow it.</div>}
           <div className="row-flex">
             <button className="primary" onClick={async () => setPair(await post('/api/remote/pair'))}>Pair a phone</button>
             {pair && <span className="muted small">Scan with the phone's camera within 10 minutes. The code works once.</span>}
