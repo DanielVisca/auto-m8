@@ -16,7 +16,7 @@ type Detail = Conversation & {
 
 const KIND: Record<string, string> = { context: 'pulled in', continues: 'continues', related: 'related', manual: 'linked', branch: 'branch', rewound: 'rewound from', started: 'started' }
 
-export function Details({ id, onOpen, onMakeRoutine }: { id: string; onOpen: (id: string) => void; onMakeRoutine: (c: Conversation) => void }) {
+export function Details({ id, onOpen, onMakeRoutine, onContinue }: { id: string; onOpen: (id: string) => void; onMakeRoutine: (c: Conversation) => void; onContinue?: (c: Conversation) => void }) {
   const { data: c } = useLive<Detail>(`/api/conversations/${encodeURIComponent(id)}`, ['conversations'])
   const [picking, setPicking] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -31,7 +31,7 @@ export function Details({ id, onOpen, onMakeRoutine }: { id: string; onOpen: (id
           {c.source}{c.cwd ? ` · ${c.cwd.replace(/^\/Users\/[^/]+/, '~')}` : ''}{c.branch ? ` · ${c.branch}` : ''}
           <br />started {ago(c.started_at)} ago · active {ago(c.updated_at)} · {c.messages} messages
         </div>
-        <div className="d-row"><StateMenu c={c} /><OpenIn id={c.id} />{c.reason && <span className="reason small">{c.reason}{c.reason.startsWith('auto-m8 flagged') && <button className="linklike small" title="Not worth my attention: stop flagging it until it moves again" onClick={e => { e.stopPropagation(); post(`/api/conversations/${encodeURIComponent(c.id)}/not-needed`) }}> · not needed</button>}</span>}</div>
+        <div className="d-row"><StateMenu c={c} /><OpenIn id={c.id} />{onContinue && c.source === 'posthog-task' && <button className="primary small" title="Start an auto-m8 chat with this conversation pulled in" onClick={() => onContinue(c)}>Continue in auto-m8</button>}{c.reason && <span className="reason small">{c.reason}{c.reason.startsWith('auto-m8 flagged') && <button className="linklike small" title="Not worth my attention: stop flagging it until it moves again" onClick={e => { e.stopPropagation(); post(`/api/conversations/${encodeURIComponent(c.id)}/not-needed`) }}> · not needed</button>}</span>}</div>
       </section>
 
       {SHOW_LABELS && <Labels c={c} />}

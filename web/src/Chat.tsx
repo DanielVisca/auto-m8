@@ -1029,7 +1029,12 @@ function Composer({ id, running, settings, onStarted, onBtw, compact, conv, show
   }
 
   useEffect(() => { if (settings && !id) { setCwd(folder?.cwd || settings.chat.cwd); setMode(settings.chat.permissionMode) } }, [settings, id]) // eslint-disable-line
-  useEffect(() => { setPulled([]); setRelated([]); setDismissed(false) }, [id])
+  // "Continue in auto-m8" (a cloud task, a Slack-asked task) opens a new chat with that conversation already pulled in.
+  useEffect(() => {
+    let seed: Related[] = []
+    if (!id) try { seed = JSON.parse(sessionStorage.getItem('perch.pull') ?? '[]'); sessionStorage.removeItem('perch.pull') } catch {}
+    setPulled(seed); setRelated([]); setDismissed(false)
+  }, [id])
   useEffect(() => { ta.current?.focus() }, [id])
 
   // Related conversations for the first message of a new chat (or on demand in an old one).

@@ -188,6 +188,8 @@ export function App() {
   const startChat = (prompt?: string) => { if (prompt) try { sessionStorage.setItem('perch.draft', prompt) } catch {} newChat() }
   const askHistory = (q: string) => setView({ kind: 'search', q, agent: 'yes' })
   const searchEverywhere = (q: string) => setView({ kind: 'search', q })
+  // Carry a cloud or Slack-asked task on locally: a new chat with it already pulled in as context.
+  const continueHere = (c: Conversation) => { try { sessionStorage.setItem('perch.pull', JSON.stringify([{ id: c.id, title: titleOf(c), snippet: '', updated_at: c.updated_at, cwd: null, source: c.source }])) } catch {} newChat() }
   const chatInFolder = (f: Folder) => { try { sessionStorage.setItem('perch.folder', JSON.stringify({ id: f.id, cwd: f.cwd, name: f.name })) } catch {} newChat() }
   const focusFolder = (f: Folder) => api.send('PUT', '/api/settings', { focus: { active: true, areas: [{ name: f.name, query: f.query || `#${f.label}` }] } })
 
@@ -232,7 +234,7 @@ export function App() {
         ? <div className="scroll"><BoardPage key={view.id} id={view.id} onOpen={openById} onBoards={() => setView({ kind: 'explore', id: 'canvases' })} /></div>
         : <div className="scroll"><BoardsIndex onOpenBoard={id => setView({ kind: 'board', id })} onBack={() => setView({ kind: 'explore', id: 'canvases' })} /></div>)}
       {view.kind === 'term' && (term ? <TermView key={term.id} term={term} onClose={() => setView({ kind: 'chat', id: null })} /> : <div className="pad muted">Terminal closed.</div>)}
-      {view.kind === 'task' && <div className="scroll"><Details id={view.id} onOpen={openById} onMakeRoutine={() => {}} /></div>}
+      {view.kind === 'task' && <div className="scroll"><Details id={view.id} onOpen={openById} onMakeRoutine={() => {}} onContinue={continueHere} /></div>}
       {view.kind === 'needs' && <div className="scroll"><div className="page"><NeedsMe onOpen={openById} /></div></div>}
       {view.kind === 'home' && <div className="scroll"><Home onOpen={openById} onStart={startChat} onBoard={id => setView({ kind: 'board', id })} settings={settings} onTerminal={(cmd, title) => newTerm({ cmd, title })} /></div>}
       {view.kind === 'ask' && <div className="scroll"><Ask question={view.q} onAsk={askHistory} /></div>}
@@ -378,7 +380,7 @@ export function App() {
           {main}
         </main>
       ),
-      details: showDetails ? <aside className="detail-col" style={{ width: '100%' }}><Boundary where="details"><Details id={view.id!} onOpen={openById} onMakeRoutine={makeRoutine} /></Boundary></aside>
+      details: showDetails ? <aside className="detail-col" style={{ width: '100%' }}><Boundary where="details"><Details id={view.id!} onOpen={openById} onMakeRoutine={makeRoutine} onContinue={continueHere} /></Boundary></aside>
         : showPrSide ? <aside className="detail-col" style={{ width: '100%' }}><PrSide url={view.id!} onOpen={openById} /></aside> : null,
     }
     return (
@@ -410,7 +412,7 @@ export function App() {
           {main}
         </main>
         {showDetails && <Splitter side="right" width={details.width} onWidth={details.setWidth} onReset={details.reset} />}
-        {showDetails && <aside className="detail-col" style={{ width: details.width }}><Boundary where="details"><Details id={view.id!} onOpen={openById} onMakeRoutine={makeRoutine} /></Boundary></aside>}
+        {showDetails && <aside className="detail-col" style={{ width: details.width }}><Boundary where="details"><Details id={view.id!} onOpen={openById} onMakeRoutine={makeRoutine} onContinue={continueHere} /></Boundary></aside>}
         {showPrSide && <Splitter side="right" width={details.width} onWidth={details.setWidth} onReset={details.reset} />}
         {showPrSide && <aside className="detail-col" style={{ width: details.width }}><PrSide url={view.id!} onOpen={openById} /></aside>}
       </div>
